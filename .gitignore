@@ -1,0 +1,8 @@
+*.skb
+*.skp.bak
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.log
+.claude/settings.local.json
