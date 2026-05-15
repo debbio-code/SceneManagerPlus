@@ -3,13 +3,17 @@
 Plugin di gestione scene avanzata per SketchUp 2019, in stile "livelli Photoshop":
 lista scene riordinabile, cartelle, batch export con watermark logo, naming pattern.
 
-## Stato attuale: Fase 1 completata
+## Stato attuale: Fase 2 completata (Sync nativa scartata)
 
 Sviluppo in 4 fasi (concordato con l'utente):
 
 1. **Fase 1 — Scaffolding + finestra base con lista scene + selezione/DnD** ✅
-2. **Fase 2 — Cartelle (logiche + sync ordine reale SKP)** ⏳
-3. **Fase 3 — Settings + naming pattern** ⏳
+2. **Fase 2 — Cartelle (logiche + DnD scene↔cartelle)** ✅
+   - 2a (cartelle + UI collassabile) e 2b (DnD scene↔cartelle, cartelle↔root) completate
+   - 2c (Sync ordine logico→pagine native SU) **scartata di proposito**: l'utente
+     usa esclusivamente il plugin per gestire le scene, quindi l'ordine nativo è
+     un non-problema. L'export di Fase 4 userà direttamente `logical_order`.
+3. **Fase 3 — Settings + naming pattern** ⏳ (prossima)
 4. **Fase 4 — Batch export + watermark** ⏳
 
 ## Decisioni di design
@@ -46,31 +50,54 @@ scene_manager_plus/
             └── app.js              # logica lista, selezione, props
 ```
 
-## Cosa funziona già (Fase 1)
+## Cosa funziona già (Fase 1 + 2)
 
+**Fase 1**
 - Finestra HtmlDialog tema scuro, ridimensionabile, posizione persistente
 - Lista scene numerata con drag handle
 - Selezione: click singolo, **Shift+click** range, **Ctrl+click** toggle
-- Drag & drop multi-selezione con drop indicator blu (linea sopra/sotto target)
-- Click singolo sincronizza la scena attiva nel viewport SU
-- Pannello proprietà collassabile con: Name, Description, e tutti i flag nativi:
-  `use_camera`, `use_hidden`, `use_hidden_layers`, `use_style`,
-  `use_shadow_info`, `use_axes`, `use_section_planes`, `use_rendering_options`
-- Bottone **Update** = `page.update(mask)` con i flag attualmente attivi
-- Bottone **Delete** con conferma
+- DnD multi-selezione con drop indicator blu
+- Click singolo sincronizza scena attiva nel viewport SU
+- Pannello proprietà con name/description + tutti i flag nativi (`use_camera`,
+  `use_hidden`, `use_hidden_layers`, `use_style`, `use_shadow_info`, `use_axes`,
+  `use_section_planes`, `use_rendering_options`)
+- Bottone **Update** = `page.update(mask)`, **Delete** con conferma
+
+**Fase 2**
+- Bottone **📁+ New folder** in toolbar (prompt nome)
+- Header cartella: chevron espandi/collassa, swatch colore (prompt hex), nome,
+  contatore scene, ✎ rinomina, ✕ elimina (visibili su hover)
+- `logical_order` ora è una lista *mista*: scene uids al root + folder ids.
+  Le scene dentro una cartella vivono in `folder.scene_ids`, non in `logical_order`.
+- DnD esteso:
+  - Scene root↔root, scene↔dentro cartella, cartelle↔root
+  - Drop **sopra/sotto** una cartella → linea blu (root drop)
+  - Drop **dentro** cartella (metà inferiore header) → rettangolo blu attorno
+    all'header (background azzurro + bordo). Vale anche per cartelle **chiuse**
+    (in quel caso appende in coda al loro contenuto).
+  - Drop tra scene dentro una cartella → linea blu **indentata 28px**
+- Selezione gruppo + drag = sposta tutto insieme (pattern file-explorer:
+  clic su row già selezionato NON resetta la selezione finché non c'è mouseup
+  senza drag; SMDnd.isDragging() esposto)
+- Cancellazione cartella riporta le sue scene a root in coda
+- Folder annidate NON supportate (folder_id_in_dest_folder filtrato lato Ruby)
 - Bottoni Export / Settings presenti ma disabilitati (Fasi 3-4)
 
-## Limite SU 2019 e workaround "ordine logico"
+## Limite SU 2019 e scelta "ordine logico only"
 
 `Sketchup::Pages` **non espone API pubblica per riordinare le pagine** in SU 2019.
 
-**Workaround attuale**: l'ordine drag&drop è salvato come *ordine logico* in
-`model.set_attribute('SceneManagerPlus', 'logical_order', [uid, uid, ...])`.
-Vive col file SKP. Le pagine SketchUp restano nell'ordine nativo.
+**Soluzione adottata**: l'ordine vive solo come *ordine logico* in
+`model.set_attribute('SceneManagerPlus', 'logical_order', [id, id, ...])`.
+La lista è *mista* (uids di scene root + ids di cartelle). Le pagine native SU
+restano nell'ordine di creazione — **e va bene così**: l'utente userà solo il
+plugin per navigare scene, e l'export di Fase 4 leggerà direttamente dall'ordine
+logico.
 
-**Da fare in Fase 2**: bottone "Sync to SketchUp" che applica realmente l'ordine
-cancellando e ricreando le pagine. Va fatto con cura (preservare proprietà,
-camera, style, descrizione, attributi custom, ecc.).
+La "Sync to SketchUp" originariamente prevista è stata scartata perché sarebbe
+stata destructive (cancella+ricrea pagine), rischiosa per lo stato per-pagina
+(hidden geometry, layer states, section planes non sono facilmente preservabili
+via API 2019), e non strettamente necessaria per il workflow dell'utente.
 
 Ogni pagina riceve un `uid` stabile salvato come attributo `SceneManagerPlus/uid`,
 così l'ordine logico e le cartelle sopravvivono a rinomine.
@@ -92,17 +119,43 @@ Callback registrate in `ui/dialog.rb`:
 | `sm_update_page` | salva name/desc/flags |
 | `sm_update_from_view` | come bottone Update nativo |
 | `sm_delete` | cancella scene selezionate |
+| `sm_folder_create` | crea cartella vuota in coda al root |
+| `sm_folder_update` | aggiorna name/color/expanded |
+| `sm_folder_delete` | elimina (scene tornano a root in coda) |
+| `sm_folder_toggle` | toggle expanded |
 | `sm_log` | debug → `Ruby Console` |
+
+Firma nuova `sm_reorder` (cambiata in Fase 2):
+`{ ids: [], before_id: id|null, dest_folder_id: id|null }`. `dest_folder_id=null`
+= root, altrimenti id cartella; `before_id=null` = append in coda.
 
 ## Installazione per test
 
-Symlink/junction nella cartella Plugins di SU 2019 (PowerShell admin):
+Idealmente symlink/junction nella cartella Plugins di SU 2019 (PowerShell admin):
 
 ```powershell
 $plug = "$env:APPDATA\SketchUp\SketchUp 2019\SketchUp\Plugins"
 New-Item -ItemType SymbolicLink -Path "$plug\scene_manager_plus.rb"  -Target "D:\Claude\SceneManager+\scene_manager_plus.rb"
 New-Item -ItemType Junction     -Path "$plug\scene_manager_plus"     -Target "D:\Claude\SceneManager+\scene_manager_plus"
 ```
+
+**Sulla macchina corrente i file sono copie reali** (non symlink/junction), quindi
+dopo ogni modifica sincronizziamo con:
+
+```powershell
+$src = "D:\Claude\SceneManager+"
+$plug = "$env:APPDATA\SketchUp\SketchUp 2019\SketchUp\Plugins"
+Remove-Item "$plug\scene_manager_plus" -Recurse -Force
+Copy-Item "$src\scene_manager_plus.rb" "$plug\scene_manager_plus.rb" -Force
+Copy-Item "$src\scene_manager_plus" "$plug\" -Recurse
+```
+
+⚠️ Trappola: `Copy-Item "$src\dir" "$plug\dir" -Recurse` quando `$plug\dir`
+esiste annida `$plug\dir\dir\...`. Sempre rimuovere prima la destinazione.
+
+Modifiche Ruby (.rb) → **riavvia SketchUp**.
+Modifiche HTML/CSS/JS → basta chiudere+riaprire la finestra del plugin
+(c'è il cache-bust su `index.html`).
 
 Poi: SketchUp 2019 → menu **Plugins → Scene Manager+** (o icona toolbar).
 
@@ -185,10 +238,11 @@ Generalizzando: per qualsiasi predicate dell'API SU (`Entity#valid?`, `Group#loc
 `send`. La nostra costante `FLAG_KEYS` contiene i nomi *base* (per UI/JSON);
 in Ruby costruiamo `"#{k}?"` per leggere e `"#{k}="` per scrivere.
 
-### ⚠️ Da implementare in Fase 2
+### ✅ Completato in Fase 2
 
-- Sync ordine logico → ordine reale `Sketchup::Pages`
-- UI cartelle (collapsibili, drag scene dentro/fuori)
+- UI cartelle collassabili con CRUD completo
+- DnD scene↔cartelle e cartelle↔root
+- Sync ordine logico → reale: **scartata** (vedi sezione "Limite SU 2019")
 
 ### Deploy locale (questa postazione)
 

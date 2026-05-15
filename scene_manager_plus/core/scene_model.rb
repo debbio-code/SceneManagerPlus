@@ -65,16 +65,21 @@ module SceneManagerPlus
       # Sync userà il trick: cancellare e ricreare le pagine nell'ordine voluto.
       # Per la Fase 1 lavoriamo solo sull'ordine logico.
 
-      # Ordine logico salvato come array di uid nel modello.
+      # Ordine logico salvato come array di id misti (scene uids + folder ids) nel modello.
+      # Le scene dentro una cartella NON sono in logical_order: sono in folder['scene_ids'].
       ORDER_KEY = 'logical_order'.freeze
 
       def logical_order
         stored = model.get_attribute(PLUGIN_ID, ORDER_KEY, nil)
         ids    = stored ? stored.dup : []
-        actual = pages.map { |p| page_id(p) }
-        # rimuovi id non più esistenti, aggiungi quelli nuovi in coda
-        ids &= actual
-        actual.each { |id| ids << id unless ids.include?(id) }
+        actual_scene_ids = pages.map { |p| page_id(p) }
+        folder_ids       = Core::Folders.all.map { |f| f['id'] }
+        in_folder        = Core::Folders.scene_parent_map.keys
+        # ids "validi" da avere in root: scene non in cartella + tutte le cartelle
+        valid = (actual_scene_ids - in_folder) + folder_ids
+        # rimuovi obsoleti, aggiungi nuovi in coda
+        ids &= valid
+        valid.each { |id| ids << id unless ids.include?(id) }
         ids
       end
 
@@ -82,37 +87,96 @@ module SceneManagerPlus
         model.set_attribute(PLUGIN_ID, ORDER_KEY, ids)
       end
 
+      # Flat list di tutte le scene (root + dentro cartelle) per lookup in UI.
       def list_ordered
-        order = logical_order
-        by_id = pages.each_with_index.each_with_object({}) { |(p, i), h| h[page_id(p)] = [p, i] }
-        order.map.with_index do |id, idx|
-          p, _ = by_id[id]
-          next nil unless p
+        pages.map.with_index do |p, i|
           {
-            id:          id,
-            index:       idx,
-            native_index: by_id[id][1],
-            name:        p.name.to_s,
-            description: p.description.to_s,
-            flags:       flags_hash(p)
+            id:           page_id(p),
+            native_index: i,
+            name:         p.name.to_s,
+            description:  p.description.to_s,
+            flags:        flags_hash(p)
           }
+        end
+      end
+
+      # Albero misto cartelle+scene, in ordine logico per il render UI.
+      def tree
+        folders_by_id = Core::Folders.all.each_with_object({}) { |f, h| h[f['id']] = f }
+        page_by_uid   = pages.each_with_object({}) { |p, h| h[page_id(p)] = p }
+
+        logical_order.map do |id|
+          if (f = folders_by_id[id])
+            {
+              kind:     'folder',
+              id:       id,
+              name:     f['name'].to_s,
+              color:    f['color'].to_s,
+              expanded: !!f['expanded'],
+              scenes:   Array(f['scene_ids']).map { |sid|
+                p = page_by_uid[sid]
+                next nil unless p
+                scene_hash(p, sid)
+              }.compact
+            }
+          elsif (p = page_by_uid[id])
+            scene_hash(p, id).merge(kind: 'scene')
+          end
         end.compact
       end
 
-      # Riordina la lista logica spostando gli id `moving_ids` davanti a `target_id`
-      # (o in coda se target_id è nil).
-      def reorder(moving_ids, target_id)
-        order = logical_order
-        moving_ids = Array(moving_ids) & order
-        order -= moving_ids
-        if target_id.nil?
-          order.concat(moving_ids)
-        else
-          idx = order.index(target_id) || order.length
-          order.insert(idx, *moving_ids)
+      def scene_hash(page, uid)
+        {
+          id:          uid,
+          name:        page.name.to_s,
+          description: page.description.to_s,
+          flags:       flags_hash(page)
+        }
+      end
+
+      # Sposta `moving_ids` davanti a `before_id` nella destinazione `dest_folder_id`.
+      # - moving_ids: array di uid scene e/o id cartelle
+      # - before_id: id davanti al quale inserire (nella destinazione), oppure nil = in coda
+      # - dest_folder_id: nil = root, altrimenti id cartella
+      # Le cartelle non possono finire dentro un'altra cartella: vengono filtrate.
+      def reorder(moving_ids, before_id, dest_folder_id)
+        moving_ids = Array(moving_ids).uniq
+        return if moving_ids.empty?
+
+        folders_list = Core::Folders.all
+        folder_id_set = folders_list.map { |f| f['id'] }
+
+        # Se la destinazione è una cartella, scarta eventuali cartelle dal moving set
+        if dest_folder_id
+          moving_ids = moving_ids.reject { |id| folder_id_set.include?(id) }
+          return if moving_ids.empty?
         end
+
+        # 1) Rimuovi moving_ids ovunque siano (root + tutte le cartelle)
+        order = logical_order - moving_ids
+        folders_list.each do |f|
+          f['scene_ids'] = Array(f['scene_ids']) - moving_ids
+        end
+
+        # 2) Inserisci nella destinazione
+        if dest_folder_id.nil?
+          idx = before_id ? (order.index(before_id) || order.length) : order.length
+          order.insert(idx, *moving_ids)
+        else
+          dest = folders_list.find { |f| f['id'] == dest_folder_id }
+          if dest
+            sids = Array(dest['scene_ids'])
+            idx = before_id ? (sids.index(before_id) || sids.length) : sids.length
+            sids.insert(idx, *moving_ids)
+            dest['scene_ids'] = sids
+          else
+            # destinazione inesistente: fallback a root
+            order.concat(moving_ids)
+          end
+        end
+
         set_logical_order(order)
-        order
+        Core::Folders.save(folders_list)
       end
 
       # Aggiorna proprietà page (rename / desc / flags).

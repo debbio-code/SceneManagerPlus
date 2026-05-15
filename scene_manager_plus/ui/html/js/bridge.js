@@ -20,11 +20,17 @@ window.SMBridge = (function () {
   return {
     ready:           function ()      { call('sm_ready'); },
     refresh:         function ()      { call('sm_refresh'); },
-    reorder:         function (ids, target) { call('sm_reorder', { ids: ids, target_id: target }); },
+    reorder:         function (ids, beforeId, destFolderId) {
+                       call('sm_reorder', { ids: ids, before_id: beforeId, dest_folder_id: destFolderId });
+                     },
     selectPage:      function (id)    { call('sm_select_page', { id: id }); },
     updatePage:      function (data)  { call('sm_update_page', data); },
     updateFromView:  function (id)    { call('sm_update_from_view', { id: id }); },
     deleteScenes:    function (ids)   { call('sm_delete', { ids: ids }); },
+    folderCreate:    function (name)  { call('sm_folder_create', { name: name }); },
+    folderUpdate:    function (data)  { call('sm_folder_update', data); },
+    folderDelete:    function (id)    { call('sm_folder_delete', { id: id }); },
+    folderToggle:    function (id)    { call('sm_folder_toggle', { id: id }); },
     log:             function (msg)   { call('sm_log', String(msg)); }
   };
 })();

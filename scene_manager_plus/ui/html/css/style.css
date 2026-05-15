@@ -86,6 +86,72 @@ body {
   text-align: right;
 }
 
+/* Cartelle */
+.folder-row {
+  display: flex;
+  align-items: center;
+  padding: 4px 8px;
+  background: #2f2f2f;
+  border-bottom: 1px solid #1c1c1c;
+  cursor: pointer;
+  user-select: none;
+}
+.folder-row:hover { background: #383838; }
+.folder-row .fchev {
+  width: 14px;
+  color: #aaa;
+  font-size: 11px;
+  text-align: center;
+  margin-right: 2px;
+}
+.folder-row .fswatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  background: #4ea1ff;
+  margin-right: 6px;
+  border: 1px solid #1e1e1e;
+  cursor: pointer;
+}
+.folder-row .fname {
+  flex: 1;
+  font-weight: bold;
+  color: #eee;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.folder-row .fcount {
+  color: #888;
+  font-size: 10px;
+  margin: 0 6px;
+}
+.folder-row .fbtn {
+  background: transparent;
+  border: none;
+  color: #888;
+  cursor: pointer;
+  padding: 0 4px;
+  font-size: 11px;
+  visibility: hidden;
+}
+.folder-row:hover .fbtn { visibility: visible; }
+.folder-row .fbtn:hover { color: #fff; }
+
+.scene-row.in-folder {
+  padding-left: 28px;
+  background: #262626;
+}
+.scene-row.in-folder .grip { color: #555; }
+.folder-row.dragging { opacity: 0.4; }
+.folder-row.drop-into {
+  box-shadow: inset 0 0 0 2px #4ea1ff, 0 0 6px rgba(78,161,255,0.55);
+  background: #2f4a66;
+}
+.scene-row.in-folder:hover { background: #2a2a2a; }
+.scene-row.in-folder.selected { background: #2b5a86; }
+
 .drop-indicator {
   position: absolute;
   left: 0;
