@@ -6,3 +6,7 @@ Thumbs.db
 .idea/
 *.log
 .claude/settings.local.json
+
+# File temporanei cache-busting generati a runtime da Dialog#prepare_index
+scene_manager_plus/ui/html/index.cb.html
+scene_manager_plus/ui/html/.index.cb.html

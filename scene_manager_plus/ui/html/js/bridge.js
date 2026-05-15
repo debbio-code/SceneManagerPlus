@@ -5,8 +5,15 @@ window.SMBridge = (function () {
   function call(name, data) {
     var payload = (data === undefined) ? '' : JSON.stringify(data);
     if (window.sketchup && typeof window.sketchup[name] === 'function') {
-      window.sketchup[name](payload);
+      try {
+        window.sketchup[name](payload);
+      } catch (err) {
+        console.warn('Bridge call failed: ' + name, err);
+      }
     } else {
+      // Visible diagnostic: bridge not wired up at all
+      var status = document.getElementById('status');
+      if (status) status.textContent = 'Bridge not available (' + name + ')';
       console.warn('Bridge stub: ' + name, data);
     }
   }

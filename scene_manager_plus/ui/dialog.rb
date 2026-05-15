@@ -11,6 +11,25 @@ module SceneManagerPlus
         File.join(PLUGIN_DIR, 'ui', 'html')
       end
 
+      # Scrive un index.html temporaneo accanto all'originale, con cache-buster
+      # ?v=<ts> sui tag <script src=> e <link href=>. Ritorna il path.
+      def prepare_index
+        src = File.join(html_dir, 'index.html')
+        ts  = Time.now.to_i.to_s
+        begin
+          html = File.read(src)
+          html = html.gsub(/(<script\s+src=")([^"]+)(")/)               { "#{$1}#{$2}?v=#{ts}#{$3}" }
+          html = html.gsub(/(<link\s+rel="stylesheet"\s+href=")([^"]+)(")/) { "#{$1}#{$2}?v=#{ts}#{$3}" }
+          dst  = File.join(html_dir, 'index.cb.html')
+          File.write(dst, html)
+          puts "[SM+] cache-busted index ready: #{dst}"
+          dst
+        rescue => e
+          warn "[SM+] prepare_index failed (#{e.class}: #{e.message}), falling back to original"
+          src
+        end
+      end
+
       def show
         if @dialog && @dialog.visible?
           @dialog.bring_to_front
@@ -30,8 +49,21 @@ module SceneManagerPlus
         )
 
         register_callbacks(@dialog)
-        @dialog.set_file(File.join(html_dir, 'index.html'))
+        # Cache-bust JS/CSS riscrivendo index.html in un file temporaneo con
+        # ?v=<timestamp> sui tag <script src> e <link href>. CEF di SU 2019
+        # può tenersi in cache i file file:// tra una sessione e l'altra.
+        @dialog.set_file(prepare_index)
         @dialog.show
+        # Fallback: se sm_ready non arriva entro 1s, forziamo push_state.
+        # Utile se il bridge JS->Ruby non si aggancia per qualche motivo.
+        ::UI.start_timer(1.0, false) do
+          begin
+            puts "[SM+] fallback timer: forcing push_state"
+            push_state
+          rescue => e
+            warn "[SM+] fallback push_state failed: #{e.message}"
+          end
+        end
         @dialog
       end
 
@@ -39,6 +71,7 @@ module SceneManagerPlus
       # e attende risposta tramite sketchup.callback(reqId, result).
       def register_callbacks(dlg)
         dlg.add_action_callback('sm_ready') do |_ctx|
+          puts "[SM+] sm_ready received from UI"
           push_state
         end
 
@@ -82,13 +115,25 @@ module SceneManagerPlus
 
       def push_state
         return unless @dialog && @dialog.visible?
+        model = Sketchup.active_model
+        scenes_raw = Core::SceneModel.list_ordered
         state = {
-          scenes:  Core::SceneModel.list_ordered,
-          folders: Core::Folders.all,
-          flag_keys: Core::SceneModel::FLAG_KEYS
+          scenes:    scenes_raw,
+          folders:   Core::Folders.all,
+          flag_keys: Core::SceneModel::FLAG_KEYS,
+          model_info: {
+            title:        (model ? model.title.to_s : ''),
+            pages_count:  (model ? model.pages.count : 0)
+          }
         }
+        puts "[SM+] push_state: model=#{state[:model_info][:title].inspect} " \
+             "native_pages=#{state[:model_info][:pages_count]} " \
+             "scenes_listed=#{scenes_raw.length}"
         js = "window.SM && SM.setState(#{state.to_json});"
         @dialog.execute_script(js)
+      rescue => e
+        warn "[SM+] push_state ERROR: #{e.class}: #{e.message}"
+        warn e.backtrace.first(5).join("\n")
       end
 
       def parse(payload)

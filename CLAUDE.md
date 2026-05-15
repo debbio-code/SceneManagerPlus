@@ -130,15 +130,75 @@ toolbar = ::UI::Toolbar.new(PLUGIN_NAME)
 
 Applicato. **Da verificare al riavvio di SU**.
 
+### ✅ RISOLTO — Drop indicator invisibile durante il drag (CEF SU 2019)
+
+**Sintomo:** Il `.drop-indicator` (linea blu di atterraggio del DnD) è presente
+nel DOM (log lo conferma: parent corretto, dimensioni corrette, `display: block`,
+top calcolato, z-index altissimo) ma **non si vede mai** durante il drag —
+nemmeno una barra fucsia 8px appesa al `<body>` con `position: fixed`.
+
+**Causa:** **CEF di SketchUp 2019 non ridipinge il DOM mentre è in corso un drag
+HTML5 nativo** (`draggable=true` + `dragstart`/`dragover`/`drop`). Tutti gli
+update visivi vengono congelati fino al rilascio del mouse → il drop-indicator
+risulta inutilizzabile.
+
+Una `<div>` fissa creata *fuori* dal drag flow è invece visibile normalmente,
+quindi non è un problema di z-index/CSS/clipping: è proprio CEF che non
+ridisegna durante il drag nativo.
+
+**Fix:** Abbandonato il drag HTML5 nativo. `dnd.js` ora usa
+`mousedown` (su row) + `mousemove`/`mouseup` (su `document`) con una soglia di
+4px per distinguere click da drag. Durante mousemove il DOM è aggiornato e
+**ridipinto normalmente**, indicatore visibile.
+
+**Pattern:** In SU 2019 (e probabilmente in tutte le SU con CEF vecchia)
+**evitare HTML5 native drag** per qualsiasi UI che debba dare feedback visivo
+in tempo reale. Usare mouse/pointer events custom.
+
+### ✅ RISOLTO — CEF carica vecchi JS/CSS dalla cache anche dopo edit
+
+**Sintomo:** Modifico `dnd.js`, chiudo/riapro la finestra HtmlDialog, ma il
+codice in esecuzione è ancora quello vecchio (log con marker `__SM_BUILD__`
+non aggiornato).
+
+**Fix:** `Dialog#prepare_index` genera a runtime un `index.cb.html` accanto
+all'originale, riscrivendo i tag `<script src>` e `<link href>` con
+`?v=<timestamp>`. CEF è obbligato a rileggere asset. Il temp file è gitignored.
+
+### ✅ RISOLTO — `NoMethodError: undefined method 'use_camera' for Sketchup::Page`
+
+I flag di `Sketchup::Page` (`use_camera`, `use_hidden`, ecc.) hanno **getter con `?`**
+e **setter senza** (convenzione predicate Ruby/SU). Non sono mai accessibili come
+`page.use_camera` — fa esplodere il `flags_hash` se si fa `page.send(:use_camera)`.
+
+```ruby
+p.use_camera?           # => true/false   (getter, OK)
+p.use_camera = true     # (setter, OK)
+# p.use_camera          # ❌ NoMethodError
+```
+
+Vale per tutti i flag: `use_hidden?`, `use_hidden_layers?`, `use_style?`,
+`use_shadow_info?`, `use_axes?`, `use_section_planes?`, `use_rendering_options?`.
+
+Generalizzando: per qualsiasi predicate dell'API SU (`Entity#valid?`, `Group#locked?`,
+`Drawingelement#visible?`, ecc.) ricordarsi del `?` quando si fa lookup dinamico via
+`send`. La nostra costante `FLAG_KEYS` contiene i nomi *base* (per UI/JSON);
+in Ruby costruiamo `"#{k}?"` per leggere e `"#{k}="` per scrivere.
+
 ### ⚠️ Da implementare in Fase 2
 
 - Sync ordine logico → ordine reale `Sketchup::Pages`
 - UI cartelle (collapsibili, drag scene dentro/fuori)
 
-### ⚠️ Cosmetic
+### Deploy locale (questa postazione)
 
-- Icone toolbar non ancora presenti (`ui/icons/scene_manager_{16,24}.png`).
-  `main.rb` ne controlla l'esistenza prima di assegnarle, quindi non rompe.
+- `%APPDATA%\SketchUp\SketchUp 2019\SketchUp\Plugins\scene_manager_plus` →
+  **Junction** verso `C:\Claude\Sketchup Plugins\SceneManagerPlus\scene_manager_plus`.
+  Gli edit ai sorgenti sono live (basta riavviare SU per ricaricare il Ruby).
+- `scene_manager_plus.rb` (loader) è una **copia statica** — il symlink richiedeva
+  admin, e questo file cambia raramente. Se lo modifichiamo, ricopiare manualmente.
+- Icone: `clapboard.png` nel root del repo, copiato come
+  `scene_manager_plus/ui/icons/scene_manager_{16,24}.png`.
 
 ## Modello dati cartelle (preview Fase 2)
 

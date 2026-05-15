@@ -39,6 +39,22 @@ body {
   overflow-y: auto;
   background: #232323;
   outline: none;
+  position: relative; /* offset parent per .drop-indicator */
+}
+
+.empty-state {
+  padding: 24px 16px;
+  color: #888;
+  text-align: center;
+  font-style: italic;
+  white-space: pre-line;
+}
+.empty-state.error {
+  color: #e57373;
+  font-style: normal;
+  text-align: left;
+  font-family: Consolas, monospace;
+  font-size: 11px;
 }
 
 .scene-row {
@@ -74,11 +90,26 @@ body {
   position: absolute;
   left: 0;
   right: 0;
-  height: 2px;
+  height: 3px;
+  margin-top: -1px; /* centra la barra sulla linea di separazione */
   background: #4ea1ff;
+  box-shadow: 0 0 4px #4ea1ff;
   pointer-events: none;
   z-index: 10;
 }
+.drop-indicator::before,
+.drop-indicator::after {
+  content: '';
+  position: absolute;
+  top: -3px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #4ea1ff;
+  box-shadow: 0 0 4px #4ea1ff;
+}
+.drop-indicator::before { left: 0; }
+.drop-indicator::after  { right: 0; }
 
 .props {
   background: #333;

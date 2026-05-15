@@ -1,3 +1,4 @@
+window.__SM_BUILD__ = 'dnd-mouse-1';
 window.SM = (function () {
   var state = { scenes: [], folders: [], flag_keys: [] };
   var selection = []; // array di id
@@ -8,20 +9,42 @@ window.SM = (function () {
 
   function setState(newState) {
     state = newState || state;
+    if (!state.scenes) state.scenes = [];
+    if (!state.flag_keys) state.flag_keys = [];
     render();
     updateProps();
-    setStatus(state.scenes.length + ' scenes');
+    var info = state.model_info || {};
+    var statusBits = [state.scenes.length + ' scenes'];
+    if (info.title) statusBits.push(info.title);
+    if (typeof info.pages_count === 'number' && info.pages_count !== state.scenes.length) {
+      statusBits.push('(native: ' + info.pages_count + ')');
+    }
+    setStatus(statusBits.join(' · '));
   }
 
   function setStatus(msg) { if (statusEl) statusEl.textContent = msg; }
 
   function render() {
     listEl.innerHTML = '';
+    if (!state.scenes || state.scenes.length === 0) {
+      var info = state.model_info || {};
+      var empty = document.createElement('div');
+      empty.className = 'empty-state';
+      if (info.pages_count > 0) {
+        empty.textContent = 'No scenes in logical order, but the model has ' +
+          info.pages_count + ' native pages.\nTry Refresh.';
+      } else if (info.title === '') {
+        empty.textContent = 'No model open (or untitled).\nOpen a .skp file with scenes.';
+      } else {
+        empty.textContent = 'No scenes in this model.\nCreate a scene in SketchUp, then Refresh.';
+      }
+      listEl.appendChild(empty);
+      return;
+    }
     state.scenes.forEach(function (s, i) {
       var row = document.createElement('div');
       row.className = 'scene-row';
       row.dataset.id = s.id;
-      row.draggable = true;
       if (selection.indexOf(s.id) !== -1) row.classList.add('selected');
       row.innerHTML =
         '<span class="grip">&#x2630;</span>' +
@@ -143,13 +166,29 @@ window.SM = (function () {
       onDrop:       function (ids, targetId) { SMBridge.reorder(ids, targetId); }
     });
 
+    if (SMBridge && SMBridge.log) SMBridge.log('JS build=' + window.__SM_BUILD__);
     SMBridge.ready();
   }
 
+  function safeInit() {
+    try { init(); }
+    catch (err) {
+      var el = document.getElementById('scene-list');
+      if (el) {
+        el.innerHTML = '';
+        var box = document.createElement('div');
+        box.className = 'empty-state error';
+        box.textContent = 'JS init error:\n' + (err && err.stack || err);
+        el.appendChild(box);
+      }
+      if (window.SMBridge && SMBridge.log) SMBridge.log('init error: ' + err);
+    }
+  }
+
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', init);
+    document.addEventListener('DOMContentLoaded', safeInit);
   } else {
-    init();
+    safeInit();
   }
 
   return { setState: setState };

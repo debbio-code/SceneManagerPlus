@@ -46,7 +46,9 @@ module SceneManagerPlus
       ].freeze
 
       def flags_hash(page)
-        FLAG_KEYS.each_with_object({}) { |k, h| h[k] = page.send(k) }
+        # API SketchUp: i getter dei flag finiscono con "?" (use_camera?),
+        # i setter no (use_camera=). Vedi Sketchup::Page docs.
+        FLAG_KEYS.each_with_object({}) { |k, h| h[k] = page.send("#{k}?") }
       end
 
       # Sposta la pagina con uid `id` all'indice `target_index` (0-based).
@@ -140,21 +142,17 @@ module SceneManagerPlus
       def update_from_view(id)
         p = find_by_id(id)
         return false unless p
-        flags = 0
-        FLAG_KEYS.each_with_index do |k, i|
-          flags |= (1 << i) if p.send(k)
-        end
-        # In realtà Page#update accetta una bitmask combinata di costanti
-        # PAGE_USE_*. Qui usiamo i flag attualmente settati sulla pagina.
+        # Page#update accetta una bitmask combinata di costanti PAGE_USE_*.
+        # Usiamo i flag attualmente settati sulla pagina (getter con "?").
         mask = 0
-        mask |= PAGE_USE_CAMERA              if p.use_camera
-        mask |= PAGE_USE_RENDERING_OPTIONS   if p.use_rendering_options
-        mask |= PAGE_USE_SHADOWINFO          if p.use_shadow_info
-        mask |= PAGE_USE_STYLE               if p.use_style
-        mask |= PAGE_USE_AXES                if p.use_axes
-        mask |= PAGE_USE_HIDDEN              if p.use_hidden
-        mask |= PAGE_USE_HIDDEN_LAYERS       if p.use_hidden_layers
-        mask |= PAGE_USE_SECTION_PLANES      if p.use_section_planes
+        mask |= PAGE_USE_CAMERA              if p.use_camera?
+        mask |= PAGE_USE_RENDERING_OPTIONS   if p.use_rendering_options?
+        mask |= PAGE_USE_SHADOWINFO          if p.use_shadow_info?
+        mask |= PAGE_USE_STYLE               if p.use_style?
+        mask |= PAGE_USE_AXES                if p.use_axes?
+        mask |= PAGE_USE_HIDDEN              if p.use_hidden?
+        mask |= PAGE_USE_HIDDEN_LAYERS       if p.use_hidden_layers?
+        mask |= PAGE_USE_SECTION_PLANES      if p.use_section_planes?
         mask = PAGE_USE_ALL if mask == 0
         model.start_operation('SM+ Update from view', true)
         p.update(mask)
