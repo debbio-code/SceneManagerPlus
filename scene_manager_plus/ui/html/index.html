@@ -12,30 +12,22 @@
       <button id="btn-new-folder" title="New folder">&#x1F4C1;+</button>
       <button id="btn-update" title="Update from view">&#x25c9; Update</button>
       <button id="btn-delete" title="Delete selected">&#x2715;</button>
+      <button id="btn-defer" title="Defer mode: stage changes in memory, click again to flush all to SketchUp">&#x23F8; Defer</button>
+      <button id="btn-previews" title="Generate previews for selected scenes (or all if none selected)">&#x1F3AC; Preview</button>
+      <button id="btn-thumbs" title="Show inline thumbnails in the list">&#x1F5BC; Thumbs</button>
       <div class="spacer"></div>
       <button id="btn-export" title="Export (coming soon)" disabled>&#x21e9;</button>
-      <button id="btn-settings" title="Settings (coming soon)" disabled>&#x2699;</button>
+      <button id="btn-settings" title="Settings">&#x2699;</button>
     </header>
+
+    <div id="progress" class="progress hidden">
+      <div class="progress-bar"><div id="progress-fill" class="progress-fill"></div></div>
+      <span id="progress-text" class="progress-text">Generating previews…</span>
+    </div>
 
     <div id="scene-list" class="scene-list" tabindex="0">
       <div class="empty-state">Loading…</div>
     </div>
-
-    <aside id="props" class="props collapsed">
-      <div class="props-header">
-        <span id="props-title">No selection</span>
-        <button id="props-toggle" title="Toggle properties">&#x25be;</button>
-      </div>
-      <div class="props-body">
-        <label>Name <input type="text" id="prop-name"></label>
-        <label>Description <textarea id="prop-desc" rows="2"></textarea></label>
-        <fieldset>
-          <legend>Properties to save</legend>
-          <div id="prop-flags"></div>
-        </fieldset>
-        <button id="prop-apply">Apply</button>
-      </div>
-    </aside>
 
     <footer class="statusbar">
       <span id="status">Ready</span>

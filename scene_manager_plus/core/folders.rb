@@ -13,7 +13,8 @@ module SceneManagerPlus
         Sketchup.active_model
       end
 
-      def all
+      # Legge il raw da SU (bypassando Buffer). Usato da Buffer.ensure_folders!
+      def read_raw
         raw = model.get_attribute(PLUGIN_ID, ATTR_KEY, '[]')
         list = JSON.parse(raw)
         list.is_a?(Array) ? list : []
@@ -21,9 +22,25 @@ module SceneManagerPlus
         []
       end
 
-      def save(list)
+      # Scrive raw su SU bypassando Buffer. Usato da Buffer.flush!
+      def write_raw(list)
         model.set_attribute(PLUGIN_ID, ATTR_KEY, list.to_json)
         list
+      end
+
+      def all
+        if Buffer.deferred?
+          return Buffer.ensure_folders!
+        end
+        read_raw
+      end
+
+      def save(list)
+        if Buffer.deferred?
+          Buffer.set_folders(list)
+          return list
+        end
+        write_raw(list)
       end
 
       def find(id)

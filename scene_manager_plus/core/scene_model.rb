@@ -69,9 +69,23 @@ module SceneManagerPlus
       # Le scene dentro una cartella NON sono in logical_order: sono in folder['scene_ids'].
       ORDER_KEY = 'logical_order'.freeze
 
-      def logical_order
+      # Raw read da SU (bypass buffer)
+      def read_order_raw
         stored = model.get_attribute(PLUGIN_ID, ORDER_KEY, nil)
-        ids    = stored ? stored.dup : []
+        stored ? stored.dup : []
+      end
+
+      # Raw write su SU (bypass buffer). Usato da Buffer.flush!
+      def write_order_raw(ids)
+        model.set_attribute(PLUGIN_ID, ORDER_KEY, ids)
+      end
+
+      def logical_order
+        ids = if Buffer.deferred?
+                Buffer.ensure_order!.dup
+              else
+                read_order_raw
+              end
         actual_scene_ids = pages.map { |p| page_id(p) }
         folder_ids       = Core::Folders.all.map { |f| f['id'] }
         in_folder        = Core::Folders.scene_parent_map.keys
@@ -84,7 +98,11 @@ module SceneManagerPlus
       end
 
       def set_logical_order(ids)
-        model.set_attribute(PLUGIN_ID, ORDER_KEY, ids)
+        if Buffer.deferred?
+          Buffer.set_order(ids)
+          return
+        end
+        write_order_raw(ids)
       end
 
       # Flat list di tutte le scene (root + dentro cartelle) per lookup in UI.
@@ -101,6 +119,7 @@ module SceneManagerPlus
       end
 
       # Albero misto cartelle+scene, in ordine logico per il render UI.
+      # In deferred mode, le pagine pending-delete sono nascoste.
       def tree
         folders_by_id = Core::Folders.all.each_with_object({}) { |f, h| h[f['id']] = f }
         page_by_uid   = pages.each_with_object({}) { |p, h| h[page_id(p)] = p }
@@ -114,24 +133,35 @@ module SceneManagerPlus
               color:    f['color'].to_s,
               expanded: !!f['expanded'],
               scenes:   Array(f['scene_ids']).map { |sid|
+                next nil if Buffer.deleted?(sid)
                 p = page_by_uid[sid]
                 next nil unless p
                 scene_hash(p, sid)
               }.compact
             }
           elsif (p = page_by_uid[id])
+            next nil if Buffer.deleted?(id)
             scene_hash(p, id).merge(kind: 'scene')
           end
         end.compact
       end
 
       def scene_hash(page, uid)
-        {
+        h = {
           id:          uid,
           name:        page.name.to_s,
           description: page.description.to_s,
-          flags:       flags_hash(page)
+          flags:       flags_hash(page),
+          pending:     false
         }
+        # Overlay buffer edits
+        if (edit = Buffer.page_edit(uid))
+          h[:name]        = edit['name']        if edit.key?('name')
+          h[:description] = edit['description'] if edit.key?('description')
+          h[:flags]       = h[:flags].merge(edit['flags']) if edit['flags'].is_a?(Hash)
+          h[:pending]     = true
+        end
+        h
       end
 
       # Sposta `moving_ids` davanti a `before_id` nella destinazione `dest_folder_id`.
@@ -180,13 +210,26 @@ module SceneManagerPlus
       end
 
       # Aggiorna proprietà page (rename / desc / flags).
+      # In Buffer.deferred?: stage e basta. Altrimenti scrive su SU.
       def update_page(id, attrs)
+        if Buffer.deferred?
+          Buffer.stage_page_edit(id, attrs)
+          return true
+        end
         p = find_by_id(id)
-        return false unless p
+        unless p
+          warn "[SM+] update_page: page not found for id=#{id.inspect}"
+          return false
+        end
+        old_name = p.name.to_s
         model.start_operation('SM+ Update scene', true)
         begin
-          p.name        = attrs['name']        if attrs['name']        && !attrs['name'].empty?
-          p.description = attrs['description'] if attrs.key?('description')
+          if attrs['name'] && !attrs['name'].to_s.empty? && attrs['name'].to_s != old_name
+            p.name = attrs['name'].to_s
+          end
+          if attrs.key?('description')
+            p.description = attrs['description'].to_s
+          end
           if attrs['flags'].is_a?(Hash)
             attrs['flags'].each do |k, v|
               setter = "#{k}="
@@ -197,7 +240,8 @@ module SceneManagerPlus
           true
         rescue => e
           model.abort_operation
-          warn "[SM+] update_page: #{e.message}"
+          warn "[SM+] update_page: #{e.class}: #{e.message}"
+          warn e.backtrace.first(3).join("\n")
           false
         end
       end
@@ -205,22 +249,46 @@ module SceneManagerPlus
       # Update scene da viewport corrente (come bottone "Update" nativo).
       def update_from_view(id)
         p = find_by_id(id)
-        return false unless p
+        unless p
+          warn "[SM+] update_from_view: page not found id=#{id.inspect}"
+          return false
+        end
         # Page#update accetta una bitmask combinata di costanti PAGE_USE_*.
         # Usiamo i flag attualmente settati sulla pagina (getter con "?").
+        # Le costanti PAGE_USE_* variano tra versioni di SketchUp. Faccio un
+        # lookup difensivo: prendo il valore se la costante esiste, altrimenti 0.
+        # Mappatura logica predicate → flag-name candidato:
+        #   use_camera?         → CAMERA
+        #   use_axes?           → CAMERA (gli assi seguono camera, no flag dedicato)
+        #   use_rendering_options? → RENDERING_OPTIONS
+        #   use_style?          → RENDERING_OPTIONS (style fa parte di rendering)
+        #   use_shadow_info?    → SHADOWINFO
+        #   use_hidden_layers?  → LAYER_VISIBILITY o HIDDEN_LAYERS
+        #   use_hidden?         → HIDDEN_GEOMETRY o HIDDEN
+        #   use_section_planes? → ACTIVE_SECTION_PLANES o SECTION_PLANES
+        sc = lambda do |*names|
+          names.each do |n|
+            return Object.const_get(n) if Object.const_defined?(n)
+          end
+          0
+        end
         mask = 0
-        mask |= PAGE_USE_CAMERA              if p.use_camera?
-        mask |= PAGE_USE_RENDERING_OPTIONS   if p.use_rendering_options?
-        mask |= PAGE_USE_SHADOWINFO          if p.use_shadow_info?
-        mask |= PAGE_USE_STYLE               if p.use_style?
-        mask |= PAGE_USE_AXES                if p.use_axes?
-        mask |= PAGE_USE_HIDDEN              if p.use_hidden?
-        mask |= PAGE_USE_HIDDEN_LAYERS       if p.use_hidden_layers?
-        mask |= PAGE_USE_SECTION_PLANES      if p.use_section_planes?
-        mask = PAGE_USE_ALL if mask == 0
+        mask |= sc.call('PAGE_USE_CAMERA')                                  if p.use_camera? || p.use_axes?
+        mask |= sc.call('PAGE_USE_RENDERING_OPTIONS')                       if p.use_rendering_options? || p.use_style?
+        mask |= sc.call('PAGE_USE_SHADOWINFO')                              if p.use_shadow_info?
+        mask |= sc.call('PAGE_USE_LAYER_VISIBILITY', 'PAGE_USE_HIDDEN_LAYERS') if p.use_hidden_layers?
+        mask |= sc.call('PAGE_USE_HIDDEN_GEOMETRY', 'PAGE_USE_HIDDEN')       if p.use_hidden?
+        mask |= sc.call('PAGE_USE_ACTIVE_SECTION_PLANES', 'PAGE_USE_SECTION_PLANES') if p.use_section_planes?
+        if mask == 0
+          all_const = sc.call('PAGE_USE_ALL')
+          puts "[SM+] update_from_view: no flags resolved on '#{p.name}', fallback PAGE_USE_ALL=#{all_const}"
+          mask = all_const
+        end
+        puts "[SM+] update_from_view: page='#{p.name}' mask=#{mask} flags=#{flags_hash(p).inspect}"
         model.start_operation('SM+ Update from view', true)
-        p.update(mask)
+        result = p.update(mask)
         model.commit_operation
+        puts "[SM+] update_from_view: page.update returned #{result.inspect}"
         true
       end
 
@@ -232,6 +300,25 @@ module SceneManagerPlus
       end
 
       def delete_pages(ids)
+        if Buffer.deferred?
+          Buffer.mark_delete(ids)
+          # Anche in deferred mode rimuoviamo le scene dalle cartelle/ordine
+          # in modo che spariscano dalla lista. Le pagine SU restano finché flush.
+          flist = Core::Folders.all
+          changed = false
+          flist.each do |f|
+            before = Array(f['scene_ids'])
+            after  = before - Array(ids)
+            if after.length != before.length
+              f['scene_ids'] = after
+              changed = true
+            end
+          end
+          Core::Folders.save(flist) if changed
+          order = logical_order - Array(ids)
+          set_logical_order(order)
+          return Array(ids).size
+        end
         targets = Array(ids).map { |i| find_by_id(i) }.compact
         return 0 if targets.empty?
         model.start_operation('SM+ Delete scenes', true)

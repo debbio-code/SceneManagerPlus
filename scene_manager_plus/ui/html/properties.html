@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Scene properties</title>
+  <link rel="stylesheet" href="css/properties.css">
+</head>
+<body>
+  <div id="props-app">
+    <header class="header">
+      <span class="label">Scene</span>
+      <span id="scene-title" class="title">—</span>
+    </header>
+
+    <main class="body">
+      <div class="row">
+        <label for="prop-name">Name</label>
+        <input type="text" id="prop-name" autocomplete="off">
+      </div>
+
+      <div class="row">
+        <label for="prop-desc">Description</label>
+        <textarea id="prop-desc" rows="3"></textarea>
+      </div>
+
+      <fieldset>
+        <legend>Properties to save</legend>
+        <div id="prop-flags"></div>
+      </fieldset>
+
+      <div class="preview-wrap">
+        <div class="preview-label">Preview</div>
+        <div id="preview-box" class="preview-box">
+          <div class="preview-empty">No preview generated.<br>Use the 🎬 Preview button in the main toolbar.</div>
+        </div>
+      </div>
+    </main>
+
+    <footer class="footer">
+      <button id="btn-update-view" title="Capture current viewport state into this scene">
+        Update from view
+      </button>
+      <div class="spacer"></div>
+      <span id="status" class="status"></span>
+    </footer>
+  </div>
+
+  <script src="js/properties.js"></script>
+</body>
+</html>

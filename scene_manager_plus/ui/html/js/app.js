@@ -1,10 +1,14 @@
 window.__SM_BUILD__ = 'phase2b-2';
 window.SM = (function () {
-  var state = { scenes: [], tree: [], folders: [], flag_keys: [] };
+  var state = { scenes: [], tree: [], folders: [], flag_keys: [], previews: {} };
   var selection = []; // array di scene id
   var anchorId  = null; // ultimo id cliccato (per shift-range)
   var pendingCollapseId = null; // id su cui collassare la selezione se mouseup senza drag
-  var listEl, propsEl, propsTitleEl, statusEl;
+  var lastClickId = null;
+  var lastClickTs = 0;
+  var DBLCLICK_MS = 400;
+  var thumbsOn = false; // session-only toggle
+  var listEl, statusEl;
 
   function $(id) { return document.getElementById(id); }
 
@@ -13,8 +17,9 @@ window.SM = (function () {
     if (!state.scenes) state.scenes = [];
     if (!state.tree)   state.tree   = [];
     if (!state.flag_keys) state.flag_keys = [];
+    if (!state.previews) state.previews = {};
+    state.preview_ts = Date.now();
     render();
-    updateProps();
     var info = state.model_info || {};
     var statusBits = [state.scenes.length + ' scenes'];
     if (state.folders && state.folders.length) statusBits.push(state.folders.length + ' folders');
@@ -22,7 +27,63 @@ window.SM = (function () {
     if (typeof info.pages_count === 'number' && info.pages_count !== state.scenes.length) {
       statusBits.push('(native: ' + info.pages_count + ')');
     }
+    if (state.deferred) {
+      statusBits.push('DEFER (' + (state.pending || 0) + ' pending)');
+    }
     setStatus(statusBits.join(' · '));
+    updateDeferButton();
+  }
+
+  // Chiamato da Ruby durante la generazione previews.
+  // done=null,total=null  → fine, nascondi
+  // done=N, total=-1      → indeterminato (non sappiamo quante)
+  // done=N, total=M       → progress N/M
+  function setPreviewProgress(done, total) {
+    var bar = $('progress');
+    var fill = $('progress-fill');
+    var txt = $('progress-text');
+    if (!bar) return;
+    if (done === null || done === undefined) {
+      bar.classList.add('hidden');
+      fill.classList.remove('indeterminate');
+      fill.style.width = '0%';
+      return;
+    }
+    bar.classList.remove('hidden');
+    if (total === -1) {
+      fill.classList.add('indeterminate');
+      fill.style.width = '';
+      txt.textContent = 'Generating previews… (' + done + ')';
+    } else {
+      fill.classList.remove('indeterminate');
+      var pct = total > 0 ? Math.round((done / total) * 100) : 0;
+      fill.style.width = pct + '%';
+      txt.textContent = 'Generating previews… ' + done + '/' + total;
+    }
+  }
+
+  function updateThumbsButton() {
+    var btn = $('btn-thumbs');
+    if (!btn) return;
+    if (thumbsOn) btn.classList.add('active'); else btn.classList.remove('active');
+    if (listEl) {
+      if (thumbsOn) listEl.classList.add('with-thumbs');
+      else          listEl.classList.remove('with-thumbs');
+    }
+  }
+
+  function updateDeferButton() {
+    var btn = $('btn-defer');
+    if (!btn) return;
+    if (state.deferred) {
+      btn.classList.add('active');
+      btn.innerHTML = '▶ Apply' + (state.pending ? ' (' + state.pending + ')' : '');
+      btn.title = 'Click to apply pending changes to SketchUp';
+    } else {
+      btn.classList.remove('active');
+      btn.innerHTML = '⏸ Defer';
+      btn.title = 'Defer mode: stage changes in memory, click again to flush all to SketchUp';
+    }
   }
 
   function setStatus(msg) { if (statusEl) statusEl.textContent = msg; }
@@ -35,13 +96,25 @@ window.SM = (function () {
     row.dataset.parent = parent;
     if (parent !== 'root') row.classList.add('in-folder');
     if (selection.indexOf(scene.id) !== -1) row.classList.add('selected');
+    var pendingDot = scene.pending ? '<span class="pending-dot" title="Pending edits"></span>' : '';
+    var previewUrl = state.previews && state.previews[scene.id];
+    var thumbHtml;
+    if (previewUrl) {
+      // cache-bust per evitare immagine vecchia cached da CEF
+      var sep = previewUrl.indexOf('?') === -1 ? '?' : '&';
+      thumbHtml = '<img class="thumb" src="' + previewUrl + sep + 't=' + (state.preview_ts || '') + '" alt="">';
+    } else {
+      thumbHtml = '<div class="thumb-empty">no preview</div>';
+    }
     row.innerHTML =
       '<span class="grip">&#x2630;</span>' +
+      '<span class="row-update" title="Update scene from view">&#x27F3;</span>' +
       '<span class="idx">' + idx + '</span>' +
+      thumbHtml +
+      pendingDot +
       '<span class="name"></span>';
     row.querySelector('.name').textContent = scene.name;
     row.addEventListener('mousedown', function (e) { onRowClick(e, scene.id); });
-    row.addEventListener('dblclick', function () { SMBridge.selectPage(scene.id); });
     return row;
   }
 
@@ -147,6 +220,18 @@ window.SM = (function () {
 
   function onRowClick(e, id) {
     pendingCollapseId = null;
+    // Manual dblclick detection: CEF in SU 2019 può non emettere dblclick
+    // dopo che render() ricrea le row tra un click e l'altro.
+    var now = Date.now();
+    if (lastClickId === id && (now - lastClickTs) < DBLCLICK_MS &&
+        !e.shiftKey && !e.ctrlKey && !e.metaKey) {
+      lastClickId = null;
+      lastClickTs = 0;
+      SMBridge.openProperties(id);
+      return;
+    }
+    lastClickId = id;
+    lastClickTs = now;
     if (e.shiftKey && anchorId !== null) {
       var order = visibleSceneOrder();
       var a = order.indexOf(anchorId), b = order.indexOf(id);
@@ -164,15 +249,14 @@ window.SM = (function () {
       if (selection.indexOf(id) !== -1 && selection.length > 1) {
         pendingCollapseId = id;
         anchorId = id;
-        SMBridge.selectPage(id);
+        if (!state.deferred) SMBridge.selectPage(id);
         return;
       }
       selection = [id];
       anchorId = id;
-      SMBridge.selectPage(id);
+      if (!state.deferred) SMBridge.selectPage(id);
     }
     render();
-    updateProps();
   }
 
   // Mouseup sul container: se c'è un collapse pending e non c'è stato drag,
@@ -188,59 +272,10 @@ window.SM = (function () {
     selection = [id];
     anchorId = id;
     render();
-    updateProps();
-  }
-
-  function updateProps() {
-    if (selection.length === 0) {
-      propsEl.classList.add('collapsed');
-      propsTitleEl.textContent = 'No selection';
-      return;
-    }
-    if (selection.length > 1) {
-      propsTitleEl.textContent = selection.length + ' scenes selected';
-      propsEl.classList.add('collapsed');
-      return;
-    }
-    var s = sceneById(selection[0]);
-    if (!s) return;
-    propsTitleEl.textContent = s.name;
-    propsEl.classList.remove('collapsed');
-    $('prop-name').value = s.name;
-    $('prop-desc').value = s.description || '';
-    var flagsEl = $('prop-flags');
-    flagsEl.innerHTML = '';
-    state.flag_keys.forEach(function (k) {
-      var lbl = document.createElement('label');
-      var cb = document.createElement('input');
-      cb.type = 'checkbox';
-      cb.dataset.flag = k;
-      cb.checked = !!s.flags[k];
-      lbl.appendChild(cb);
-      lbl.appendChild(document.createTextNode(k.replace(/^use_/, '').replace(/_/g, ' ')));
-      flagsEl.appendChild(lbl);
-    });
-  }
-
-  function applyProps() {
-    if (selection.length !== 1) return;
-    var id = selection[0];
-    var flags = {};
-    document.querySelectorAll('#prop-flags input[type=checkbox]').forEach(function (cb) {
-      flags[cb.dataset.flag] = cb.checked;
-    });
-    SMBridge.updatePage({
-      id:          id,
-      name:        $('prop-name').value,
-      description: $('prop-desc').value,
-      flags:       flags
-    });
   }
 
   function init() {
     listEl        = $('scene-list');
-    propsEl       = $('props');
-    propsTitleEl  = $('props-title');
     statusEl      = $('status');
 
     $('btn-refresh').addEventListener('click', function () { SMBridge.refresh(); });
@@ -258,19 +293,65 @@ window.SM = (function () {
         selection = [];
       }
     });
-    $('prop-apply').addEventListener('click', applyProps);
-    $('props-toggle').addEventListener('click', function () {
-      propsEl.classList.toggle('collapsed');
-    });
-    $('props-header') && $('props-header').addEventListener('click', function (e) {
-      if (e.target.tagName !== 'BUTTON') propsEl.classList.toggle('collapsed');
+    var btnDefer = $('btn-defer');
+    if (btnDefer) {
+      btnDefer.addEventListener('click', function () { SMBridge.deferToggle(); });
+    }
+    var btnThumbs = $('btn-thumbs');
+    if (btnThumbs) {
+      btnThumbs.addEventListener('click', function () {
+        thumbsOn = !thumbsOn;
+        updateThumbsButton();
+      });
+    }
+    var btnPreviews = $('btn-previews');
+    if (btnPreviews) {
+      btnPreviews.addEventListener('click', function () {
+        // selezione vuota → tutte le scene; selezione presente → solo quelle
+        var ids = selection.slice();
+        var msg = ids.length === 0
+          ? 'Generate previews for ALL scenes? This may take a while.'
+          : 'Generate previews for ' + ids.length + ' selected scene(s)?';
+        if (!confirm(msg)) return;
+        setStatus('Generating previews…');
+        SMBridge.generatePreviews(ids);
+      });
+    }
+    var btnSettings = $('btn-settings');
+    if (btnSettings) {
+      btnSettings.addEventListener('click', function () {
+        try { window.sketchup && window.sketchup.sm_open_settings && window.sketchup.sm_open_settings(''); }
+        catch (e) { console.error('open settings failed', e); }
+      });
+    }
+    listEl.addEventListener('mouseup', onContainerMouseUp);
+
+    // Dblclick via delegation: render() ricrea le row, quindi un listener sul row
+    // non viene preservato tra primo e secondo click. Il listEl invece è stabile.
+    listEl.addEventListener('dblclick', function (e) {
+      var row = e.target.closest && e.target.closest('.scene-row');
+      if (!row || !row.dataset || !row.dataset.id) return;
+      SMBridge.openProperties(row.dataset.id);
     });
 
-    listEl.addEventListener('mouseup', onContainerMouseUp);
+    // Click sull'icona "update scene" per riga (delegation, capture):
+    // ferma propagazione così non triggera selezione né drag.
+    listEl.addEventListener('mousedown', function (e) {
+      if (!e.target.classList || !e.target.classList.contains('row-update')) return;
+      e.stopPropagation();
+      e.preventDefault();
+    }, true);
+    listEl.addEventListener('click', function (e) {
+      if (!e.target.classList || !e.target.classList.contains('row-update')) return;
+      e.stopPropagation();
+      var row = e.target.closest('.scene-row');
+      if (!row || !row.dataset || !row.dataset.id) return;
+      SMBridge.updateFromView(row.dataset.id);
+    });
 
     SMDnd.attach(listEl, {
       getSelected:  function () { return selection.slice(); },
-      onDragSelect: function (id) { selection = [id]; anchorId = id; render(); updateProps(); },
+      onDragSelect: function (id) { selection = [id]; anchorId = id; render(); },
       onDrop:       function (ids, info) {
         SMBridge.reorder(ids, info.beforeId, info.destFolderId);
       }
@@ -301,5 +382,22 @@ window.SM = (function () {
     safeInit();
   }
 
-  return { setState: setState };
+  function setActiveFromNative(uid) {
+    if (!uid) return;
+    // Solo cambio di selezione UI: NIENTE bridge call back.
+    selection = [uid];
+    anchorId  = uid;
+    render();
+    // Scrolla la riga in vista
+    var row = listEl && listEl.querySelector('.scene-row[data-id="' + uid + '"]');
+    if (row && row.scrollIntoView) {
+      try { row.scrollIntoView({ block: 'nearest' }); } catch (e) {}
+    }
+  }
+
+  return {
+    setState: setState,
+    setPreviewProgress: setPreviewProgress,
+    setActiveFromNative: setActiveFromNative
+  };
 })();

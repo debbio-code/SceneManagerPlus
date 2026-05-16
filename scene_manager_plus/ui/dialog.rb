@@ -5,7 +5,46 @@ module SceneManagerPlus
     module Dialog
       module_function
 
-      @dialog = nil
+      @dialog            = nil
+      @poll_timer_id     = nil
+      @last_active_uid   = nil
+
+      # Polling 250ms: se selected_page cambia (e defer è OFF), aggiorna la
+      # selezione nel plugin. Più affidabile del frame_change_observer che
+      # in SU 2019 non scatta sempre sui click ai tab nativi.
+      def start_active_scene_poll
+        stop_active_scene_poll
+        @last_active_uid = nil
+        @poll_timer_id = ::UI.start_timer(0.25, true) do
+          poll_active_scene
+        end
+        puts "[SM+] active scene poll started"
+      end
+
+      def stop_active_scene_poll
+        if @poll_timer_id
+          begin
+            ::UI.stop_timer(@poll_timer_id)
+          rescue
+          end
+          @poll_timer_id = nil
+        end
+      end
+
+      def poll_active_scene
+        return unless @dialog && @dialog.visible?
+        return if Core::Buffer.deferred?
+        m = Sketchup.active_model
+        return unless m
+        page = m.pages.selected_page
+        return unless page
+        uid = Core::SceneModel.page_id(page)
+        return if uid == @last_active_uid
+        @last_active_uid = uid
+        @dialog.execute_script("window.SM && SM.setActiveFromNative(#{uid.to_json});")
+      rescue => e
+        warn "[SM+] poll_active_scene: #{e.class}: #{e.message}"
+      end
 
       def html_dir
         File.join(PLUGIN_DIR, 'ui', 'html')
@@ -49,11 +88,20 @@ module SceneManagerPlus
         )
 
         register_callbacks(@dialog)
+        # Auto-flush eventuali edit pending + stop polling alla chiusura.
+        @dialog.set_on_closed do
+          if Core::Buffer.deferred?
+            edits, deletes = Core::Buffer.flush!
+            puts "[SM+] auto-flush on close: #{edits} edit(s), #{deletes} delete(s)"
+          end
+          stop_active_scene_poll
+        end
         # Cache-bust JS/CSS riscrivendo index.html in un file temporaneo con
         # ?v=<timestamp> sui tag <script src> e <link href>. CEF di SU 2019
         # può tenersi in cache i file file:// tra una sessione e l'altra.
         @dialog.set_file(prepare_index)
         @dialog.show
+        start_active_scene_poll
         # Fallback: se sm_ready non arriva entro 1s, forziamo push_state.
         # Utile se il bridge JS->Ruby non si aggancia per qualche motivo.
         ::UI.start_timer(1.0, false) do
@@ -86,8 +134,11 @@ module SceneManagerPlus
         end
 
         dlg.add_action_callback('sm_select_page') do |_ctx, payload|
-          data = parse(payload)
-          Core::SceneModel.select_page(data['id'])
+          # In defer mode non tocchiamo SU: niente viewport change.
+          unless Core::Buffer.deferred?
+            data = parse(payload)
+            Core::SceneModel.select_page(data['id'])
+          end
         end
 
         dlg.add_action_callback('sm_update_page') do |_ctx, payload|
@@ -110,6 +161,57 @@ module SceneManagerPlus
 
         dlg.add_action_callback('sm_log') do |_ctx, msg|
           puts "[SM+ UI] #{msg}"
+        end
+
+        dlg.add_action_callback('sm_open_settings') do |_ctx|
+          SettingsDialog.show
+        end
+
+        dlg.add_action_callback('sm_open_properties') do |_ctx, payload|
+          data = parse(payload)
+          PropertiesDialog.show_for(data['id']) if data['id']
+        end
+
+        dlg.add_action_callback('sm_generate_previews') do |_ctx, payload|
+          data = parse(payload)
+          ids  = Array(data['ids'])
+
+          on_progress = lambda do |done, total, _uid|
+            js = "window.SM && SM.setPreviewProgress(#{done.to_json}, #{total.to_json});"
+            begin
+              dlg.execute_script(js)
+            rescue
+            end
+          end
+
+          on_done = lambda do |count|
+            puts "[SM+] previews generated: #{count}"
+            begin
+              dlg.execute_script("window.SM && SM.setPreviewProgress(null, null);")
+            rescue
+            end
+            push_state
+            PropertiesDialog.push_state if defined?(PropertiesDialog)
+          end
+
+          # segnala "starting"
+          begin
+            dlg.execute_script("window.SM && SM.setPreviewProgress(0, #{ids.empty? ? -1 : ids.size});")
+          rescue
+          end
+
+          Core::Previews.generate(ids, on_progress: on_progress, on_done: on_done)
+        end
+
+        dlg.add_action_callback('sm_defer_toggle') do |_ctx|
+          if Core::Buffer.deferred?
+            edits, deletes = Core::Buffer.flush!
+            puts "[SM+] flush: #{edits} edit(s), #{deletes} delete(s)"
+          else
+            Core::Buffer.enable!
+            puts "[SM+] defer mode ON"
+          end
+          push_state
         end
 
         dlg.add_action_callback('sm_folder_create') do |_ctx, payload|
@@ -150,6 +252,9 @@ module SceneManagerPlus
           tree:      tree,
           folders:   Core::Folders.all,
           flag_keys: Core::SceneModel::FLAG_KEYS,
+          deferred:  Core::Buffer.deferred?,
+          pending:   Core::Buffer.pending_count,
+          previews:  Core::Previews.url_map,
           model_info: {
             title:        (model ? model.title.to_s : ''),
             pages_count:  (model ? model.pages.count : 0)

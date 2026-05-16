@@ -3,18 +3,25 @@
 Plugin di gestione scene avanzata per SketchUp 2019, in stile "livelli Photoshop":
 lista scene riordinabile, cartelle, batch export con watermark logo, naming pattern.
 
-## Stato attuale: Fase 2 completata (Sync nativa scartata)
+## Stato attuale: Fase 3 completata + Defer mode + Previews
 
-Sviluppo in 4 fasi (concordato con l'utente):
+Sviluppo in 4 fasi:
 
 1. **Fase 1 — Scaffolding + finestra base con lista scene + selezione/DnD** ✅
 2. **Fase 2 — Cartelle (logiche + DnD scene↔cartelle)** ✅
-   - 2a (cartelle + UI collassabile) e 2b (DnD scene↔cartelle, cartelle↔root) completate
-   - 2c (Sync ordine logico→pagine native SU) **scartata di proposito**: l'utente
-     usa esclusivamente il plugin per gestire le scene, quindi l'ordine nativo è
-     un non-problema. L'export di Fase 4 userà direttamente `logical_order`.
-3. **Fase 3 — Settings + naming pattern** ⏳ (prossima)
+   - Sync ordine logico→pagine native SU **scartata di proposito** (vedi sotto)
+3. **Fase 3 — Settings + naming pattern + Properties dialog** ✅
 4. **Fase 4 — Batch export + watermark** ⏳
+
+Extra fuori-fase aggiunti in Fase 3:
+- **Defer mode** (`Core::Buffer`): tutte le scritture vivono in RAM, un solo
+  flush a SU. Bottone in toolbar, auto-flush alla chiusura.
+- **Per-scene previews** (`Core::Previews`): PNG persistenti per-modello
+  (`~/.scene_manager_plus/previews/<model_guid>/`). Generazione asincrona con
+  progress bar.
+- **Inline thumbnails** nella lista (toggle Thumbs).
+- **Polling 250ms** per syncare in plugin la scena attivata da tab nativi SU.
+- **Per-row ⟳** icona update-from-view (come "Update Scene" nativo).
 
 ## Decisioni di design
 
@@ -36,18 +43,27 @@ scene_manager_plus.rb               # loader, registra l'extension
 scene_manager_plus/
 ├── main.rb                         # entry point: menu + toolbar + comando
 ├── core/
+│   ├── buffer.rb                   # Defer mode: stato globale edit in RAM + flush!
 │   ├── scene_model.rb              # wrapper su Sketchup.active_model.pages
-│   ├── folders.rb                  # stub Fase 2 (schema + load/save)
-│   └── settings.rb                 # config persistente con defaults
+│   ├── folders.rb                  # cartelle logiche (schema + load/save)
+│   ├── settings.rb                 # config persistente con defaults
+│   ├── naming.rb                   # format/preview/apply_rename pattern
+│   └── previews.rb                 # cache PNG anteprime per-modello persistente
 └── ui/
-    ├── dialog.rb                   # HtmlDialog wrapper + bridge Ruby↔JS
+    ├── dialog.rb                   # Main HtmlDialog + bridge + polling scene attiva
+    ├── settings_dialog.rb          # Dialog Settings (pattern naming, ...)
+    ├── properties_dialog.rb        # Dialog Properties singola scena (dblclick)
     └── html/
         ├── index.html              # finestra principale
-        ├── css/style.css           # tema scuro Photoshop-like
+        ├── settings.html           # finestra Settings
+        ├── properties.html         # finestra Properties
+        ├── css/{style,settings,properties}.css
         └── js/
             ├── bridge.js           # window.SMBridge → sketchup.<callback>
-            ├── dnd.js              # drag&drop multi-selezione + drop indicator
-            └── app.js              # logica lista, selezione, props
+            ├── dnd.js              # drag&drop custom (no HTML5 native)
+            ├── app.js              # logica lista, selezione, defer, thumbs
+            ├── settings.js         # logica dialog Settings
+            └── properties.js       # logica dialog Properties (live commit)
 ```
 
 ## Cosa funziona già (Fase 1 + 2)
@@ -218,6 +234,31 @@ non aggiornato).
 all'originale, riscrivendo i tag `<script src>` e `<link href>` con
 `?v=<timestamp>`. CEF è obbligato a rileggere asset. Il temp file è gitignored.
 
+### ✅ RISOLTO — `PAGE_USE_*` constants: nomi diversi per versione SU
+
+`Sketchup::Page#update(mask)` accetta una bitmask di costanti top-level
+`PAGE_USE_*`. **In SU 2019 i nomi differiscono dai docs SU recenti**.
+
+Costanti che esistono in SU 2019: `PAGE_USE_CAMERA`,
+`PAGE_USE_RENDERING_OPTIONS`, `PAGE_USE_SHADOWINFO`, `PAGE_USE_HIDDEN_LAYERS`,
+`PAGE_USE_HIDDEN`, `PAGE_USE_SECTION_PLANES`, `PAGE_USE_ALL`.
+
+Costanti che **NON esistono** in SU 2019: `PAGE_USE_STYLE`, `PAGE_USE_AXES`,
+`PAGE_USE_HIDDEN_GEOMETRY`, `PAGE_USE_LAYER_VISIBILITY`,
+`PAGE_USE_ACTIVE_SECTION_PLANES`.
+
+Mappatura predicate → flag:
+- `use_camera?` / `use_axes?` → CAMERA (gli assi seguono camera)
+- `use_rendering_options?` / `use_style?` → RENDERING_OPTIONS (style è parte
+  di rendering)
+- `use_shadow_info?` → SHADOWINFO
+- `use_hidden_layers?` → HIDDEN_LAYERS (o LAYER_VISIBILITY su SU recenti)
+- `use_hidden?` → HIDDEN (o HIDDEN_GEOMETRY)
+- `use_section_planes?` → SECTION_PLANES (o ACTIVE_SECTION_PLANES)
+
+In `update_from_view` uso un lookup difensivo (`Object.const_defined?`) che
+prova più nomi e prende quello presente. Vale anche `PAGE_USE_ALL`.
+
 ### ✅ RISOLTO — `NoMethodError: undefined method 'use_camera' for Sketchup::Page`
 
 I flag di `Sketchup::Page` (`use_camera`, `use_hidden`, ecc.) hanno **getter con `?`**
@@ -238,11 +279,170 @@ Generalizzando: per qualsiasi predicate dell'API SU (`Entity#valid?`, `Group#loc
 `send`. La nostra costante `FLAG_KEYS` contiene i nomi *base* (per UI/JSON);
 in Ruby costruiamo `"#{k}?"` per leggere e `"#{k}="` per scrivere.
 
-### ✅ Completato in Fase 2
+### ✅ Completato in Fase 2-3
 
 - UI cartelle collassabili con CRUD completo
 - DnD scene↔cartelle e cartelle↔root
-- Sync ordine logico → reale: **scartata** (vedi sezione "Limite SU 2019")
+- Sync ordine logico → reale: **scartata** (utente non lo vuole, vedi sezione)
+- Settings dialog + naming pattern + apply rename
+- Properties dialog separato (dblclick → live commit)
+- Defer mode (Core::Buffer)
+- Previews persistenti + thumbnails inline + progress bar
+- Sync scena attiva nativo → plugin (polling 250ms)
+- ⟳ update-from-view per riga
+
+### ⚠️ Da implementare in Fase 4
+
+- Batch export PNG/JPG con naming pattern
+- Watermark PNG via ChunkyPNG (embedded in `vendor/`)
+- Watermark JPG fallback (overlay 2D temporaneo)
+- Abilitazione delle sezioni Export e Logo nel Settings dialog (oggi disabled)
+
+### ✅ RISOLTO — `dblclick` non scatta in CEF SU 2019 se render ricrea row
+
+`makeSceneRow` in `app.js` viene chiamata ad ogni `setState` → la `<div.scene-row>`
+viene rimossa e ricreata. Tra primo e secondo click di un dblclick, il target
+elemento non è più lo stesso → CEF non emette `dblclick`.
+
+**Tentativo fallito**: spostare il listener su `listEl` con event delegation.
+Anche così non scatta affidabilmente.
+
+**Soluzione adottata**: rilevamento manuale in `onRowClick` con timestamp
+(`lastClickId` + `lastClickTs`, soglia 400ms, no modificatori). Se due
+mousedown sulla stessa riga arrivano entro la soglia, triggeriamo
+`SMBridge.openProperties(id)`.
+
+### ⚠️ TRAPPOLA — `module_function` non rende il metodo respond_to-positive
+
+```ruby
+module Foo
+  module_function
+  def hello; "hi"; end
+end
+Foo.hello                # => "hi"   (OK, public module method)
+Foo.respond_to?(:hello)  # => false  (perché module_function lo rende anche
+                         #            private instance method)
+```
+
+Non usare `Module.respond_to?(:metodo_module_function)` per gating —
+chiama direttamente. È un guard pattern che ho dovuto rimuovere da
+SettingsDialog e PropertiesDialog quando il `Dialog.push_state` non veniva
+chiamato.
+
+### ⚠️ TRAPPOLA — `UI.start_timer(0, false)` da action_callback non affidabile
+
+Tentativo di deferire `update_page` con `UI.start_timer(0, false) { ... }`
+dentro una bridge callback: il timer non sempre fira in SU 2019.
+
+Per progress bar previews uso una catena di timer `0.01s` (Previews.generate):
+qui scatta. Forse il problema è `delay=0` esatto + callback context.
+**Pattern sicuro**: delay >= 0.01, mai 0.
+
+### ⚠️ TRAPPOLA — `Pages#add_frame_change_observer` non scatta sui tab clicks
+
+In SU 2019 con scene transitions disabilitate (preferenze SU), il
+`frame_change_observer` non emette `frameChange` quando l'utente clicca un
+tab scena nativo. È pensato per le transizioni animate.
+
+**Soluzione adottata**: polling `UI.start_timer(0.25, true)` che legge
+`pages.selected_page` e confronta con `@last_active_uid`. Se cambia (e defer
+è OFF), pusha `SM.setActiveFromNative(uid)` al dialog. Carico minimo.
+
+Il polling viene attaccato in `Dialog.show` e fermato in `set_on_closed`.
+
+### Pattern: intercettare click su sub-element prima di selezione/drag
+
+Per il bottone ⟳ per-riga: la riga ha `mousedown` per selezione/drag (sia su
+listener della row, sia via SMDnd attaccato a listEl).
+
+```js
+// CAPTURE phase: blocca prima che bubble raggiunga gli altri listener
+listEl.addEventListener('mousedown', function (e) {
+  if (!e.target.classList || !e.target.classList.contains('row-update')) return;
+  e.stopPropagation();
+  e.preventDefault();
+}, true);
+listEl.addEventListener('click', function (e) {
+  if (!e.target.classList.contains('row-update')) return;
+  e.stopPropagation();
+  var row = e.target.closest('.scene-row');
+  SMBridge.updateFromView(row.dataset.id);
+});
+```
+
+Capture phase su listEl fira PRIMA degli handler bubble di SMDnd e dei row
+mousedown listener. `stopPropagation` blocca tutto.
+
+## Defer mode (Core::Buffer)
+
+Quando attivo, le scritture vengono accumulate in RAM. Stato globale
+(module-level var) in `core/buffer.rb`:
+
+```ruby
+@deferred       = bool
+@page_edits     = { uid => { 'name'?, 'description'?, 'flags'? } }
+@pending_delete = [uid, ...]
+@folders        = lazy snapshot di Folders.all (mutato in place)
+@order          = lazy snapshot di logical_order
+@folders_dirty / @order_dirty = flag dirty
+```
+
+`SceneModel.update_page`, `delete_pages`, `set_logical_order` e
+`Folders.all/save` controllano `Buffer.deferred?` e si comportano di
+conseguenza. Display via `scene_hash` fa l'overlay degli edit; `tree` filtra
+le pending-delete.
+
+`Buffer.flush!` applica tutto in un'unica `model.start_operation`:
+1) edit pagine, 2) erase pending-delete, 3) `Folders.write_raw`, 4)
+`SceneModel.write_order_raw`. Singolo Ctrl+Z annulla tutto.
+
+Eccezioni che restano immediate anche in defer mode:
+- `select_page` (navigation) — bypassato lato JS (`if (!state.deferred)
+  SMBridge.selectPage(id)`) e anche lato Ruby per sicurezza
+- `update_from_view` (cattura viewport dipende dal qui-e-ora)
+
+Auto-flush in `Dialog.set_on_closed`.
+
+## Previews persistenti
+
+`Core::Previews` salva PNG 480×300 in
+`File.join(Dir.home, '.scene_manager_plus', 'previews', model_key, "#{uid}.png")`.
+
+`model_key`: preferisce `Sketchup::Model#guid` (stabile per file SKP),
+fallback hash MD5 del path.
+
+Cache `@cache` in-memory ma idratata da disco via `refresh_from_disk!` al
+prossimo `path_for`/`url_map`. Idempotente: se `model_key` non cambia non
+rilegge.
+
+Generazione asincrona: `generate(uids, on_progress:, on_done:)` usa catena
+di `UI.start_timer(0.01, false)` per processare una scena per tick. Tra un
+tick e l'altro CEF ridipinge la progress bar (importante: con delay 0
+diretto, CEF non ridipinge → non vediamo progresso).
+
+Salva e ripristina `pages.selected_page` e `view.camera` prima/dopo la
+generazione.
+
+## Sync scena attiva nativo → plugin
+
+Polling 250ms in `Dialog#poll_active_scene`. Legge `pages.selected_page`,
+confronta con `@last_active_uid`, se diverso esegue
+`dlg.execute_script("SM.setActiveFromNative(uid)")`.
+
+In defer mode il polling è no-op (la finestra è "isolata").
+
+JS `setActiveFromNative` aggiorna `selection = [uid]`, render, e
+`row.scrollIntoView({ block: 'nearest' })`. NIENTE bridge call back (no
+infinite loop).
+
+## Properties dialog (dblclick)
+
+Live commit, niente Apply: name salva su Enter o blur, description su blur,
+flag su change. `setState` da Ruby evita di sovrascrivere il campo se è
+`document.activeElement` (no flicker durante digitazione).
+
+`scene_payload` usa `SceneModel.scene_hash(p, uid)` che fa già l'overlay del
+Buffer in defer mode, così il dialog mostra valori coerenti.
 
 ### Deploy locale (questa postazione)
 

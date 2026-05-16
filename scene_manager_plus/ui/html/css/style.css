@@ -10,9 +10,52 @@ body {
 
 #app {
   display: grid;
-  grid-template-rows: auto 1fr auto auto;
+  grid-template-rows: auto auto 1fr auto;
   height: 100vh;
 }
+
+.progress {
+  background: #2b2b2b;
+  border-bottom: 1px solid #1e1e1e;
+  padding: 4px 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.progress.hidden { display: none; }
+.progress-bar {
+  flex: 1;
+  height: 8px;
+  background: #1e1e1e;
+  border-radius: 4px;
+  overflow: hidden;
+}
+.progress-fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, #4ea1ff, #6cb8ff);
+  transition: width 0.15s ease;
+}
+.progress-fill.indeterminate {
+  width: 30%;
+  animation: indeterminate 1.2s linear infinite;
+}
+@keyframes indeterminate {
+  0%   { margin-left: -30%; }
+  100% { margin-left: 100%; }
+}
+.progress-text {
+  color: #bbb;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+#btn-thumbs.active {
+  background: #2e6fb8;
+  border-color: #1a4e8a;
+  color: #fff;
+}
+#btn-thumbs.active:hover { background: #3a85d6; }
 
 .toolbar {
   display: flex;
@@ -34,6 +77,23 @@ body {
 .toolbar button:hover:not(:disabled) { background: #5a5a5a; }
 .toolbar button:disabled { opacity: 0.4; cursor: default; }
 .toolbar .spacer { flex: 1; }
+
+#btn-defer.active {
+  background: #b8782e;
+  border-color: #8a4e1a;
+  color: #fff;
+}
+#btn-defer.active:hover { background: #d68a3a; }
+
+.scene-row .pending-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #ffb84e;
+  margin-right: 4px;
+  vertical-align: middle;
+}
 
 .scene-list {
   overflow-y: auto;
@@ -75,7 +135,56 @@ body {
   cursor: grab;
   font-size: 14px;
 }
+.scene-row .row-update {
+  color: #888;
+  margin-right: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  user-select: none;
+  padding: 2px 3px;
+  border-radius: 2px;
+}
+.scene-row .row-update:hover { color: #4ea1ff; background: #1e1e1e; }
+.scene-row .row-update:active { color: #fff; }
 .scene-row.dragging { opacity: 0.4; }
+
+.scene-row .thumb {
+  display: none;
+  width: 120px;
+  height: 75px;
+  margin-right: 8px;
+  background: #1a1a1a;
+  border: 1px solid #1e1e1e;
+  border-radius: 2px;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+.scene-row .thumb-empty {
+  display: none;
+  width: 120px;
+  height: 75px;
+  margin-right: 8px;
+  background: #1a1a1a;
+  border: 1px dashed #333;
+  border-radius: 2px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  color: #555;
+  font-size: 10px;
+  font-style: italic;
+  text-align: center;
+  padding: 4px;
+}
+.scene-list.with-thumbs .scene-row {
+  padding: 6px 8px;
+}
+.scene-list.with-thumbs .scene-row .thumb,
+.scene-list.with-thumbs .scene-row .thumb-empty {
+  display: flex;
+}
+.scene-list.with-thumbs .scene-row .thumb { display: block; }
 
 .scene-row .name { flex: 1; }
 .scene-row .idx {
@@ -176,62 +285,6 @@ body {
 }
 .drop-indicator::before { left: 0; }
 .drop-indicator::after  { right: 0; }
-
-.props {
-  background: #333;
-  border-top: 1px solid #1e1e1e;
-  max-height: 50vh;
-  overflow-y: auto;
-}
-.props.collapsed .props-body { display: none; }
-.props-header {
-  display: flex;
-  align-items: center;
-  padding: 4px 8px;
-  background: #3a3a3a;
-  cursor: pointer;
-}
-.props-header span { flex: 1; font-weight: bold; }
-.props-header button {
-  background: none; border: none; color: #ddd; cursor: pointer;
-}
-.props-body { padding: 8px; }
-.props-body label {
-  display: block;
-  margin-bottom: 6px;
-}
-.props-body input[type=text],
-.props-body textarea {
-  width: 100%;
-  background: #232323;
-  color: #ddd;
-  border: 1px solid #1e1e1e;
-  padding: 3px 5px;
-  font-family: inherit;
-  font-size: 12px;
-}
-.props-body fieldset {
-  border: 1px solid #1e1e1e;
-  margin: 6px 0;
-  padding: 6px 8px;
-}
-.props-body fieldset legend { padding: 0 4px; color: #aaa; }
-#prop-flags label {
-  display: flex;
-  align-items: center;
-  font-size: 11px;
-  margin-bottom: 2px;
-}
-#prop-flags input { margin-right: 4px; }
-#prop-apply {
-  background: #2b5a86;
-  border: 1px solid #1e1e1e;
-  color: #fff;
-  padding: 4px 12px;
-  cursor: pointer;
-  border-radius: 2px;
-}
-#prop-apply:hover { background: #316a99; }
 
 .statusbar {
   background: #1e1e1e;

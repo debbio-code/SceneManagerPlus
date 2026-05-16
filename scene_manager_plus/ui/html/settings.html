@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Scene Manager+ Settings</title>
+  <link rel="stylesheet" href="css/settings.css">
+</head>
+<body>
+  <div id="settings-app">
+    <section class="group" id="group-naming">
+      <h2>Naming pattern</h2>
+
+      <div class="row">
+        <label class="check">
+          <input type="checkbox" id="naming-enabled">
+          <span>Enable naming pattern</span>
+        </label>
+      </div>
+
+      <div class="row">
+        <label>Prefix mode</label>
+        <select id="prefix-mode">
+          <option value="skp_name">SketchUp file name</option>
+          <option value="custom">Custom text</option>
+          <option value="none">None</option>
+        </select>
+      </div>
+
+      <div class="row" id="row-prefix-custom">
+        <label>Custom prefix</label>
+        <input type="text" id="prefix-custom" placeholder="e.g. PROJECT-01">
+      </div>
+
+      <div class="row two-col">
+        <div>
+          <label>Number padding</label>
+          <input type="number" id="pad" min="0" max="6" step="1">
+        </div>
+        <div>
+          <label>Separator</label>
+          <input type="text" id="separator" maxlength="3">
+        </div>
+      </div>
+
+      <div class="row">
+        <label class="check">
+          <input type="checkbox" id="include-scene-name">
+          <span>Append original scene name</span>
+        </label>
+      </div>
+
+      <div class="preview">
+        <h3>Preview</h3>
+        <div class="preview-pattern">
+          Pattern: <code id="pattern-string">—</code>
+        </div>
+        <ul id="preview-list" class="preview-list">
+          <li class="empty">No scenes to preview.</li>
+        </ul>
+      </div>
+
+      <div class="actions">
+        <button id="btn-save" title="Save settings only">Save</button>
+        <button id="btn-apply" class="primary" title="Save and rename all scenes now">
+          Save &amp; Rename scenes
+        </button>
+        <span id="apply-status" class="status"></span>
+      </div>
+    </section>
+
+    <section class="group disabled" title="Available in Phase 4">
+      <h2>Export <span class="badge">Phase 4</span></h2>
+      <p class="hint">Output folder, resolution, format. Coming soon.</p>
+    </section>
+
+    <section class="group disabled" title="Available in Phase 4">
+      <h2>Logo / Watermark <span class="badge">Phase 4</span></h2>
+      <p class="hint">PNG watermark, position, opacity. Coming soon.</p>
+    </section>
+  </div>
+
+  <script src="js/settings.js"></script>
+</body>
+</html>

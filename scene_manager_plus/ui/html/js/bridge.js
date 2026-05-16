@@ -31,6 +31,9 @@ window.SMBridge = (function () {
     folderUpdate:    function (data)  { call('sm_folder_update', data); },
     folderDelete:    function (id)    { call('sm_folder_delete', { id: id }); },
     folderToggle:    function (id)    { call('sm_folder_toggle', { id: id }); },
+    openProperties:  function (id)    { call('sm_open_properties', { id: id }); },
+    deferToggle:     function ()      { call('sm_defer_toggle'); },
+    generatePreviews:function (ids)   { call('sm_generate_previews', { ids: ids || [] }); },
     log:             function (msg)   { call('sm_log', String(msg)); }
   };
 })();
