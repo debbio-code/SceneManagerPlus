@@ -33,12 +33,17 @@
   }
 
   function writeForm(naming) {
-    $('#naming-enabled').checked = !!naming.enabled;
-    $('#prefix-mode').value = naming.prefix_mode || 'skp_name';
-    $('#prefix-custom').value = naming.prefix_custom || '';
-    $('#pad').value = (naming.pad == null ? 2 : naming.pad);
-    $('#separator').value = naming.separator || '_';
-    $('#include-scene-name').checked = !!naming.include_scene_name;
+    // Naming non ha auto-save (Save manuale): se un push_state arriva mentre
+    // l'utente sta digitando — tipicamente perché l'auto-save Export/Logo
+    // ha appena fatto un round-trip — NON dobbiamo sovrascrivere il campo
+    // in editing, altrimenti il valore in-progress viene "ripristinato" al
+    // contenuto persistito (vecchio).
+    setIfNotFocused($('#naming-enabled'),     'checked', !!naming.enabled);
+    setIfNotFocused($('#prefix-mode'),        'value',   naming.prefix_mode || 'skp_name');
+    setIfNotFocused($('#prefix-custom'),      'value',   naming.prefix_custom || '');
+    setIfNotFocused($('#pad'),                'value',   (naming.pad == null ? 2 : naming.pad));
+    setIfNotFocused($('#separator'),          'value',   naming.separator || '_');
+    setIfNotFocused($('#include-scene-name'), 'checked', !!naming.include_scene_name);
     updateConditionalRows();
     updatePatternString();
   }
