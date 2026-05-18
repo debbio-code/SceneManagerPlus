@@ -68,14 +68,130 @@
       </div>
     </section>
 
-    <section class="group disabled" title="Available in Phase 4">
-      <h2>Export <span class="badge">Phase 4</span></h2>
-      <p class="hint">Output folder, resolution, format. Coming soon.</p>
+    <section class="group" id="group-export">
+      <h2>Export</h2>
+
+      <div class="row">
+        <label>Output folder</label>
+        <div class="row two-col" style="margin-bottom:0;">
+          <div style="flex:3;">
+            <input type="text" id="output-dir" placeholder="(auto: Immagini/ next to the .skp)">
+          </div>
+          <div style="flex:0 0 auto;">
+            <button type="button" id="btn-browse-output" class="mini-btn">Browse…</button>
+          </div>
+        </div>
+        <small class="muted" style="margin-top:4px;">
+          If empty, exports go to <code>Immagini/</code> beside the .skp. Previous content gets archived to <code>Superate/NN/</code>.
+        </small>
+      </div>
+
+      <div class="row two-col">
+        <div>
+          <label>Width (px)</label>
+          <input type="number" id="export-width" min="16" max="16384" step="1">
+        </div>
+        <div>
+          <label>Height (px)</label>
+          <input type="number" id="export-height" min="16" max="16384" step="1">
+        </div>
+      </div>
+
+      <div class="row two-col">
+        <div>
+          <label>Format</label>
+          <select id="export-format">
+            <option value="png">PNG</option>
+            <option value="jpg">JPG</option>
+          </select>
+        </div>
+        <div>
+          <label class="check" style="margin-top:18px;">
+            <input type="checkbox" id="export-antialias">
+            <span>Antialias</span>
+          </label>
+        </div>
+      </div>
+
+      <div class="row">
+        <label class="check">
+          <input type="checkbox" id="export-transparent">
+          <span>Transparent background (PNG only)</span>
+        </label>
+      </div>
+
+      <div class="row two-col">
+        <div>
+          <label>Line scale multiplier</label>
+          <input type="number" id="export-line-scale" min="0.1" max="10" step="0.1">
+        </div>
+        <div></div>
+      </div>
+      <small class="muted" style="margin-top:-4px;">
+        Multiplies edge thickness in the export (SU 2020+: native; SU 2019: applied via temporary EdgeWidth/ProfileWidth).
+      </small>
+
+      <div class="actions">
+        <span class="auto-save-hint">Changes are saved automatically.</span>
+        <span id="export-status" class="status"></span>
+      </div>
     </section>
 
-    <section class="group disabled" title="Available in Phase 4">
-      <h2>Logo / Watermark <span class="badge">Phase 4</span></h2>
-      <p class="hint">PNG watermark, position, opacity. Coming soon.</p>
+    <section class="group" id="group-logo">
+      <h2>Logo / Watermark</h2>
+
+      <div class="row">
+        <label class="check">
+          <input type="checkbox" id="logo-enabled">
+          <span>Add watermark on export</span>
+        </label>
+      </div>
+
+      <div class="row">
+        <label class="check">
+          <input type="checkbox" id="logo-use-default">
+          <span>Use default logo <span id="logo-default-hint" class="muted"></span></span>
+        </label>
+      </div>
+
+      <div class="row" id="row-logo-path">
+        <label>Logo file (PNG, transparency supported)</label>
+        <div class="row two-col" style="margin-bottom:0;">
+          <div style="flex:3;">
+            <input type="text" id="logo-path" placeholder="C:\path\to\logo.png">
+          </div>
+          <div style="flex:0 0 auto;">
+            <button type="button" id="btn-browse-logo" class="mini-btn">Browse…</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="row two-col">
+        <div>
+          <label>Width (% of image)</label>
+          <input type="number" id="logo-width-pct" min="1" max="100" step="1">
+        </div>
+        <div>
+          <label>Opacity (%)</label>
+          <input type="number" id="logo-opacity" min="0" max="100" step="1">
+        </div>
+      </div>
+
+      <div class="row two-col">
+        <div>
+          <label>Offset X (px from right)</label>
+          <input type="number" id="logo-offset-x" min="0" max="4096" step="1">
+        </div>
+        <div>
+          <label>Offset Y (px from bottom)</label>
+          <input type="number" id="logo-offset-y" min="0" max="4096" step="1">
+        </div>
+      </div>
+
+      <div class="actions">
+        <span class="auto-save-hint">Changes are saved automatically.</span>
+        <span id="logo-status" class="status"></span>
+      </div>
     </section>
   </div>
 

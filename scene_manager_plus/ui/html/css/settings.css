@@ -96,6 +96,27 @@ select:focus {
 }
 input[disabled], select[disabled] { opacity: 0.4; }
 
+button.mini-btn {
+  background: #4a4a4a;
+  border: 1px solid #1e1e1e;
+  color: #ddd;
+  padding: 5px 10px;
+  border-radius: 2px;
+  cursor: pointer;
+  font-size: 11px;
+  height: 28px;
+  align-self: flex-end;
+}
+button.mini-btn:hover { background: #5a5a5a; }
+
+.muted { color: #888; font-size: 11px; margin-left: 4px; font-style: italic; }
+
+.auto-save-hint {
+  color: #888;
+  font-size: 11px;
+  font-style: italic;
+}
+
 .preview {
   margin-top: 12px;
   padding-top: 10px;

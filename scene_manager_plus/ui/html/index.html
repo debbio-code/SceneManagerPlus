@@ -16,13 +16,14 @@
       <button id="btn-previews" title="Generate previews for selected scenes (or all if none selected)">&#x1F3AC; Preview</button>
       <button id="btn-thumbs" title="Show inline thumbnails in the list">&#x1F5BC; Thumbs</button>
       <div class="spacer"></div>
-      <button id="btn-export" title="Export (coming soon)" disabled>&#x21e9;</button>
+      <button id="btn-export" title="Batch export scenes">&#x21e9;</button>
       <button id="btn-settings" title="Settings">&#x2699;</button>
     </header>
 
     <div id="progress" class="progress hidden">
       <div class="progress-bar"><div id="progress-fill" class="progress-fill"></div></div>
       <span id="progress-text" class="progress-text">Generating previews…</span>
+      <button id="btn-cancel-export" class="cancel-btn hidden" title="Cancel export">&#x2715;</button>
     </div>
 
     <div id="scene-list" class="scene-list" tabindex="0">

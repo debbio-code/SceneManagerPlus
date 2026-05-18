@@ -3,7 +3,7 @@
 Plugin di gestione scene avanzata per SketchUp 2019, in stile "livelli Photoshop":
 lista scene riordinabile, cartelle, batch export con watermark logo, naming pattern.
 
-## Stato attuale: Fase 3 completata + Defer mode + Previews
+## Stato attuale: Fase 4 completata
 
 Sviluppo in 4 fasi:
 
@@ -11,7 +11,13 @@ Sviluppo in 4 fasi:
 2. **Fase 2 — Cartelle (logiche + DnD scene↔cartelle)** ✅
    - Sync ordine logico→pagine native SU **scartata di proposito** (vedi sotto)
 3. **Fase 3 — Settings + naming pattern + Properties dialog** ✅
-4. **Fase 4 — Batch export + watermark** ⏳
+4. **Fase 4 — Batch export + watermark** ✅
+   - `Core::Exporter` (asincrono, cancellabile)
+   - Watermark via `Sketchup::ImageRep` — niente ChunkyPNG
+   - Logo bundled in `scene_manager_plus/assets/default_logo.png`
+   - Scope picker (All / Selected / Folders) in `ExportDialog`
+   - Smart output dir: regola Immagini/Superate/NN accanto al `.skp`
+   - Line Scale Multiplier (con fallback EdgeWidth/ProfileWidth per SU 2019)
 
 Extra fuori-fase aggiunti in Fase 3:
 - **Defer mode** (`Core::Buffer`): tutte le scritture vivono in RAM, un solo
@@ -174,6 +180,100 @@ Modifiche HTML/CSS/JS → basta chiudere+riaprire la finestra del plugin
 (c'è il cache-bust su `index.html`).
 
 Poi: SketchUp 2019 → menu **Plugins → Scene Manager+** (o icona toolbar).
+
+## Lezioni Fase 4 (export + watermark)
+
+### ⚠️ `Sketchup::ImageRep#set_data` su Windows: BGRA top-down, NON RGBA
+
+Per 32 bpp, `set_data(w, h, 32, 0, buf)` su SU 2019 Windows si aspetta i byte
+in ordine **BGRA** (DIB convention), NON RGBA. Sintomi se sbagli:
+- Wood marrone diventa blu, e simmetricamente i blu diventano rossi (R↔B swap)
+- Le righe NON vengono flippate (set_data legge top-down come io scrivo), quindi
+  il logo non finisce capovolto a causa dei byte di base, MA…
+
+Ordine corretto per ogni pixel:
+```ruby
+buf.setbyte(j,     c.blue)
+buf.setbyte(j + 1, c.green)
+buf.setbyte(j + 2, c.red)
+buf.setbyte(j + 3, 255)
+```
+
+### ⚠️ `ImageRep#color_at_uv` usa convenzione OpenGL (v=0 in basso)
+
+Se indicizzi top-down (riga 0 = top), devi flippare v:
+```ruby
+v = 1.0 - (dy + 0.5) / th.to_f
+```
+Altrimenti il logo finisce capovolto verticalmente nell'output (testo "ʇsɐıdǝp").
+
+### ⚠️ `Sketchup.write_default` con stringhe JSON è inaffidabile in SU 2019
+
+Salvare `'{"width":3840,"format":"jpg"}'` come singolo valore poteva non
+persistere o ritornare valori vecchi alla lettura. **Schema robusto**: un
+`write_default` per leaf, usando tipi nativi (Integer/Float/Boolean/String).
+Vedi `Core::Settings#read_one`/`#write_one`. Chiave piatta `group.field`.
+
+Pattern al read: booleani salvati con `write_default(..., true)` possono
+ritornare come `1`/`0` in alcune build. Coercion difensiva:
+```ruby
+case default
+when TrueClass, FalseClass
+  return !!v if v.is_a?(TrueClass) || v.is_a?(FalseClass)
+  return v.to_i != 0 if v.is_a?(Numeric)
+end
+```
+
+### ⚠️ `PLUGIN_DIR` via Junction NON risale al repo
+
+`File.expand_path('..', PLUGIN_DIR)` in deploy via Junction risale a
+`%APPDATA%/.../Plugins/`, NON alla cartella di repo. **Bundle gli asset
+DENTRO PLUGIN_DIR** (es. `scene_manager_plus/assets/`). Non usare `..`
+per cercare risorse fuori dalla cartella plugin.
+
+### ⚠️ `view.write_image(:scale_factor)` esiste solo in SU 2020+
+
+Per Line Scale Multiplier su SU 2019 fallback: manipola
+`model.rendering_options['EdgeWidth']` e `['ProfileWidth']` temporaneamente
+prima del batch render, ripristina in `finish` (anche su cancel/errore).
+Funziona solo se lo stile attivo ha edges/profili visibili.
+
+### ⚠️ `view.write_image` per JPG apre la dialog "JPG Image Options"
+
+Senza `compression:` esplicito. Sempre passare `compression: 0.9` (o altro)
+per JPG così l'export è silent.
+
+### ⚠️ Async step chain + multiple Save = on_done chiamato N volte
+
+In un export asincrono (catena di `UI.start_timer`), serve:
+1. `done_fired` (closure) per garantire chiamata singola a `on_done`
+2. `stopped` flag per far ritornare immediatamente i timer già in coda
+3. `@running` module-level per rifiutare export concorrenti
+
+Senza queste guard, click multipli su Cancel o doppio click su Export
+producevano N messagebox finali (uno per immagine in alcuni casi).
+
+### ⚠️ Settings dialog con più Save buttons + push_state
+
+`push_state` riscrive TUTTI i form da storage. Se l'utente modifica Export
+ma clicca per errore il Save di Naming, le modifiche Export non salvate
+vengono cancellate quando setState riscrive i campi. **Soluzioni adottate**:
+1. **Auto-save** su input change per Export/Logo (debounce 350ms su testuali)
+2. `setIfNotFocused` per non sovrascrivere il campo attualmente in editing
+3. Niente più bottoni Save per Export/Logo (hint "Changes are saved automatically.")
+
+Naming mantiene Save/Save & Rename perché ha semantica diversa (preview → apply).
+
+### Smart output dir: Immagini / Superate / NN
+
+Quando `export.output_dir` è vuoto:
+- Caso A: `Immagini/` non esiste accanto al .skp → la crea, esporta lì
+- Caso B: `Immagini/` esiste e ha file → crea `Superate/NN` con NN successivo
+  (zero-padded 2 cifre), SPOSTA i file di `Immagini` lì, poi esporta in `Immagini`
+- Caso C: `Immagini/` esiste vuota → esporta lì
+- Se il .skp non è salvato → fallback al picker manuale
+
+Le note di archivio entrano negli `errors` mostrati nel messagebox finale.
 
 ## Bug noti / risolti
 

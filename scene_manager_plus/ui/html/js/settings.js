@@ -98,13 +98,88 @@
     if (msg) setTimeout(() => { $('#apply-status').textContent = ''; }, 3000);
   }
 
+  function readExport() {
+    return {
+      width:       parseInt($('#export-width').value, 10) || 1920,
+      height:      parseInt($('#export-height').value, 10) || 1080,
+      format:      $('#export-format').value,
+      antialias:   $('#export-antialias').checked,
+      transparent: $('#export-transparent').checked,
+      output_dir:  $('#output-dir').value,
+      line_scale_multiplier: parseFloat($('#export-line-scale').value) || 1.0
+    };
+  }
+  function setIfNotFocused(el, prop, value) {
+    if (!el || shouldSkipField(el)) return;
+    el[prop] = value;
+  }
+  function writeExport(e) {
+    setIfNotFocused($('#export-width'),       'value',   e.width   == null ? 1920 : e.width);
+    setIfNotFocused($('#export-height'),      'value',   e.height  == null ? 1080 : e.height);
+    setIfNotFocused($('#export-format'),      'value',   e.format  || 'png');
+    setIfNotFocused($('#export-antialias'),   'checked', !!e.antialias);
+    setIfNotFocused($('#export-transparent'), 'checked', !!e.transparent);
+    setIfNotFocused($('#output-dir'),         'value',   e.output_dir || '');
+    setIfNotFocused($('#export-line-scale'),  'value',   e.line_scale_multiplier == null ? 2 : e.line_scale_multiplier);
+  }
+
+  function readLogo() {
+    return {
+      enabled:     $('#logo-enabled').checked,
+      use_default: $('#logo-use-default').checked,
+      path:        $('#logo-path').value,
+      width_pct:   parseInt($('#logo-width-pct').value, 10) || 15,
+      offset_x:    parseInt($('#logo-offset-x').value, 10) || 20,
+      offset_y:    parseInt($('#logo-offset-y').value, 10) || 20,
+      opacity:     parseInt($('#logo-opacity').value, 10) || 100
+    };
+  }
+  function writeLogo(l, defaultLogoName) {
+    setIfNotFocused($('#logo-enabled'),     'checked', !!l.enabled);
+    setIfNotFocused($('#logo-use-default'), 'checked', l.use_default !== false);
+    setIfNotFocused($('#logo-path'),        'value',   l.path || '');
+    setIfNotFocused($('#logo-width-pct'),   'value',   (l.width_pct == null ? 15 : l.width_pct));
+    setIfNotFocused($('#logo-offset-x'),    'value',   (l.offset_x == null ? 20 : l.offset_x));
+    setIfNotFocused($('#logo-offset-y'),    'value',   (l.offset_y == null ? 20 : l.offset_y));
+    setIfNotFocused($('#logo-opacity'),     'value',   (l.opacity  == null ? 100 : l.opacity));
+    $('#logo-default-hint').textContent = defaultLogoName
+      ? '(' + defaultLogoName + ')' : '(none bundled)';
+    updateLogoPathRow();
+  }
+  function updateLogoPathRow() {
+    $('#row-logo-path').style.display = $('#logo-use-default').checked ? 'none' : '';
+  }
+
   // ---- Exposed callbacks from Ruby ----
+  // Quando arriva uno state push da Ruby (es. dopo save) NON riscriviamo i
+  // campi che l'utente sta editando: preserva input in-progress e impedisce
+  // la perdita di valori non ancora salvati nei campi adiacenti.
+  function shouldSkipField(el) {
+    return el && document.activeElement === el;
+  }
+
   SMS.setState = function (state) {
     SMS.state = state;
     const naming = (state.settings && state.settings.naming) || {};
+    const exp    = (state.settings && state.settings.export) || {};
+    const logo   = (state.settings && state.settings.logo)   || {};
     writeForm(naming);
+    writeExport(exp);
+    writeLogo(logo, state.default_logo_name);
     requestPreview();
   };
+
+  SMS.setOutputDir = function (path) { if (path) $('#output-dir').value = path; };
+  SMS.setLogoPath  = function (path) { if (path) $('#logo-path').value  = path; };
+
+  function setExportStatus(msg) {
+    $('#export-status').textContent = msg;
+    if (msg) setTimeout(() => { $('#export-status').textContent = ''; }, 2500);
+  }
+  function setLogoStatus(msg) {
+    $('#logo-status').textContent = msg;
+    if (msg) setTimeout(() => { $('#logo-status').textContent = ''; }, 2500);
+  }
 
   SMS.setPreview = function (samples) {
     renderPreview(samples);
@@ -141,6 +216,61 @@
       if (!confirm(msg)) return;
       call('sm_naming_apply', { values: readForm() });
     });
+
+    // Export form: auto-save su qualsiasi change (con piccolo debounce sui
+    // campi testuali per non saturare il bridge mentre l'utente digita).
+    let expSaveTimer = null;
+    function saveExportNow() {
+      call('sm_settings_set', { group: 'export', values: readExport() });
+      setExportStatus('Saved');
+    }
+    function saveExportDebounced() {
+      clearTimeout(expSaveTimer);
+      expSaveTimer = setTimeout(saveExportNow, 350);
+    }
+    ['export-width', 'export-height', 'output-dir', 'export-line-scale'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.addEventListener('input', saveExportDebounced);
+    });
+    ['export-format', 'export-antialias', 'export-transparent'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.addEventListener('change', saveExportNow);
+    });
+    $('#btn-browse-output').addEventListener('click', () => {
+      call('sm_pick_dir', { current: $('#output-dir').value });
+    });
+
+    // Logo form: stesso pattern auto-save.
+    let logoSaveTimer = null;
+    function saveLogoNow() {
+      call('sm_settings_set', { group: 'logo', values: readLogo() });
+      setLogoStatus('Saved');
+    }
+    function saveLogoDebounced() {
+      clearTimeout(logoSaveTimer);
+      logoSaveTimer = setTimeout(saveLogoNow, 350);
+    }
+    ['logo-path', 'logo-width-pct', 'logo-offset-x', 'logo-offset-y', 'logo-opacity'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.addEventListener('input', saveLogoDebounced);
+    });
+    ['logo-enabled', 'logo-use-default'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.addEventListener('change', saveLogoNow);
+    });
+    // UX: spuntare "Use default logo" attiva implicitamente il watermark.
+    // Senza questo collegamento è facile aspettarsi il logo ma vederselo
+    // mancare perché la master "Add watermark on export" è ancora off.
+    $('#logo-use-default').addEventListener('change', () => {
+      if ($('#logo-use-default').checked && !$('#logo-enabled').checked) {
+        $('#logo-enabled').checked = true;
+        saveLogoNow();
+      }
+    });
+    $('#btn-browse-logo').addEventListener('click', () => {
+      call('sm_pick_logo', { current: $('#logo-path').value });
+    });
+    $('#logo-use-default').addEventListener('change', updateLogoPathRow);
 
     call('sm_settings_ready');
   });

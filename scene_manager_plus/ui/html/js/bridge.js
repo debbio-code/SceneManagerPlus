@@ -34,6 +34,8 @@ window.SMBridge = (function () {
     openProperties:  function (id)    { call('sm_open_properties', { id: id }); },
     deferToggle:     function ()      { call('sm_defer_toggle'); },
     generatePreviews:function (ids)   { call('sm_generate_previews', { ids: ids || [] }); },
+    openExport:      function (sel)   { call('sm_open_export', { selected: sel || [] }); },
+    cancelExport:    function ()      { call('sm_export_cancel_running'); },
     log:             function (msg)   { call('sm_log', String(msg)); }
   };
 })();

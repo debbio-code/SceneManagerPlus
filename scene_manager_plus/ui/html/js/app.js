@@ -317,6 +317,19 @@ window.SM = (function () {
         SMBridge.generatePreviews(ids);
       });
     }
+    var btnExport = $('btn-export');
+    if (btnExport) {
+      btnExport.addEventListener('click', function () {
+        SMBridge.openExport(selection.slice());
+      });
+    }
+    var btnCancelExp = $('btn-cancel-export');
+    if (btnCancelExp) {
+      btnCancelExp.addEventListener('click', function () {
+        btnCancelExp.disabled = true;
+        SMBridge.cancelExport();
+      });
+    }
     var btnSettings = $('btn-settings');
     if (btnSettings) {
       btnSettings.addEventListener('click', function () {
@@ -395,9 +408,31 @@ window.SM = (function () {
     }
   }
 
+  function setExportProgress(done, total, name) {
+    var bar = $('progress');
+    var fill = $('progress-fill');
+    var txt = $('progress-text');
+    var cancel = $('btn-cancel-export');
+    if (!bar) return;
+    if (done === null || done === undefined) {
+      bar.classList.add('hidden');
+      fill.classList.remove('indeterminate');
+      fill.style.width = '0%';
+      if (cancel) { cancel.classList.add('hidden'); cancel.disabled = false; }
+      return;
+    }
+    bar.classList.remove('hidden');
+    fill.classList.remove('indeterminate');
+    if (cancel) { cancel.classList.remove('hidden'); cancel.disabled = false; }
+    var pct = (total && total > 0) ? Math.round((done / total) * 100) : 0;
+    fill.style.width = pct + '%';
+    txt.textContent = 'Exporting… ' + done + '/' + total + (name ? '  ' + name : '');
+  }
+
   return {
     setState: setState,
     setPreviewProgress: setPreviewProgress,
+    setExportProgress: setExportProgress,
     setActiveFromNative: setActiveFromNative
   };
 })();

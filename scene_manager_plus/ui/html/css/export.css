@@ -1,0 +1,40 @@
+.muted { color: #888; font-size: 11px; margin-left: 4px; }
+
+.folder-list {
+  margin-top: 6px;
+  margin-left: 22px;
+  padding: 6px 8px;
+  background: #232323;
+  border: 1px solid #1e1e1e;
+  border-radius: 2px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+.folder-list.hidden { display: none; }
+.folder-list .empty { color: #777; font-style: italic; margin: 4px 0; }
+.folder-list label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 0;
+  font-size: 12px;
+  cursor: pointer;
+}
+.folder-list label .count { color: #888; font-size: 11px; margin-left: auto; }
+
+.actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+#out-summary { color: #aaa; font-style: normal; }
+#out-summary code {
+  background: #232323;
+  padding: 1px 5px;
+  border-radius: 2px;
+  color: #4ea1ff;
+  font-family: Consolas, monospace;
+}
+
+input[type="radio"]:disabled + span { color: #777; }

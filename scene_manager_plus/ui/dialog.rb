@@ -46,6 +46,11 @@ module SceneManagerPlus
         warn "[SM+] poll_active_scene: #{e.class}: #{e.message}"
       end
 
+      # Accessor usato da ExportDialog per pushare progress al main dialog.
+      def dialog_handle
+        @dialog
+      end
+
       def html_dir
         File.join(PLUGIN_DIR, 'ui', 'html')
       end
@@ -165,6 +170,15 @@ module SceneManagerPlus
 
         dlg.add_action_callback('sm_open_settings') do |_ctx|
           SettingsDialog.show
+        end
+
+        dlg.add_action_callback('sm_open_export') do |_ctx, payload|
+          data = parse(payload)
+          ExportDialog.show(selected_ids: Array(data['selected']))
+        end
+
+        dlg.add_action_callback('sm_export_cancel_running') do |_ctx|
+          Core::Exporter.request_cancel!
         end
 
         dlg.add_action_callback('sm_open_properties') do |_ctx, payload|

@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Scene Manager+ Export</title>
+  <link rel="stylesheet" href="css/settings.css">
+  <link rel="stylesheet" href="css/export.css">
+</head>
+<body>
+  <div id="export-app">
+    <section class="group">
+      <h2>What to export</h2>
+
+      <div class="row">
+        <label class="check">
+          <input type="radio" name="scope" value="all" checked>
+          <span>All scenes <span id="count-all" class="muted"></span></span>
+        </label>
+      </div>
+      <div class="row">
+        <label class="check" id="row-selected">
+          <input type="radio" name="scope" value="selected" id="rb-selected" disabled>
+          <span>Current selection <span id="count-selected" class="muted"></span></span>
+        </label>
+      </div>
+      <div class="row">
+        <label class="check">
+          <input type="radio" name="scope" value="folders" id="rb-folders">
+          <span>Specific folders…</span>
+        </label>
+      </div>
+
+      <div id="folder-list" class="folder-list hidden">
+        <p class="empty">No folders defined.</p>
+      </div>
+    </section>
+
+    <section class="group">
+      <h2>Output</h2>
+      <p class="hint" id="out-summary">—</p>
+      <p class="hint" style="margin-top:6px;">Change format/size/watermark in <strong>Settings</strong>.</p>
+    </section>
+
+    <div class="actions" style="padding: 0 12px 12px;">
+      <button id="btn-cancel">Cancel</button>
+      <button id="btn-export" class="primary">Export</button>
+    </div>
+  </div>
+
+  <script src="js/export.js"></script>
+</body>
+</html>

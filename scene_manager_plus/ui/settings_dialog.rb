@@ -66,6 +66,7 @@ module SceneManagerPlus
           # data = { group: 'naming'|'export'|'logo', values: {...} }
           group = data['group']
           vals  = data['values'] || {}
+          puts "[SM+] sm_settings_set: group=#{group.inspect} payload_chars=#{payload.to_s.length} vals_keys=#{vals.keys.inspect}"
           Core::Settings.set(group, vals) if group
           push_state
         end
@@ -95,6 +96,37 @@ module SceneManagerPlus
           Dialog.push_state
         end
 
+        dlg.add_action_callback('sm_pick_dir') do |_ctx, payload|
+          data = parse(payload)
+          cur  = data['current'].to_s
+          start_dir = (cur && File.directory?(cur)) ? cur : Dir.home
+          chosen = ::UI.select_directory(title: 'Choose export folder', directory: start_dir)
+          if chosen
+            cfg = Core::Settings.get('export')
+            Core::Settings.set('export', cfg.merge('output_dir' => chosen))
+            dlg.execute_script("window.SMS && SMS.setOutputDir(#{chosen.to_json});")
+          end
+        end
+
+        dlg.add_action_callback('sm_pick_logo') do |_ctx, payload|
+          data = parse(payload)
+          cur  = data['current'].to_s
+          start_dir = (!cur.empty? && File.file?(cur)) ? File.dirname(cur) : Dir.home
+          chosen = ::UI.openpanel('Choose logo PNG', start_dir, 'PNG Files|*.png;*.PNG||')
+          if chosen
+            cfg = Core::Settings.get('logo')
+            # Scegliere un file logo implica voler usarlo come watermark
+            # custom: forziamo enabled=true e use_default=false.
+            Core::Settings.set('logo', cfg.merge(
+              'path'        => chosen,
+              'enabled'     => true,
+              'use_default' => false
+            ))
+            push_state # rinfresca UI con i nuovi flag
+            dlg.execute_script("window.SMS && SMS.setLogoPath(#{chosen.to_json});")
+          end
+        end
+
         dlg.add_action_callback('sm_settings_log') do |_ctx, msg|
           puts "[SM+ Settings UI] #{msg}"
         end
@@ -102,9 +134,11 @@ module SceneManagerPlus
 
       def push_state
         return unless @dialog && @dialog.visible?
+        default_logo = Core::Settings.default_logo_path
         state = {
-          settings:  Core::Settings.all,
-          skp_title: (Sketchup.active_model ? Sketchup.active_model.title.to_s : '')
+          settings:           Core::Settings.all,
+          skp_title:          (Sketchup.active_model ? Sketchup.active_model.title.to_s : ''),
+          default_logo_name:  (default_logo ? File.basename(default_logo) : nil)
         }
         js = "window.SMS && SMS.setState(#{state.to_json});"
         @dialog.execute_script(js)
