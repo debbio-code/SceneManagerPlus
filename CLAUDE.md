@@ -36,7 +36,7 @@ Extra fuori-fase aggiunti in Fase 3:
 | UI | `UI::HtmlDialog` (CEF, SU 2017+) — niente WebDialog legacy |
 | Cartelle | Doppia modalità: solo logiche (default) + bottone "Sync to SketchUp" che applica l'ordine reale alle pagine |
 | Formati export | PNG + JPG |
-| Watermark | PNG: composizione via ChunkyPNG (pure Ruby, embedded in `vendor/`). JPG: fallback overlay 2D temporaneo nella scena, esportato e rimosso |
+| Watermark | Composizione via `Sketchup::ImageRep` (PNG + JPG unificati). ChunkyPNG scartato, niente `vendor/`. Logo bundled in `scene_manager_plus/assets/default_logo.png` |
 | Persistenza cartelle/ordine | Attributi sul `Sketchup.active_model` (vivono col file SKP) |
 | Persistenza settings | `Sketchup.write_default` (per-utente, globale al PC) |
 | Lingua UI | Inglese (UX standard) |
@@ -391,12 +391,12 @@ in Ruby costruiamo `"#{k}?"` per leggere e `"#{k}="` per scrivere.
 - Sync scena attiva nativo → plugin (polling 250ms)
 - ⟳ update-from-view per riga
 
-### ⚠️ Da implementare in Fase 4
+### ✅ Completato in Fase 4
 
 - Batch export PNG/JPG con naming pattern
-- Watermark PNG via ChunkyPNG (embedded in `vendor/`)
-- Watermark JPG fallback (overlay 2D temporaneo)
-- Abilitazione delle sezioni Export e Logo nel Settings dialog (oggi disabled)
+- Watermark unificato via `Sketchup::ImageRep` (ChunkyPNG scartato)
+- Sezioni Export/Logo nel Settings dialog abilitate con auto-save
+- Scope picker (All / Selected / Folders), smart output dir, Line Scale Multiplier
 
 ### ✅ RISOLTO — `dblclick` non scatta in CEF SU 2019 se render ricrea row
 
