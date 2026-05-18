@@ -20,13 +20,27 @@
 
   function log(msg) { call('sm_settings_log', String(msg)); }
 
+  // Coercion-helper: parseInt/parseFloat con `|| fallback` collassano 0 sul
+  // fallback (0 è falsy). Per i numerici che ammettono 0 (offset, opacity 0%,
+  // pad 0, ecc.) serve un check esplicito.
+  function toIntOr(v, fallback) {
+    if (v === '' || v == null) return fallback;
+    var n = parseInt(v, 10);
+    return Number.isFinite(n) ? n : fallback;
+  }
+  function toFloatOr(v, fallback) {
+    if (v === '' || v == null) return fallback;
+    var n = parseFloat(v);
+    return Number.isFinite(n) ? n : fallback;
+  }
+
   // ---- Values from form ----
   function readForm() {
     return {
       enabled: $('#naming-enabled').checked,
       prefix_mode: $('#prefix-mode').value,
       prefix_custom: $('#prefix-custom').value,
-      pad: parseInt($('#pad').value, 10) || 0,
+      pad: toIntOr($('#pad').value, 2),
       separator: $('#separator').value,
       include_scene_name: $('#include-scene-name').checked
     };
@@ -105,13 +119,13 @@
 
   function readExport() {
     return {
-      width:       parseInt($('#export-width').value, 10) || 1920,
-      height:      parseInt($('#export-height').value, 10) || 1080,
+      width:       toIntOr($('#export-width').value, 1920),
+      height:      toIntOr($('#export-height').value, 1080),
       format:      $('#export-format').value,
       antialias:   $('#export-antialias').checked,
       transparent: $('#export-transparent').checked,
       output_dir:  $('#output-dir').value,
-      line_scale_multiplier: parseFloat($('#export-line-scale').value) || 1.0
+      line_scale_multiplier: toFloatOr($('#export-line-scale').value, 1.0)
     };
   }
   function setIfNotFocused(el, prop, value) {
@@ -133,10 +147,10 @@
       enabled:     $('#logo-enabled').checked,
       use_default: $('#logo-use-default').checked,
       path:        $('#logo-path').value,
-      width_pct:   parseInt($('#logo-width-pct').value, 10) || 15,
-      offset_x:    parseInt($('#logo-offset-x').value, 10) || 20,
-      offset_y:    parseInt($('#logo-offset-y').value, 10) || 20,
-      opacity:     parseInt($('#logo-opacity').value, 10) || 100
+      width_pct:   toIntOr($('#logo-width-pct').value, 15),
+      offset_x:    toIntOr($('#logo-offset-x').value, 20),
+      offset_y:    toIntOr($('#logo-offset-y').value, 20),
+      opacity:     toIntOr($('#logo-opacity').value, 100)
     };
   }
   function writeLogo(l, defaultLogoName) {
@@ -202,17 +216,26 @@
   }
 
   document.addEventListener('DOMContentLoaded', () => {
-    ['naming-enabled', 'prefix-mode', 'prefix-custom', 'pad',
-     'separator', 'include-scene-name'].forEach(id => {
-      const el = document.getElementById(id);
-      if (!el) return;
-      el.addEventListener('input', onChange);
-      el.addEventListener('change', onChange);
-    });
-
-    $('#btn-save').addEventListener('click', () => {
+    // Naming form: auto-save (stesso pattern di Export/Logo). Prima usava
+    // un Save manuale ma il flusso era inconsistente: il toggle del checkbox
+    // "Enable" non persisteva, e un push_state collaterale (es. auto-save
+    // Export/Logo durante editing) sovrascriveva i campi non ancora salvati.
+    let namingSaveTimer = null;
+    function saveNamingNow() {
       call('sm_settings_set', { group: 'naming', values: readForm() });
       setStatus('Saved');
+    }
+    function saveNamingDebounced() {
+      clearTimeout(namingSaveTimer);
+      namingSaveTimer = setTimeout(saveNamingNow, 350);
+    }
+    ['prefix-custom', 'pad', 'separator'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.addEventListener('input', () => { onChange(); saveNamingDebounced(); });
+    });
+    ['naming-enabled', 'prefix-mode', 'include-scene-name'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.addEventListener('change', () => { onChange(); saveNamingNow(); });
     });
 
     $('#btn-apply').addEventListener('click', () => {
