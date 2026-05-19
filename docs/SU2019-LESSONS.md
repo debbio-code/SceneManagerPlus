@@ -103,6 +103,62 @@ Mappatura predicate → flag:
 Usare lookup difensivo (`Object.const_defined?`) che prova più nomi e prende
 quello presente.
 
+### `Sketchup::Page#layers` in SU 2019 = "hidden list" legacy, NON "overrides"
+
+Diversamente da come è naturale immaginare (e da come è documentato in
+alcune versioni più recenti), in SU 2019 `page.layers` ritorna **la lista
+dei layer che la pagina vuole tenere nascosti** quando viene attivata.
+Tutti gli altri layer del modello vengono mostrati (sovrascrivendo lo
+stato model-level del layer, finché `use_hidden_layers?` è true).
+
+**Conseguenza per "Add visible tag" del plugin Layers Manager**: quel
+plugin crea un layer globalmente hidden e — per renderlo visibile solo
+nella scena attiva — lo aggiunge a `page.layers` di **tutte le altre
+pagine** tranne quella corrente. Sulla corrente il layer NON è in
+`page.layers` → viene mostrato.
+
+**Conseguenza per `Sketchup::Pages#add`**: la nuova pagina snapshotta lo
+stato *model-level* di ogni layer, ignorando gli "override per-pagina"
+attivi sulla scena selezionata. I tag "Add visible tag" spariscono dalla
+nuova scena.
+
+Per replicare la visibilità *effettiva* della pagina attiva sulla nuova:
+
+```ruby
+if active && active.use_hidden_layers?
+  hidden_on_active = active.layers.to_a
+  model.layers.each do |layer|
+    page.set_visibility(layer, !hidden_on_active.include?(layer))
+  end
+end
+```
+
+(Tentativo errato che è stato fatto e poi corretto: iterare solo
+`active.layers` e fare `set_visibility(layer, !layer.visible?)` — questo
+accende tutti i layer-globalmente-hidden che la pagina vuole tenere
+hidden, esattamente il bug opposto.)
+
+### `model.options['PageOptions']['TransitionTime'] = 0` per batch render
+
+Il vero collo di bottiglia di un batch `pages.selected_page = page` + 
+`view.write_image` è l'**animazione di transizione** tra scene (default
+~1s/scena). Disabilitarla per la durata del batch e ripristinare a fine:
+
+```ruby
+po = model.options['PageOptions']
+saved_t = po['TransitionTime']
+saved_s = po['ShowTransition']
+po['TransitionTime'] = 0
+po['ShowTransition'] = false
+# ... batch ...
+po['TransitionTime'] = saved_t
+po['ShowTransition'] = saved_s
+```
+
+Da solo questo fa ~70-80% del guadagno su un batch di preview. Altri
+fattori (antialias, risoluzione, frequenza yield a CEF) contano molto
+meno.
+
 ### Predicate getter — `use_camera?` NON `use_camera`
 
 I flag di `Sketchup::Page` hanno **getter con `?`** e **setter senza**
@@ -207,6 +263,80 @@ Pattern "pannello che si ricorda di essere aperto":
 
 Il timer 0.5s è importante: a `file_loaded` la UI di SU non è ancora
 pronta a ospitare un HtmlDialog (posizione errata, o crash silenzioso).
+
+### `innerHTML = ''` azzera `scrollTop` del contenitore
+
+Una lista re-renderizzata via `listEl.innerHTML = ''` + append delle nuove
+row PERDE la posizione di scroll: con i figli rimossi il browser non ha
+più nulla da scrollare, `scrollTop` torna a 0, e quando re-appendiamo
+contenuto la scrollbar ricomincia dall'inizio.
+
+**Pattern**: salvare e ripristinare manualmente intorno al re-render:
+
+```js
+function render() {
+  var savedScroll = listEl.scrollTop;
+  listEl.innerHTML = '';
+  // ... append rows
+  listEl.scrollTop = savedScroll;
+}
+```
+
+Sintomo se manca: ogni click che triggera render fa "saltare in cima" una
+lista più lunga della viewport.
+
+### `<img src="file:///...?t=ts">` cache-buster ribumpato a ogni render
+
+Tentazione: usare un cache-buster `?t=Date.now()` sull'URL `<img>` per
+forzare CEF a rileggere il PNG. Se però bumpiamo il timestamp a OGNI
+`setState` (e setState fira dopo ogni edit/rename/reorder), CEF
+ri-richiede il file innumerevoli volte → ogni tanto la richiesta fallisce
+(race con il filesystem, o quirk di CEF su `file://` + query string) e la
+preview "sparisce" finché un altro render non capita di farla ricaricare.
+
+**Pattern**: bumpare il cache-buster SOLO quando i file potrebbero essere
+cambiati davvero. In pratica:
+- al cambio del set di chiavi (es. nuova scena aggiunta con preview), e
+- al segnale di fine-generazione esplicito dal Ruby (`setPreviewProgress(null, null)`),
+  per il caso di rigenerazione che riscrive lo STESSO uid con contenuto
+  nuovo (signature di chiavi invariata).
+
+Tra un'operazione e l'altra l'URL resta identico → CEF tiene tutto in
+cache, niente fetch ripetuti.
+
+### Doppia rilevazione `dblclick` (manuale + delegation) → race
+
+Se si usa la rilevazione manuale del doppio click (necessaria perché CEF
+SU 2019 non emette `dblclick` se la row viene ricreata tra i due click —
+vedi nota sopra), **non aggiungere ANCHE un listener `dblclick` su un
+contenitore stabile come `listEl`**: il secondo click triggera entrambi
+gli handler, il callback viene chiamato due volte di fila.
+
+Sintomo concreto: `openProperties(id)` chiamato due volte rapidamente →
+prima call crea l'HtmlDialog ma il JS di CEF non è ancora pronto, seconda
+call trova `@dialog.visible? === true` e fa `execute_script(setState(...))`
+ma `window.SMP` è ancora `undefined` → il primo setState va perso → il
+dialog mostra il titolo iniziale statico (`—`) o resta su uno stato
+precedente.
+
+### `setState` con state vuoto NON deve azzerare la UI esistente
+
+Pattern difensivo per dialog che ricevono push_state da Ruby: se arriva
+uno state senza scene/payload (race in apertura, o scena cancellata),
+**non sovrascrivere** i campi correnti se ne avevamo di validi. Solo se
+non avevamo niente, mostrare "scene not found".
+
+```js
+SMP.setState = function (state) {
+  const s = state && state.scene;
+  if (!s) {
+    if (SMP.state && SMP.state.scene) return; // race: ignora
+    // ... mostra "not found"
+    return;
+  }
+  // ... applica
+};
+```
 
 ### Intercettare click su sub-element prima di selezione/drag
 

@@ -69,9 +69,14 @@
   }
 
   SMP.setState = function (state) {
-    SMP.state = state;
     const s = state && state.scene;
     if (!s) {
+      // Stato vuoto: può capitare se push_state arriva con @scene_id non
+      // ancora risolto a una pagina, in race con apertura dialog. Se avevamo
+      // uno stato valido prima, non sovrascriviamo i campi a vuoto. Se non
+      // avevamo nulla, mostriamo "scene not found".
+      if (SMP.state && SMP.state.scene) return;
+      SMP.state = state;
       $('#scene-title').textContent = '(scene not found)';
       $('#prop-name').value = '';
       $('#prop-desc').value = '';
@@ -79,6 +84,7 @@
       $('#btn-update-view').disabled = true;
       return;
     }
+    SMP.state = state;
     $('#scene-title').textContent = s.name || '(unnamed)';
     // Non sovrascrivere il campo se l'utente sta digitando in quel momento
     const nameEl = $('#prop-name');

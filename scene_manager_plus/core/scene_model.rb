@@ -292,6 +292,56 @@ module SceneManagerPlus
         true
       end
 
+      # Crea una nuova scena dalla vista corrente (come "Add Scene" nativo).
+      # Anche in defer mode crea immediatamente: pages.add è un'operazione SU
+      # che dipende dallo stato corrente del modello/camera.
+      def add_from_view(name = nil)
+        m = model
+        return nil unless m
+        active = m.pages.selected_page
+        m.start_operation('SM+ New scene', true)
+        begin
+          page = m.pages.add(name.to_s)
+
+          # Allinea visibilità layer della nuova scena a quella *effettiva*
+          # della scena attiva. In SU 2019 `Page#layers` ritorna la lista
+          # dei layer HIDDEN dalla pagina (semantica legacy: la pagina ha
+          # un set di layer da spegnere; tutti gli altri vengono mostrati
+          # quando use_hidden_layers? è true — indipendentemente dallo
+          # stato model-level del layer).
+          #
+          # Il Layer Manager "Add visible tag" sfrutta proprio questo:
+          # crea il layer globalmente hidden e lo aggiunge alla hidden-list
+          # di TUTTE le pagine ESISTENTI tranne quella corrente. Sulla
+          # corrente quindi il layer è visibile.
+          #
+          # SU's `pages.add` però snapshotta lo stato model-level del
+          # layer, non quello effettivo della pagina attiva — per questo i
+          # tag "Add visible tag" sparivano. Soluzione: per ogni layer del
+          # modello, replichiamo sul nuovo page la stessa visibilità
+          # *effettiva* della pagina attiva (hidden se in active.layers,
+          # visibile altrimenti).
+          if active && active.use_hidden_layers?
+            hidden_on_active = active.layers.to_a
+            m.layers.each do |layer|
+              begin
+                page.set_visibility(layer, !hidden_on_active.include?(layer))
+              rescue => e
+                warn "[SM+] add_from_view: set_visibility failed for #{layer.name rescue '?'}: #{e.message}"
+              end
+            end
+          end
+
+          page_id(page) # ensure uid attribute exists
+          m.commit_operation
+          page
+        rescue => e
+          m.abort_operation
+          warn "[SM+] add_from_view: #{e.class}: #{e.message}"
+          nil
+        end
+      end
+
       def select_page(id)
         p = find_by_id(id)
         return false unless p

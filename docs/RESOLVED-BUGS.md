@@ -142,6 +142,85 @@ soluzione (`setIfNotFocused`) applicata a `writeExport`/`writeLogo` da
 subito; l'estensione a `writeForm` è arrivata dopo, quando l'utente ha
 segnalato lo stesso pattern sulla sezione Naming.
 
+## Fase 4+ — UX polish
+
+### Preview thumbnail "sparivano ogni tanto"
+
+**Sintomo**: dopo un'operazione qualsiasi nel pannello (rename, reorder,
+update from view, …) alcune o tutte le thumbnail scena diventavano
+broken/vuote. Toggling thumbs off/on a volte le faceva tornare, altre
+volte serviva rigenerare.
+
+**Causa**: `state.preview_ts = Date.now()` veniva ribumpato a ogni
+`setState`. L'`<img src="file:///.../X.png?t=newTs">` cambiava URL a
+ogni render → CEF ri-richiedeva il PNG ogni volta, e la richiesta
+ripetuta su `file://` con query string in CEF SU 2019 falliva
+intermittentemente (filesystem race / quirk noto).
+
+**Fix**: bumpare `preview_ts` solo quando (a) il set di chiavi della
+mappa previews cambia, o (b) arriva il segnale `setPreviewProgress(null,
+null)` di fine-rigenerazione (gestisce il caso "stessi uid, contenuto
+nuovo"). Tra le altre operazioni l'URL resta identico, CEF tiene la
+cache, niente fetch ripetuti.
+
+### Doppio click apriva Properties senza nome scena
+
+**Sintomo**: a volte (non sempre) il doppio click su una scena apriva il
+dialog Properties con il titolo iniziale `—` invece del nome della scena.
+
+**Causa**: c'erano DUE handler che chiamavano `openProperties(id)` —
+rilevazione manuale del dblclick in `onRowClick` (necessaria perché CEF
+non emette `dblclick` se la row viene ricreata tra i click) e un
+listener `dblclick` su `listEl` aggiunto come "fallback". Il secondo
+faceva chiamare `openProperties` di nuovo a millisecondi di distanza
+dalla prima call. La seconda call trovava `@dialog.visible? === true` e
+chiamava `execute_script("window.SMP && SMP.setState(...)")` PRIMA che
+il JS di CEF fosse caricato → `window.SMP` undefined → il primo setState
+si perdeva → il titolo restava al valore statico dell'HTML.
+
+**Fix**: rimosso il listener `dblclick` su `listEl` (la rilevazione
+manuale è sufficiente). Aggiunto un fallback in `SMP.setState`: se
+arriva uno state vuoto e ne avevamo uno valido, ignora invece di
+azzerare la UI.
+
+### Click su una scena faceva saltare la lista in cima
+
+**Sintomo**: con la finestra abbastanza corta da non mostrare tutte le
+scene, cliccare su una qualsiasi scena scrollava la lista in cima.
+
+**Causa**: `render()` fa `listEl.innerHTML = ''` per ricostruire la
+lista — rimuovere tutti i figli azzera lo `scrollTop` del contenitore
+(non c'è più nulla da scrollare). Quando re-appendevamo le row, la
+scrollbar ricominciava da 0.
+
+**Fix**: salvare `listEl.scrollTop` all'inizio di `render()` e
+ripristinarlo dopo l'append. Generale per qualsiasi lista
+re-renderizzata via innerHTML.
+
+### Nuove scene perdevano i tag "Add visible tag"
+
+**Sintomo**: creando una nuova scena (sia dal pannello nativo SU sia dal
+bottone del plugin), i tag creati col plugin Layers Manager via "Add
+visible tag" risultavano spenti, anche se a video erano accesi sulla
+scena attiva.
+
+**Causa**: `pages.add` snapshotta lo stato model-level dei layer, non
+quello effettivo del viewport (che include gli override per-pagina della
+scena attiva). I tag "Add visible tag" sono globalmente hidden e visibili
+solo via override → SU li perde nello snapshot.
+
+**Tentativo errato**: iterare `active.layers` e fare `set_visibility(layer,
+!layer.visible?)`. In SU 2019 `page.layers` è la lista degli HIDDEN per
+quella pagina (non degli "override generici"), quindi questa logica
+accendeva tutti i layer-globalmente-hidden che la pagina intendeva
+nascondere → risultato: nuova scena con tutti i layer ON tranne quelli
+"Add visible tag" (caso peggiore del bug originale).
+
+**Fix corretto**: per ogni `model.layers`, `new_page.set_visibility(layer,
+!active.layers.include?(layer))`. Si replica la visibilità effettiva
+calcolata dalla hidden-list. Vedi `SU2019-LESSONS.md` sezione
+`Sketchup::Page#layers` per la spiegazione completa.
+
 ---
 
 ## Potenziali bug aperti (osservati, non riproducibili in modo affidabile)

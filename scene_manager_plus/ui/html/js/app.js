@@ -1,6 +1,8 @@
 window.__SM_BUILD__ = 'phase2b-2';
 window.SM = (function () {
   var state = { scenes: [], tree: [], folders: [], flag_keys: [], previews: {} };
+  var lastPreviewSig = '';
+  var lastPreviewTs  = 0;
   var selection = []; // array di scene id
   var anchorId  = null; // ultimo id cliccato (per shift-range)
   var pendingCollapseId = null; // id su cui collassare la selezione se mouseup senza drag
@@ -18,7 +20,19 @@ window.SM = (function () {
     if (!state.tree)   state.tree   = [];
     if (!state.flag_keys) state.flag_keys = [];
     if (!state.previews) state.previews = {};
-    state.preview_ts = Date.now();
+    // preview_ts viene usato come cache-buster nell'<img src>. Bumparlo a
+    // ogni setState (cosa che facevamo prima) forzava CEF a ri-richiedere
+    // ogni PNG dopo OGNI operazione (rename, reorder, update_from_view,
+    // ecc.): la ri-richiesta a volte falliva e la preview spariva
+    // "ogni tanto". Ora bumpiamo solo quando l'insieme dei PNG cambia
+    // davvero (nuova generazione → cambia il set di chiavi). Così l'URL
+    // dell'<img> resta stabile tra render e CEF tiene tutto in cache.
+    var sig = Object.keys(state.previews).sort().join('|');
+    if (sig !== lastPreviewSig) {
+      lastPreviewTs  = Date.now();
+      lastPreviewSig = sig;
+    }
+    state.preview_ts = lastPreviewTs;
     render();
     var info = state.model_info || {};
     var statusBits = [state.scenes.length + ' scenes'];
@@ -47,6 +61,11 @@ window.SM = (function () {
       bar.classList.add('hidden');
       fill.classList.remove('indeterminate');
       fill.style.width = '0%';
+      // Generazione completata: forza il bump del cache-buster anche se il
+      // set di uid è invariato (PNG riscritti con stesso nome ma contenuto
+      // nuovo → senza questo, CEF servirebbe ancora la versione cached).
+      lastPreviewTs  = Date.now();
+      lastPreviewSig = '__force_' + lastPreviewTs;
       return;
     }
     bar.classList.remove('hidden');
@@ -116,7 +135,168 @@ window.SM = (function () {
       '<span class="name"></span>';
     row.querySelector('.name').textContent = scene.name;
     row.addEventListener('mousedown', function (e) { onRowClick(e, scene.id); });
+    row.addEventListener('contextmenu', function (e) {
+      e.preventDefault();
+      if (selection.indexOf(scene.id) === -1) {
+        selection = [scene.id];
+        anchorId = scene.id;
+        render();
+        if (!state.deferred) SMBridge.selectPage(scene.id);
+      }
+      showContextMenu(e.clientX, e.clientY, scene.id);
+    });
     return row;
+  }
+
+  // Scrolla la row al centro solo se non già completamente visibile.
+  function scrollRowIntoCenter(id) {
+    if (!listEl || !id) return;
+    var row = listEl.querySelector('.scene-row[data-id="' + id + '"]');
+    if (!row) return;
+    var rRect = row.getBoundingClientRect();
+    var lRect = listEl.getBoundingClientRect();
+    if (rRect.top < lRect.top || rRect.bottom > lRect.bottom) {
+      try { row.scrollIntoView({ block: 'center' }); } catch (e) {}
+    }
+  }
+
+  // Context menu (tasto destro su scena)
+  function hideContextMenu() {
+    var m = document.getElementById('sm-ctx-menu');
+    if (m) m.parentNode.removeChild(m);
+    document.removeEventListener('mousedown', onDocMouseDownCloseMenu, true);
+    window.removeEventListener('blur', hideContextMenu);
+  }
+  function onDocMouseDownCloseMenu(e) {
+    var m = document.getElementById('sm-ctx-menu');
+    if (m && !m.contains(e.target)) hideContextMenu();
+  }
+  function showContextMenu(x, y, sceneId) {
+    hideContextMenu();
+    var menu = document.createElement('div');
+    menu.className = 'context-menu';
+    menu.id = 'sm-ctx-menu';
+    var item = document.createElement('div');
+    item.className = 'ctx-item';
+    item.textContent = 'Rename';
+    item.addEventListener('click', function () {
+      hideContextMenu();
+      startInlineRename(sceneId);
+    });
+    menu.appendChild(item);
+    document.body.appendChild(menu);
+    // Posiziona dentro la viewport
+    var mw = menu.offsetWidth, mh = menu.offsetHeight;
+    var vw = window.innerWidth, vh = window.innerHeight;
+    if (x + mw > vw) x = Math.max(0, vw - mw - 2);
+    if (y + mh > vh) y = Math.max(0, vh - mh - 2);
+    menu.style.left = x + 'px';
+    menu.style.top  = y + 'px';
+    setTimeout(function () {
+      document.addEventListener('mousedown', onDocMouseDownCloseMenu, true);
+      window.addEventListener('blur', hideContextMenu);
+    }, 0);
+  }
+
+  // Rinomina inline dentro la row.
+  function startInlineRename(id) {
+    var row = listEl && listEl.querySelector('.scene-row[data-id="' + id + '"]');
+    if (!row) return;
+    var nameEl = row.querySelector('.name');
+    if (!nameEl) return;
+    var current = nameEl.textContent;
+    nameEl.textContent = '';
+    var input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'rename-input';
+    input.value = current;
+    nameEl.appendChild(input);
+    input.focus();
+    input.select();
+    var done = false;
+    function commit() {
+      if (done) return;
+      done = true;
+      var v = input.value.trim();
+      if (v && v !== current) {
+        SMBridge.updatePage({ id: id, name: v });
+      } else {
+        render();
+      }
+    }
+    function cancel() {
+      if (done) return;
+      done = true;
+      render();
+    }
+    input.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter')      { e.preventDefault(); commit(); }
+      else if (e.key === 'Escape'){ e.preventDefault(); cancel(); }
+      e.stopPropagation();
+    });
+    input.addEventListener('blur', commit);
+    input.addEventListener('mousedown', function (e) { e.stopPropagation(); });
+    input.addEventListener('click',     function (e) { e.stopPropagation(); });
+    input.addEventListener('dblclick',  function (e) { e.stopPropagation(); });
+  }
+
+  // Mappa parent->siblings (ordinati). 'root' = lista mista cartelle/scene root.
+  function buildSiblingMap() {
+    var map = { root: [] };
+    state.tree.forEach(function (item) {
+      map.root.push(item.id);
+      if (item.kind === 'folder') {
+        map[item.id] = item.scenes.map(function (s) { return s.id; });
+      }
+    });
+    return map;
+  }
+  function findParentOf(id) {
+    for (var i = 0; i < state.tree.length; i++) {
+      var item = state.tree[i];
+      if (item.id === id) return 'root';
+      if (item.kind === 'folder') {
+        for (var j = 0; j < item.scenes.length; j++) {
+          if (item.scenes[j].id === id) return item.id;
+        }
+      }
+    }
+    return null;
+  }
+
+  // Sposta su/giù (delta = -1 o +1) la selezione di scene. Richiede che
+  // tutte le scene selezionate stiano sotto lo stesso parent e siano
+  // contigue nell'ordine dei sibling: altrimenti no-op (silenziosamente).
+  function moveSelection(delta) {
+    if (!selection.length) return;
+    var sib = buildSiblingMap();
+    var parents = {};
+    selection.forEach(function (id) {
+      var p = findParentOf(id);
+      if (p == null) return;
+      (parents[p] = parents[p] || []).push(id);
+    });
+    var pKeys = Object.keys(parents);
+    if (pKeys.length !== 1) return;
+    var parent = pKeys[0];
+    var siblings = sib[parent] || [];
+    var indices = parents[parent].map(function (id) { return siblings.indexOf(id); })
+                                 .filter(function (i) { return i >= 0; })
+                                 .sort(function (a, b) { return a - b; });
+    if (!indices.length) return;
+    var minI = indices[0], maxI = indices[indices.length - 1];
+    if (maxI - minI + 1 !== indices.length) return; // non contigua
+    var movingIds = siblings.slice(minI, maxI + 1);
+    var beforeId;
+    if (delta < 0) {
+      if (minI === 0) return;
+      beforeId = siblings[minI - 1];
+    } else {
+      if (maxI >= siblings.length - 1) return;
+      var afterIdx = maxI + 2;
+      beforeId = afterIdx < siblings.length ? siblings[afterIdx] : null;
+    }
+    SMBridge.reorder(movingIds, beforeId, parent === 'root' ? null : parent);
   }
 
   function makeFolderHeader(folder) {
@@ -158,6 +338,11 @@ window.SM = (function () {
   }
 
   function render() {
+    // Preserva lo scroll: innerHTML='' rimuove i figli e di fatto azzera
+    // lo scrollTop del contenitore. Senza questo, ogni selezione (che
+    // chiama render()) faceva saltare la lista in cima se la finestra era
+    // più corta del contenuto.
+    var savedScroll = listEl.scrollTop;
     listEl.innerHTML = '';
     if (!state.tree || state.tree.length === 0) {
       var info = state.model_info || {};
@@ -189,6 +374,8 @@ window.SM = (function () {
         listEl.appendChild(makeSceneRow(item, counter, 'root'));
       }
     });
+    // Ripristina lo scroll dopo aver ricostruito il contenuto.
+    listEl.scrollTop = savedScroll;
   }
 
   function indexOfId(id) {
@@ -280,6 +467,10 @@ window.SM = (function () {
     statusEl      = $('status');
 
     $('btn-refresh').addEventListener('click', function () { SMBridge.refresh(); });
+    var btnNewScene = $('btn-new-scene');
+    if (btnNewScene) {
+      btnNewScene.addEventListener('click', function () { SMBridge.newSceneFromView(); });
+    }
     $('btn-new-folder').addEventListener('click', function () {
       var n = window.prompt('Folder name:', 'New folder');
       if (n && n.trim()) SMBridge.folderCreate(n.trim());
@@ -369,13 +560,12 @@ window.SM = (function () {
     }
     listEl.addEventListener('mouseup', onContainerMouseUp);
 
-    // Dblclick via delegation: render() ricrea le row, quindi un listener sul row
-    // non viene preservato tra primo e secondo click. Il listEl invece è stabile.
-    listEl.addEventListener('dblclick', function (e) {
-      var row = e.target.closest && e.target.closest('.scene-row');
-      if (!row || !row.dataset || !row.dataset.id) return;
-      SMBridge.openProperties(row.dataset.id);
-    });
+    // NB: la rilevazione del doppio click avviene in onRowClick (manuale,
+    // controllando lastClickId/lastClickTs). Niente listener `dblclick` qui:
+    // un secondo handler causava openProperties() doppio e race su show_for
+    // (talvolta il dialog si apriva senza nome scena perché push_state
+    // arrivava prima che il JS fosse pronto, e la seconda chiamata trovava
+    // @dialog.visible? === true ma window.SMP ancora undefined).
 
     // Click sull'icona "update scene" per riga (delegation, capture):
     // ferma propagazione così non triggera selezione né drag.
@@ -396,6 +586,19 @@ window.SM = (function () {
     // (cartella aperta → in fila, cartella chiusa → saltata). Bind su document
     // così funziona ovunque il focus stia dentro la finestra. Si esce dal
     // gestore se l'utente sta digitando in un campo testuale.
+    // ArrowUp / ArrowDown: sposta la selezione su/giù nell'ordine logico.
+    // Funziona sia per scene a root sia per scene dentro la stessa cartella.
+    // Selezione multipla supportata solo se contigua sotto lo stesso parent.
+    document.addEventListener('keydown', function (e) {
+      if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+      var t = document.activeElement;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+      if (!selection.length) return;
+      e.preventDefault();
+      e.stopPropagation();
+      moveSelection(e.key === 'ArrowDown' ? +1 : -1);
+    });
+
     document.addEventListener('keydown', function (e) {
       var k = e.key;
       if (k !== 'PageUp' && k !== 'PageDown' && k !== 'Home' && k !== 'End') return;
@@ -471,11 +674,6 @@ window.SM = (function () {
     selection = [uid];
     anchorId  = uid;
     render();
-    // Scrolla la riga in vista
-    var row = listEl && listEl.querySelector('.scene-row[data-id="' + uid + '"]');
-    if (row && row.scrollIntoView) {
-      try { row.scrollIntoView({ block: 'nearest' }); } catch (e) {}
-    }
   }
 
   function setExportProgress(done, total, name) {

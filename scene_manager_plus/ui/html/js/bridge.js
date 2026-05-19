@@ -27,6 +27,7 @@ window.SMBridge = (function () {
     updatePage:      function (data)  { call('sm_update_page', data); },
     updateFromView:  function (id)    { call('sm_update_from_view', { id: id }); },
     deleteScenes:    function (ids)   { call('sm_delete', { ids: ids }); },
+    newSceneFromView:function ()      { call('sm_new_scene_from_view'); },
     folderCreate:    function (name)  { call('sm_folder_create', { name: name }); },
     folderUpdate:    function (data)  { call('sm_folder_update', data); },
     folderDelete:    function (id)    { call('sm_folder_delete', { id: id }); },

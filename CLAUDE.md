@@ -38,7 +38,10 @@ Feature aggiunte fuori-fase (Fase 3):
 |---|---|
 | UI | `UI::HtmlDialog` (CEF, SU 2017+) — niente WebDialog legacy |
 | Stile finestra principale | `STYLE_UTILITY` (palette sempre sopra viewport, posizione+dimensione persistite affidabilmente — `STYLE_DIALOG` non salva la posizione su SU 2019). Auto-riaprire all'avvio se era aperta (flag `main_dialog_open` via `write_default`, ri-show con timer 0.5s dopo `file_loaded`). Settings/Properties restano `STYLE_DIALOG` (sono modali-ish). |
-| Navigazione tastiera | `PageUp`/`PageDown`/`Home`/`End` quando focus nel plugin → scorre l'ordine logico visibile (cartelle chiuse saltate). Non c'è modo pulito in SU 2019 di hijacker i tasti globalmente, quindi fuori dal plugin resta il comportamento nativo. |
+| Navigazione tastiera | `PageUp`/`PageDown`/`Home`/`End` scorrono la selezione lungo l'ordine logico visibile (cartelle chiuse saltate). `ArrowUp`/`ArrowDown` invece **spostano** la selezione (singola o multi-contigua sotto lo stesso parent) nell'ordine logico. Non c'è modo pulito in SU 2019 di hijacker i tasti globalmente, quindi fuori dal plugin resta il comportamento nativo. |
+| Nuova scena da vista | Icona toolbar (📷+) → `SceneModel.add_from_view`. Replica gli override di visibilità layer della pagina attiva (vedi sotto, "Add visible tag"). |
+| Rinomina inline | Right-click su scena → context menu → "Rename" → input nella row, Enter = commit, Esc/blur-senza-modifiche = annulla. |
+| Preview thumbnail | 300×150 (stesso aspect ratio dell'export finale). Durante batch generation: transizioni scena disabilitate, antialias off, yield a CEF batched ogni ~total/25 scene. Cache-buster `?t=` bumpato solo a cambio set chiavi o fine-generazione, non a ogni `setState`. |
 | Cartelle | Solo logiche (ordine in `model.attribute`), no sync alle pagine native (vedi sotto) |
 | Formati export | PNG + JPG |
 | Watermark | Composizione via `Sketchup::ImageRep` (PNG + JPG unificati). ChunkyPNG scartato, niente `vendor/`. Logo bundled in `scene_manager_plus/assets/default_logo.png` |
@@ -99,6 +102,25 @@ via API 2019), e non strettamente necessaria per il workflow dell'utente.
 
 Ogni pagina riceve un `uid` stabile salvato come attributo `SceneManagerPlus/uid`,
 così l'ordine logico e le cartelle sopravvivono a rinomine.
+
+## Compatibilità con "Add visible tag" del plugin Layers Manager
+
+Il plugin Layers Manager espone "Add visible tag" — un tag visibile solo
+nella scena attiva, ottenuto creando il layer globalmente hidden e
+aggiungendolo alla hidden-list (`page.layers`) di tutte le altre pagine
+esistenti. `Sketchup::Pages#add` di SU snapshotta solo la visibilità a
+livello modello, quindi questi tag spariscono dalle nuove scene.
+
+`SceneModel.add_from_view` risolve questo: cattura `selected_page` prima
+di `pages.add`, poi per ogni `model.layers` chiama
+`new_page.set_visibility(layer, !active.layers.include?(layer))` —
+allinea la visibilità *effettiva* della nuova scena a quella che il
+viewport sta renderizzando. Vedi `docs/SU2019-LESSONS.md` (sezione
+"Sketchup::Page#layers in SU 2019") per la semantica esatta — è
+controintuitiva (è la lista degli hidden, non degli "override").
+
+Se in futuro aggiungiamo altri punti che creano scene da view (es.
+"Duplicate scene"), riusare la stessa logica.
 
 ## Bridge Ruby ↔ JavaScript
 

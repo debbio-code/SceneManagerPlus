@@ -237,6 +237,11 @@ module SceneManagerPlus
           push_state
         end
 
+        dlg.add_action_callback('sm_new_scene_from_view') do |_ctx|
+          Core::SceneModel.add_from_view
+          push_state
+        end
+
         dlg.add_action_callback('sm_folder_create') do |_ctx, payload|
           data = parse(payload)
           Core::Folders.create(name: data['name'] || 'New folder')

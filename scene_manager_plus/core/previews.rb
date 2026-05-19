@@ -7,8 +7,8 @@ module SceneManagerPlus
     module Previews
       module_function
 
-      WIDTH        = 480
-      HEIGHT       = 300
+      WIDTH        = 300
+      HEIGHT       = 150
 
       # Root persistente cross-platform. ~/.scene_manager_plus/previews/<model_guid>/<uid>.png
       ROOT = File.join(Dir.home, '.scene_manager_plus', 'previews').freeze
@@ -50,6 +50,10 @@ module SceneManagerPlus
       # caricata. Idempotente.
       def refresh_from_disk!
         key = model_key
+        # 'no_model' è uno stato transitorio (callback Ruby con active_model
+        # momentaneamente nil): non azzeriamo la cache valida, altrimenti le
+        # preview spariscono "a tratti" durante operazioni concorrenti.
+        return if key == 'no_model'
         return if @cache_model == key && !@cache.empty?
         @cache_model = key
         @cache       = {}
@@ -62,6 +66,18 @@ module SceneManagerPlus
         puts "[SM+] previews cache loaded from disk: #{@cache.size} entries for model_key=#{key}"
       end
 
+      # Encoding file:/// per CEF: spazi e caratteri non-ASCII nei path
+      # (es. utente con accenti in C:\Users\...) facevano fallire il load
+      # dell'immagine in modo intermittente. Encodiamo tutto tranne i char
+      # safe e i separatori di path.
+      def file_url(path)
+        normalized = path.to_s.gsub('\\', '/')
+        encoded = normalized.gsub(/([^A-Za-z0-9_\-.\/:~])/) { |c|
+          c.bytes.map { |b| '%%%02X' % b }.join
+        }
+        'file:///' + encoded
+      end
+
       def path_for(uid)
         refresh_from_disk!
         @cache[uid]
@@ -72,7 +88,7 @@ module SceneManagerPlus
         refresh_from_disk!
         @cache.each_with_object({}) do |(uid, p), h|
           next unless p && File.file?(p)
-          h[uid] = "file:///" + p.gsub('\\', '/')
+          h[uid] = file_url(p)
         end
       end
 
@@ -111,19 +127,44 @@ module SceneManagerPlus
         i           = 0
         count       = 0
 
+        # Disabilita l'animazione di transizione tra scene durante la
+        # generazione: di default SU anima ogni `pages.selected_page=` (in
+        # genere ~1s/scena), che è il collo di bottiglia principale. Salviamo
+        # i valori originali per ripristinarli a fine generazione.
+        page_opts        = model.options['PageOptions']
+        saved_trans_time = page_opts ? page_opts['TransitionTime'] : nil
+        saved_show_trans = page_opts ? page_opts['ShowTransition'] : nil
+        if page_opts
+          page_opts['TransitionTime'] = 0
+          page_opts['ShowTransition'] = false unless saved_show_trans.nil?
+        end
+
+        finish = lambda do
+          begin
+            if prev_page
+              pages.selected_page = prev_page
+            else
+              view.camera = prev_camera
+            end
+          rescue => e
+            warn "[SM+] Preview restore context failed: #{e.message}"
+          end
+          if page_opts
+            page_opts['TransitionTime'] = saved_trans_time unless saved_trans_time.nil?
+            page_opts['ShowTransition'] = saved_show_trans unless saved_show_trans.nil?
+          end
+          on_done&.call(count)
+        end
+
+        # Aggiorna la progress bar in CEF ogni PROGRESS_EVERY scene, non a
+        # ogni iterazione: lo `execute_script` su HtmlDialog ha overhead
+        # apprezzabile su batch grandi. La prima/ultima scena le riportiamo
+        # sempre.
+        progress_every = [1, (total / 25.0).ceil].max
+
         step = lambda do
           if i >= total
-            # Ripristina contesto
-            begin
-              if prev_page
-                pages.selected_page = prev_page
-              else
-                view.camera = prev_camera
-              end
-            rescue => e
-              warn "[SM+] Preview restore context failed: #{e.message}"
-            end
-            on_done&.call(count)
+            finish.call
             next
           end
 
@@ -137,7 +178,7 @@ module SceneManagerPlus
               filename:    path,
               width:       WIDTH,
               height:      HEIGHT,
-              antialias:   true,
+              antialias:   false, # thumbnail piccola: l'AA fa poca differenza
               transparent: false
             )
             @cache[uid] = path
@@ -146,10 +187,14 @@ module SceneManagerPlus
             warn "[SM+] Preview generate failed for #{uid}: #{e.class}: #{e.message}"
           end
 
-          on_progress&.call(i, total, uid)
-          # Cedi il controllo a SU/CEF per ridipingere prima della scena
-          # successiva. delay 0 = appena possibile.
-          ::UI.start_timer(0.01, false) { step.call }
+          if i == 1 || i == total || (i % progress_every).zero?
+            on_progress&.call(i, total, uid)
+            # Cedi il controllo a CEF SOLO quando aggiorniamo la progress:
+            # un UI.start_timer per ogni scena aggiungeva ~10ms × N scene.
+            ::UI.start_timer(0, false) { step.call }
+          else
+            step.call # prosegui sincrono, niente yield
+          end
         end
 
         step.call
