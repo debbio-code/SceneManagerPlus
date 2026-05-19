@@ -182,11 +182,28 @@
     const naming = (state.settings && state.settings.naming) || {};
     const exp    = (state.settings && state.settings.export) || {};
     const logo   = (state.settings && state.settings.logo)   || {};
+    const ui     = (state.settings && state.settings.ui)     || {};
     writeForm(naming);
     writeExport(exp);
     writeLogo(logo, state.default_logo_name);
+    writeUi(ui);
     requestPreview();
   };
+
+  function readUi() {
+    return {
+      show_order_banner: $('#ui-show-order-banner').checked
+    };
+  }
+  function writeUi(u) {
+    setIfNotFocused($('#ui-show-order-banner'), 'checked', u.show_order_banner !== false);
+  }
+  function setUiStatus(msg) {
+    const el = $('#ui-status');
+    if (!el) return;
+    el.textContent = msg;
+    if (msg) setTimeout(() => { el.textContent = ''; }, 2500);
+  }
 
   SMS.setOutputDir = function (path) { if (path) $('#output-dir').value = path; };
   SMS.setLogoPath  = function (path) { if (path) $('#logo-path').value  = path; };
@@ -299,6 +316,14 @@
       call('sm_pick_logo', { current: $('#logo-path').value });
     });
     $('#logo-use-default').addEventListener('change', updateLogoPathRow);
+
+    // UI form: auto-save su change checkbox.
+    function saveUiNow() {
+      call('sm_settings_set', { group: 'ui', values: readUi() });
+      setUiStatus('Saved');
+    }
+    const uiBanner = document.getElementById('ui-show-order-banner');
+    if (uiBanner) uiBanner.addEventListener('change', saveUiNow);
 
     call('sm_settings_ready');
   });

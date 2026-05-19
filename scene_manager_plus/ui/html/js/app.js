@@ -46,6 +46,29 @@ window.SM = (function () {
     }
     setStatus(statusBits.join(' · '));
     updateDeferButton();
+    updateOrderBanner();
+  }
+
+  function updateOrderBanner() {
+    var el = $('banner-order');
+    if (!el) return;
+    if (state.native_order_divergent) {
+      el.classList.remove('hidden');
+    } else {
+      el.classList.add('hidden');
+    }
+  }
+
+  function onBannerOrderClick() {
+    alert(
+      'SceneTabs order out of sync\n\n' +
+      'The native SketchUp scene tabs are showing the scenes in creation order, ' +
+      'which no longer matches the order in this plugin.\n\n' +
+      'SketchUp 2019 does not expose an API to reorder native pages, so this ' +
+      'mismatch cannot be fixed automatically. You can hide the native scene tabs ' +
+      'via View → Animation → Scene Tabs (note: SU 2019 may forget this setting ' +
+      'when reopening the file).'
+    );
   }
 
   // Chiamato da Ruby durante la generazione previews.
@@ -467,6 +490,8 @@ window.SM = (function () {
     statusEl      = $('status');
 
     $('btn-refresh').addEventListener('click', function () { SMBridge.refresh(); });
+    var bannerOrder = $('banner-order');
+    if (bannerOrder) bannerOrder.addEventListener('click', onBannerOrderClick);
     var btnNewScene = $('btn-new-scene');
     if (btnNewScene) {
       btnNewScene.addEventListener('click', function () { SMBridge.newSceneFromView(); });

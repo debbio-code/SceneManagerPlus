@@ -8,6 +8,7 @@ module SceneManagerPlus
       @dialog            = nil
       @poll_timer_id     = nil
       @last_active_uid   = nil
+      @last_native_sig   = nil
 
       # Polling 250ms: se selected_page cambia (e defer è OFF), aggiorna la
       # selezione nel plugin. Più affidabile del frame_change_observer che
@@ -15,6 +16,7 @@ module SceneManagerPlus
       def start_active_scene_poll
         stop_active_scene_poll
         @last_active_uid = nil
+        @last_native_sig = nil
         @poll_timer_id = ::UI.start_timer(0.25, true) do
           poll_active_scene
         end
@@ -36,6 +38,17 @@ module SceneManagerPlus
         return if Core::Buffer.deferred?
         m = Sketchup.active_model
         return unless m
+        # Detect riordino nativo (es. via "Window → Scenes" di SU): l'API
+        # 2019 non riordina via Ruby ma la UI nativa sì. Confrontiamo la
+        # firma dell'ordine pagine e forziamo push_state se cambia, così
+        # il banner divergenza si aggiorna.
+        native_sig = m.pages.map { |p| Core::SceneModel.page_id(p) }.join('|')
+        if @last_native_sig && native_sig != @last_native_sig
+          @last_native_sig = native_sig
+          push_state
+        else
+          @last_native_sig = native_sig
+        end
         page = m.pages.selected_page
         return unless page
         uid = Core::SceneModel.page_id(page)
@@ -286,7 +299,8 @@ module SceneManagerPlus
           model_info: {
             title:        (model ? model.title.to_s : ''),
             pages_count:  (model ? model.pages.count : 0)
-          }
+          },
+          native_order_divergent: (Core::Settings.get('ui')['show_order_banner'] && Core::SceneModel.native_order_divergent?)
         }
         puts "[SM+] push_state: model=#{state[:model_info][:title].inspect} " \
              "native_pages=#{state[:model_info][:pages_count]} " \

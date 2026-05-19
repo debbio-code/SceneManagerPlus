@@ -34,6 +34,9 @@ module SceneManagerPlus
           'offset_x'     => 20,
           'offset_y'     => 20,
           'opacity'      => 100
+        },
+        'ui' => {
+          'show_order_banner' => true
         }
       }.freeze
 

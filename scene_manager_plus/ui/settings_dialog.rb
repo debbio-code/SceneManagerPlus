@@ -68,6 +68,10 @@ module SceneManagerPlus
           vals  = data['values'] || {}
           puts "[SM+] sm_settings_set: group=#{group.inspect} payload_chars=#{payload.to_s.length} vals_keys=#{vals.keys.inspect}"
           Core::Settings.set(group, vals) if group
+          # Settings che influenzano la main dialog (es. banner ordine):
+          # forziamo un push_state lì, altrimenti la modifica non si vede
+          # finché l'utente non interagisce con la lista.
+          Dialog.push_state if group == 'ui'
           # NIENTE push_state qui: il form JS ha già i valori appena inviati,
           # e rileggerli via Sketchup.read_default subito dopo write_default è
           # inaffidabile in SU 2019 (la lettura può tornare il valore vecchio

@@ -97,6 +97,37 @@ module SceneManagerPlus
         ids
       end
 
+      # Ordine "flat" delle scene come visualizzate dal plugin: espande le
+      # cartelle nell'ordine logico. Usato per confronto con l'ordine nativo
+      # dei tab SU (vedi native_order_divergent?).
+      def flat_scene_order
+        folders_by_id = Core::Folders.all.each_with_object({}) { |f, h| h[f['id']] = f }
+        result = []
+        logical_order.each do |id|
+          if (f = folders_by_id[id])
+            Array(f['scene_ids']).each { |sid| result << sid }
+          else
+            result << id
+          end
+        end
+        result
+      end
+
+      # True se l'ordine delle pagine native SU diverge dall'ordine flat
+      # mostrato dal plugin. In SU 2019 non c'è API per riordinare Pages,
+      # quindi i tab nativi restano nell'ordine di creazione e questa
+      # condizione si attiva non appena l'utente riordina nel plugin.
+      # In defer mode evitiamo il check per non mostrare divergenze
+      # transitorie su edit non ancora flushati.
+      def native_order_divergent?
+        return false if Buffer.deferred?
+        native = pages.map { |p| page_id(p) }
+        native != flat_scene_order
+      rescue => e
+        warn "[SM+] native_order_divergent?: #{e.class}: #{e.message}"
+        false
+      end
+
       def set_logical_order(ids)
         if Buffer.deferred?
           Buffer.set_order(ids)

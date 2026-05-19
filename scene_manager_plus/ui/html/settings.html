@@ -193,6 +193,25 @@
         <span id="logo-status" class="status"></span>
       </div>
     </section>
+
+    <section class="group" id="group-ui">
+      <h2>Interface</h2>
+
+      <div class="row">
+        <label class="check">
+          <input type="checkbox" id="ui-show-order-banner">
+          <span>Show "SceneTabs order out of sync" warning banner</span>
+        </label>
+        <small class="muted" style="margin-top:4px;">
+          SketchUp 2019 does not allow reordering native scene tabs via API, so they stay in creation order while the plugin order can change. Disable this if you don't want to be reminded.
+        </small>
+      </div>
+
+      <div class="actions">
+        <span class="auto-save-hint">Changes are saved automatically.</span>
+        <span id="ui-status" class="status"></span>
+      </div>
+    </section>
   </div>
 
   <script src="js/settings.js"></script>
