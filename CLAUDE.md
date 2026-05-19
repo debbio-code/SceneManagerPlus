@@ -37,6 +37,8 @@ Feature aggiunte fuori-fase (Fase 3):
 | Tema | Scelta |
 |---|---|
 | UI | `UI::HtmlDialog` (CEF, SU 2017+) — niente WebDialog legacy |
+| Stile finestra principale | `STYLE_UTILITY` (palette sempre sopra viewport, posizione+dimensione persistite affidabilmente — `STYLE_DIALOG` non salva la posizione su SU 2019). Auto-riaprire all'avvio se era aperta (flag `main_dialog_open` via `write_default`, ri-show con timer 0.5s dopo `file_loaded`). Settings/Properties restano `STYLE_DIALOG` (sono modali-ish). |
+| Navigazione tastiera | `PageUp`/`PageDown`/`Home`/`End` quando focus nel plugin → scorre l'ordine logico visibile (cartelle chiuse saltate). Non c'è modo pulito in SU 2019 di hijacker i tasti globalmente, quindi fuori dal plugin resta il comportamento nativo. |
 | Cartelle | Solo logiche (ordine in `model.attribute`), no sync alle pagine native (vedi sotto) |
 | Formati export | PNG + JPG |
 | Watermark | Composizione via `Sketchup::ImageRep` (PNG + JPG unificati). ChunkyPNG scartato, niente `vendor/`. Logo bundled in `scene_manager_plus/assets/default_logo.png` |

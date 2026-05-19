@@ -77,11 +77,12 @@ window.SM = (function () {
     if (!btn) return;
     if (state.deferred) {
       btn.classList.add('active');
-      btn.innerHTML = '▶ Apply' + (state.pending ? ' (' + state.pending + ')' : '');
-      btn.title = 'Click to apply pending changes to SketchUp';
+      btn.innerHTML = '▶';
+      btn.title = 'Click to apply pending changes to SketchUp' +
+        (state.pending ? ' (' + state.pending + ' pending)' : '');
     } else {
       btn.classList.remove('active');
-      btn.innerHTML = '⏸ Defer';
+      btn.innerHTML = '⏸';
       btn.title = 'Defer mode: stage changes in memory, click again to flush all to SketchUp';
     }
   }
@@ -360,6 +361,46 @@ window.SM = (function () {
       var row = e.target.closest('.scene-row');
       if (!row || !row.dataset || !row.dataset.id) return;
       SMBridge.updateFromView(row.dataset.id);
+    });
+
+    // PageUp/PageDown/Home/End: navigazione lungo l'ordine logico del plugin
+    // (cartella aperta → in fila, cartella chiusa → saltata). Bind su document
+    // così funziona ovunque il focus stia dentro la finestra. Si esce dal
+    // gestore se l'utente sta digitando in un campo testuale.
+    document.addEventListener('keydown', function (e) {
+      var k = e.key;
+      if (k !== 'PageUp' && k !== 'PageDown' && k !== 'Home' && k !== 'End') return;
+      var t = document.activeElement;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+      var order = visibleSceneOrder();
+      if (order.length === 0) return;
+      var target = null;
+      if (k === 'Home') {
+        target = order[0];
+      } else if (k === 'End') {
+        target = order[order.length - 1];
+      } else {
+        // Se la scena attiva non è nell'ordine visibile (es. dentro cartella
+        // chiusa), idx = -1 e cadiamo nel caso "fuori lista" per convenzione.
+        var curId = selection[0];
+        var idx = curId ? order.indexOf(curId) : -1;
+        if (k === 'PageDown') {
+          target = idx < 0 ? order[0] : order[Math.min(order.length - 1, idx + 1)];
+        } else {
+          target = idx < 0 ? order[order.length - 1] : order[Math.max(0, idx - 1)];
+        }
+      }
+      if (!target) return;
+      e.preventDefault();
+      e.stopPropagation();
+      selection = [target];
+      anchorId = target;
+      render();
+      var row = listEl && listEl.querySelector('.scene-row[data-id="' + target + '"]');
+      if (row && row.scrollIntoView) {
+        try { row.scrollIntoView({ block: 'nearest' }); } catch (er) {}
+      }
+      if (!state.deferred) SMBridge.selectPage(target);
     });
 
     SMDnd.attach(listEl, {

@@ -179,6 +179,35 @@ sull'elemento "originale".
 sullo stesso id arrivano entro N ms (es. 400ms) senza modificatori,
 triggerare l'azione doppio-click.
 
+### `STYLE_DIALOG` vs `STYLE_UTILITY` per persistenza posizione
+
+`HtmlDialog.new(preferences_key: ...)` dovrebbe persistere posizione +
+dimensione tra sessioni. In pratica su SU 2019:
+- `STYLE_DIALOG` salva la **dimensione** ma la **posizione spesso si
+  ricentra** all'apertura successiva.
+- `STYLE_UTILITY` (palette/inspector, sempre sopra il viewport) persiste
+  **posizione + dimensione** in modo affidabile tra sessioni e tra file
+  diversi. È il pattern dei tray nativi di SU.
+
+Trade-off: `STYLE_UTILITY` non può andare DIETRO la viewport SU. Per un
+pannello pensato come sostituto di una finestra nativa è il
+comportamento giusto.
+
+### Auto-riaprire un HtmlDialog all'avvio di SU se era aperto
+
+Pattern "pannello che si ricorda di essere aperto":
+1. In `Dialog#show` → `write_default(section, 'main_dialog_open', true)`.
+2. In `set_on_closed` → `write_default(..., false)`.
+3. In `main.rb` dopo `file_loaded`:
+   ```ruby
+   if Sketchup.read_default(section, 'main_dialog_open', false)
+     ::UI.start_timer(0.5, false) { Dialog.show rescue warn ... }
+   end
+   ```
+
+Il timer 0.5s è importante: a `file_loaded` la UI di SU non è ancora
+pronta a ospitare un HtmlDialog (posizione errata, o crash silenzioso).
+
 ### Intercettare click su sub-element prima di selezione/drag
 
 Per un bottone interno a una row che fa anche da selezione/drag, registrare
@@ -222,6 +251,26 @@ cancellate.
    `document.activeElement`
 3. Niente bottoni Save manuali per sezioni con auto-save (l'utente non si
    aspetta di doverlo cliccare)
+
+### ⚠️ `Sketchup.read_default` subito dopo `write_default` può tornare stale
+
+Su SU 2019 le scritture via `write_default` NON sono garantite di essere
+visibili a una `read_default` immediatamente successiva nello stesso tick.
+La rilettura può tornare il **valore precedente** o il **default**.
+
+Sintomo concreto: in `sm_settings_set` chiamavamo `Core::Settings.set(...)`
+e subito dopo `push_state` (che fa `Core::Settings.all` → tante
+`read_default`). Lo state ri-pushato conteneva i valori stale. Il
+`writeLogo`/`writeExport` in JS sovrascriveva i campi non-focused
+(setIfNotFocused passa perché il focus è già su un altro campo) con i
+valori vecchi → l'utente vedeva il proprio input "tornare indietro"
+cambiando campo.
+
+**Fix**: NON fare `push_state` automatico dopo un save che proviene da
+auto-save dal form stesso. Il form JS ha già i valori appena inviati,
+non serve un round-trip. Fare `push_state` esplicito solo in callback
+che cambiano flag laterali (es. `sm_pick_logo` setta anche `enabled` e
+`use_default`).
 
 ### Numeric `parseInt(x) || N` collassa 0 sul fallback
 

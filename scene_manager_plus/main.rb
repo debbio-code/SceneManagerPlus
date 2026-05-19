@@ -30,6 +30,22 @@ module SceneManagerPlus
     toolbar.add_item(cmd)
     toolbar.show
 
+    # Auto-riapertura come i pannelli nativi: se la finestra era aperta
+    # all'ultima chiusura di SU, la ri-mostriamo. Salvato in Dialog#show e
+    # Dialog#set_on_closed via write_default('SceneManagerPlus', 'main_dialog_open').
+    # Defer di 0.5s: a `file_loaded` la UI di SU non è ancora pronta a ospitare
+    # un HtmlDialog (su SU 2019 mostrare la finestra troppo presto causa
+    # posizione errata o crash silenzioso).
+    if Sketchup.read_default('SceneManagerPlus', 'main_dialog_open', false)
+      ::UI.start_timer(0.5, false) do
+        begin
+          SceneManagerPlus::UI::Dialog.show
+        rescue => e
+          warn "[SM+] auto-open failed: #{e.class}: #{e.message}"
+        end
+      end
+    end
+
     file_loaded(__FILE__)
   end
 end

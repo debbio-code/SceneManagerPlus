@@ -89,23 +89,32 @@ module SceneManagerPlus
           height:          640,
           min_width:       320,
           min_height:      400,
-          style:           ::UI::HtmlDialog::STYLE_DIALOG
+          # STYLE_UTILITY: palette sempre sopra la viewport SU, posizione e
+          # dimensione persistite in modo affidabile via preferences_key tra
+          # sessioni e tra file diversi (come i pannelli nativi). STYLE_DIALOG
+          # in SU 2019 salvava la dimensione ma non sempre la posizione.
+          style:           ::UI::HtmlDialog::STYLE_UTILITY
         )
 
         register_callbacks(@dialog)
         # Auto-flush eventuali edit pending + stop polling alla chiusura.
+        # Salviamo anche "open=false" così il prossimo avvio di SU sa di non
+        # riaprire automaticamente la finestra (l'utente l'ha chiusa di sua
+        # volontà). Vedi auto_show_if_was_open per il ripristino.
         @dialog.set_on_closed do
           if Core::Buffer.deferred?
             edits, deletes = Core::Buffer.flush!
             puts "[SM+] auto-flush on close: #{edits} edit(s), #{deletes} delete(s)"
           end
           stop_active_scene_poll
+          Sketchup.write_default('SceneManagerPlus', 'main_dialog_open', false)
         end
         # Cache-bust JS/CSS riscrivendo index.html in un file temporaneo con
         # ?v=<timestamp> sui tag <script src> e <link href>. CEF di SU 2019
         # può tenersi in cache i file file:// tra una sessione e l'altra.
         @dialog.set_file(prepare_index)
         @dialog.show
+        Sketchup.write_default('SceneManagerPlus', 'main_dialog_open', true)
         start_active_scene_poll
         # Fallback: se sm_ready non arriva entro 1s, forziamo push_state.
         # Utile se il bridge JS->Ruby non si aggancia per qualche motivo.

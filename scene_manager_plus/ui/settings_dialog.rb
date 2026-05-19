@@ -68,7 +68,15 @@ module SceneManagerPlus
           vals  = data['values'] || {}
           puts "[SM+] sm_settings_set: group=#{group.inspect} payload_chars=#{payload.to_s.length} vals_keys=#{vals.keys.inspect}"
           Core::Settings.set(group, vals) if group
-          push_state
+          # NIENTE push_state qui: il form JS ha già i valori appena inviati,
+          # e rileggerli via Sketchup.read_default subito dopo write_default è
+          # inaffidabile in SU 2019 (la lettura può tornare il valore vecchio
+          # / il default). Il round-trip sovrascriveva i campi adiacenti già
+          # blurati con il valore "stale" → l'utente vedeva il proprio input
+          # tornare al valore precedente cambiando campo (caso classico:
+          # logo offset_x/offset_y). Se in futuro serve sincronizzare flag
+          # laterali (vedi sm_pick_logo), push_state esplicito in quel
+          # callback specifico.
         end
 
         dlg.add_action_callback('sm_naming_preview') do |_ctx, payload|
