@@ -298,6 +298,35 @@ window.SM = (function () {
     if (btnDefer) {
       btnDefer.addEventListener('click', function () { SMBridge.deferToggle(); });
     }
+    var btnSelectAll = $('btn-select-all');
+    if (btnSelectAll) {
+      // Ciclo: 0 = "all", 1 = "none", 2 = "invert original". Si resetta se
+      // l'utente cambia selezione manualmente tra una pressione e l'altra.
+      var saStep = 0;
+      var saOriginal = null;
+      var saLastApplied = null;
+      function sigOf(arr) { return arr.slice().sort().join('|'); }
+      btnSelectAll.addEventListener('click', function () {
+        var order = visibleSceneOrder();
+        if (order.length === 0) return;
+        if (saLastApplied === null || sigOf(selection) !== saLastApplied) {
+          saStep = 0;
+          saOriginal = selection.slice();
+        }
+        if (saStep === 0) {
+          selection = order.slice();
+        } else if (saStep === 1) {
+          selection = [];
+        } else {
+          var orig = saOriginal || [];
+          selection = order.filter(function (id) { return orig.indexOf(id) === -1; });
+        }
+        anchorId = selection.length ? selection[0] : null;
+        saLastApplied = sigOf(selection);
+        saStep = (saStep + 1) % 3;
+        render();
+      });
+    }
     var btnThumbs = $('btn-thumbs');
     if (btnThumbs) {
       btnThumbs.addEventListener('click', function () {
