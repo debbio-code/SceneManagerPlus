@@ -395,54 +395,46 @@ sull'export funziona. Ipotesi non confermata: a 300×150 con
 Va indagato più a fondo — per ora il moltiplicatore Thumbnails è esposto
 ma di fatto inefficace.
 
-## Investigazione aperta — `add_from_view` e layer accesi manualmente
+## `add_from_view` e visibilità layer — risolto (2026-05)
 
-**Stato**: in pausa, da riprendere con dati diagnostici dall'utente.
+Storia in due atti.
 
-**Sintomo riportato**: partendo da una scena esistente, accendendo manualmente
-qualche layer dal Layer Manager e poi creando una nuova scena dalla vista (📷+),
-i layer accesi NON risultano visibili nella nuova scena.
+**Atto 1 — drift da toggle manuale**: quando l'utente toggla un layer dal
+Layer Manager dopo aver attivato una scena, SU 2019 aggiorna
+`layer.visible?` ma NON sincronizza `page.layers` (override stale). Il
+viewport in caso di drift mostra sempre `layer.visible?`. Confermato con
+diag in entrambe le direzioni (accensione e spegnimento) sul modello
+Pedrazzoli.
 
-**Ipotesi finora**: il codice in `SceneModel.add_from_view` usa
-`!hidden_on_active.include?(layer)` (cioè la hidden-list SALVATA della scena
-attiva) per ricostruire la visibilità sulla nuova pagina. Questo è giusto per
-preservare i layer "Add visible tag" del Layers Manager (vedi
-`docs/SU2019-LESSONS.md`), ma potrebbe ignorare modifiche manuali post-
-attivazione se SU non aggiorna `active.layers` quando l'utente toggla un layer.
+**Atto 2 — `pages.add` muta il model**: il Layers Manager registra un
+observer su `pages.add` che, per i layer con "Add visible tag" attivo
+(globally visible quando la AVT-page è attiva), durante l'add:
+1. Riporta `layer.visible? = false` (model)
+2. Aggiunge il layer alla hidden list della nuova scena
 
-**Tentativo scartato**: sostituire con `layer.visible?` puro rompe "Add visible
-tag" (lessons doc lo dichiara esplicitamente come "bug opposto").
+Quindi tra PRE e POST `pages.add` lo stato del modello cambia. Nessuna
+formula calcolata POST-add può ricostruire la visibilità effettiva del
+viewport PRE-add.
 
-**Possibile fix**: OR delle due fonti — `layer.visible? || !active.layers.include?(layer)`
-— ma ha un caso ambiguo (layer globalmente visibile + page hidden-list lo
-nasconde → OR dice "visibile" ma viewport dice "hidden"). Da chiarire con
-diagnostica prima di scegliere.
+**Fix applicato** in `SceneModel.add_from_view`:
+1. **Prima** di `pages.add`, snapshottare `layer.visible?` di tutti i
+   layer (= ciò che il viewport sta mostrando).
+2. Dopo `pages.add`, ripristinare il model state per i layer dove
+   l'observer LM ha sbragato, e applicare lo stesso state alla nuova
+   page via `page.set_visibility`.
 
-**Diagnostica già installata** in `add_from_view` (scene_model.rb): stampa
-sulla Ruby Console:
-- `active.use_hidden_layers?`, dimensione di `active.layers`
-- elenco "mismatches": layer dove `!active.layers.include?(l)` diverge da
-  `l.visible?` (cioè dove page-override e model-visibility raccontano cose
-  diverse)
-- stato del nuovo page subito dopo `pages.add` + override
+Questo gestisce contestualmente sia AVT sia il drift da toggle manuale:
+in entrambi i casi la fonte di verità è `layer.visible?` PRE-add.
 
-**Prossimo step alla ripresa**: chiedere all'utente di riprodurre il bug con
-Ruby Console aperta e incollare l'output `[SM+] add_from_view DIAG: ...`.
-In base ai mismatch capiremo se SU aggiorna `active.layers`, `layer.visible?`,
-entrambi, o nessuno, quando l'utente toggla un layer nel Layer Manager —
-e di conseguenza qual è la formula corretta per `effective_visibility`.
+Tabella di verità chiusa:
 
-Tabella di verità da costruire (X = da scoprire):
-
-| Caso                          | layer.visible? | in active.layers | effective viewport |
-|-------------------------------|----------------|------------------|--------------------|
-| "Add visible tag"             | F              | F                | T (visible)        |
-| Layer normalmente hidden      | X              | T                | F                  |
-| Layer normalmente visible     | T              | F                | T                  |
-| Utente accende layer hidden   | X              | X                | T                  |
-| Utente spegne layer visible   | X              | X                | F                  |
-
-I log diagnostici servono a riempire le X.
+| Caso                          | visible? PRE | in active.layers | viewport | new page |
+|-------------------------------|--------------|------------------|----------|----------|
+| Layer normale hidden          | F            | T                | F        | F ✓      |
+| Layer normale visible         | T            | F                | T        | T ✓      |
+| AVT (Add Visible Tag)         | T            | F                | T        | T ✓      |
+| Utente accende layer hidden   | T            | T (stale)        | T        | T ✓      |
+| Utente spegne layer visible   | F            | F (stale)        | F        | F ✓      |
 
 ## Note per future sessioni
 

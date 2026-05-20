@@ -360,51 +360,38 @@ module SceneManagerPlus
         m = model
         return nil unless m
         active = m.pages.selected_page
+        # Snapshot di layer.visible? PRIMA di pages.add. SU 2019 + Layers
+        # Manager observer durante pages.add mutano il model: per i layer
+        # "Add visible tag" (globally visible col tag attivo sulla active
+        # page) l'observer li riporta a globally-hidden + li aggiunge alla
+        # hidden list della nuova scena. Senza snapshot perderemmo lo stato
+        # che il viewport sta effettivamente mostrando.
+        # Vedi docs/SU2019-LESSONS.md, sezione "pages.add muta il model".
+        pre_visible = {}
+        m.layers.each { |l| pre_visible[l] = l.visible? }
+
         m.start_operation('SM+ New scene', true)
         begin
-          # Diagnostica pre-add: cosa vede SU adesso?
-          if active
-            ahidden = active.layers.to_a
-            mismatches = m.layers.map { |l|
-              page_says_visible = !ahidden.include?(l)
-              model_says_visible = l.visible?
-              if page_says_visible != model_says_visible
-                "  - '#{l.name}': page=#{page_says_visible} model=#{model_says_visible}"
-              end
-            }.compact
-            puts "[SM+] add_from_view DIAG: active='#{active.name}' use_hidden_layers?=#{active.use_hidden_layers?} layers_in_hidden_list=#{ahidden.size}/#{m.layers.size}"
-            if mismatches.any?
-              puts "[SM+] add_from_view DIAG: mismatches page-override vs model-visibility (#{mismatches.size}):"
-              mismatches.first(20).each { |s| puts s }
-            else
-              puts "[SM+] add_from_view DIAG: no mismatches between active.layers and layer.visible?"
-            end
-          end
-
           page = m.pages.add(name.to_s)
 
-          # Allinea visibilità layer della nuova scena a quella *effettiva*
-          # della scena attiva — vedi docs/SU2019-LESSONS.md, sezione
-          # "Sketchup::Page#layers in SU 2019 = hidden list legacy".
-          # `active.layers` è la lista degli HIDDEN, non degli override
-          # "show". Quando use_hidden_layers? è true, la pagina considera
-          # visibili tutti i layer NON in active.layers, anche se
-          # globalmente hidden — è il caso "Add visible tag" del Layers
-          # Manager. Usare `layer.visible?` qui è il bug opposto.
-          if active && active.use_hidden_layers?
-            hidden_on_active = active.layers.to_a
-            m.layers.each do |layer|
-              begin
-                page.set_visibility(layer, !hidden_on_active.include?(layer))
-              rescue => e
-                warn "[SM+] add_from_view: set_visibility failed for #{layer.name rescue '?'}: #{e.message}"
-              end
+          # Ripristina il model state pre-add (caso AVT: LM observer ha
+          # spento dei layer globalmente) e applica lo stesso state alla
+          # nuova page tramite override. In caso di mismatch tra page
+          # override stale e layer.visible? — drift causato da toggle
+          # manuale dal Layer Manager — il viewport mostra layer.visible?,
+          # quindi quella è la fonte di verità.
+          pre_visible.each do |layer, was_visible|
+            begin
+              layer.visible = was_visible if layer.visible? != was_visible
+            rescue
+              # ignore, best-effort
+            end
+            begin
+              page.set_visibility(layer, was_visible)
+            rescue => e
+              warn "[SM+] add_from_view: set_visibility failed for #{layer.name rescue '?'}: #{e.message}"
             end
           end
-
-          # Diagnostica post-add: cosa contiene il nuovo page.layers?
-          new_hidden = page.layers.to_a
-          puts "[SM+] add_from_view DIAG: new page '#{page.name}' use_hidden_layers?=#{page.use_hidden_layers?} hidden_list_size=#{new_hidden.size}/#{m.layers.size}"
 
           page_id(page) # ensure uid attribute exists
           m.commit_operation

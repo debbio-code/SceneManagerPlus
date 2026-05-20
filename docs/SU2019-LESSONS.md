@@ -103,40 +103,55 @@ Mappatura predicate → flag:
 Usare lookup difensivo (`Object.const_defined?`) che prova più nomi e prende
 quello presente.
 
-### `Sketchup::Page#layers` in SU 2019 = "hidden list" legacy, NON "overrides"
+### `Sketchup::Page#layers`, `pages.add`, drift e AVT — quadro completo
 
-Diversamente da come è naturale immaginare (e da come è documentato in
-alcune versioni più recenti), in SU 2019 `page.layers` ritorna **la lista
-dei layer che la pagina vuole tenere nascosti** quando viene attivata.
-Tutti gli altri layer del modello vengono mostrati (sovrascrivendo lo
-stato model-level del layer, finché `use_hidden_layers?` è true).
+In SU 2019 `page.layers` ritorna l'array dei layer che la pagina vuole
+tenere nascosti quando attivata. Gli altri vengono mostrati (override su
+model state, finché `use_hidden_layers?` è true).
 
-**Conseguenza per "Add visible tag" del plugin Layers Manager**: quel
-plugin crea un layer globalmente hidden e — per renderlo visibile solo
-nella scena attiva — lo aggiunge a `page.layers` di **tutte le altre
-pagine** tranne quella corrente. Sulla corrente il layer NON è in
-`page.layers` → viene mostrato.
+**Drift da toggle manuale (confermato 2026-05)**: quando l'utente toggla
+un layer dal Layer Manager dopo l'attivazione di una scena, SU aggiorna
+`layer.visible?` (model) ma NON sincronizza `page.layers` della scena
+attiva. L'override resta stale. In caso di mismatch il viewport mostra
+sempre `layer.visible?`, in entrambe le direzioni (accensione e
+spegnimento).
 
-**Conseguenza per `Sketchup::Pages#add`**: la nuova pagina snapshotta lo
-stato *model-level* di ogni layer, ignorando gli "override per-pagina"
-attivi sulla scena selezionata. I tag "Add visible tag" spariscono dalla
-nuova scena.
+**`pages.add` muta il model (confermato 2026-05)**: se il Layers Manager
+è caricato e ci sono layer con "Add visible tag" attivo (layer globally
+visible tramite override AVT sulla page attiva), un observer di LM
+reagisce a `pages.add` durante l'esecuzione e:
+1. Riporta `layer.visible? = false` (model state)
+2. Aggiunge il layer alla hidden list della nuova page
 
-Per replicare la visibilità *effettiva* della pagina attiva sulla nuova:
+Quindi `pages.add` **non è puro**: tra PRE e POST cambia lo stato del
+modello. Qualsiasi formula calcolata POST-add perde l'informazione di
+ciò che il viewport stava mostrando PRE-add.
+
+**Pattern corretto** per replicare la visibilità effettiva della pagina
+attiva sulla nuova:
 
 ```ruby
-if active && active.use_hidden_layers?
-  hidden_on_active = active.layers.to_a
-  model.layers.each do |layer|
-    page.set_visibility(layer, !hidden_on_active.include?(layer))
-  end
+# 1. Snapshot PRIMA di pages.add (sennò AVT observer ti spegne i layer)
+pre_visible = {}
+model.layers.each { |l| pre_visible[l] = l.visible? }
+
+page = model.pages.add(name)
+
+# 2. Ripristina il model state (per i layer che l'observer ha mutato)
+#    e applica lo stesso state alla new page
+pre_visible.each do |layer, was_visible|
+  layer.visible = was_visible if layer.visible? != was_visible
+  page.set_visibility(layer, was_visible)
 end
 ```
 
-(Tentativo errato che è stato fatto e poi corretto: iterare solo
-`active.layers` e fare `set_visibility(layer, !layer.visible?)` — questo
-accende tutti i layer-globalmente-hidden che la pagina vuole tenere
-hidden, esattamente il bug opposto.)
+**Tentativi precedenti che NON funzionano**:
+- `set_visibility(layer, !layer.visible?)` su `active.layers` → bug opposto.
+- `set_visibility(layer, !hidden_on_active.include?(layer))` → preserva
+  AVT ma rompe i toggle manuali (drift) in entrambe le direzioni.
+- `set_visibility(layer, layer.visible?)` post-add senza snapshot →
+  funziona per drift ma perde AVT (l'observer lo ha già spento prima
+  della nostra `set_visibility`).
 
 ### `model.options['PageOptions']['TransitionTime'] = 0` per batch render
 
