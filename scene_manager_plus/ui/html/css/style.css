@@ -178,6 +178,11 @@ body {
 }
 .scene-row .row-update:hover { color: #4ea1ff; background: #1e1e1e; }
 .scene-row .row-update:active { color: #fff; }
+.scene-row .export-cb {
+  margin: 0 6px 0 0;
+  cursor: pointer;
+  flex-shrink: 0;
+}
 .scene-row.dragging { opacity: 0.4; }
 
 .scene-row .thumb {

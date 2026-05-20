@@ -177,13 +177,43 @@ module SceneManagerPlus
         end.compact
       end
 
+      # Flag "include in batch export ALL" (default true). Vive come page
+      # attribute → persiste nel .skp. Indipendente dai FLAG_KEYS nativi SU.
+      EXPORT_INCLUDED_KEY = 'export_included'.freeze
+
+      def export_included?(page)
+        v = page.get_attribute(PLUGIN_ID, EXPORT_INCLUDED_KEY, true)
+        v != false
+      end
+
+      def set_export_included(id, included)
+        set_export_included_bulk([id], included)
+      end
+
+      def set_export_included_bulk(ids, included)
+        targets = Array(ids).map { |i| find_by_id(i) }.compact
+        return 0 if targets.empty?
+        val = !!included
+        model.start_operation('SM+ Toggle export include', true)
+        begin
+          targets.each { |p| p.set_attribute(PLUGIN_ID, EXPORT_INCLUDED_KEY, val) }
+          model.commit_operation
+          targets.size
+        rescue => e
+          model.abort_operation
+          warn "[SM+] set_export_included_bulk: #{e.class}: #{e.message}"
+          0
+        end
+      end
+
       def scene_hash(page, uid)
         h = {
-          id:          uid,
-          name:        page.name.to_s,
-          description: page.description.to_s,
-          flags:       flags_hash(page),
-          pending:     false
+          id:              uid,
+          name:            page.name.to_s,
+          description:     page.description.to_s,
+          flags:           flags_hash(page),
+          export_included: export_included?(page),
+          pending:         false
         }
         # Overlay buffer edits
         if (edit = Buffer.page_edit(uid))

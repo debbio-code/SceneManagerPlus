@@ -186,6 +186,13 @@ module SceneManagerPlus
           push_state
         end
 
+        dlg.add_action_callback('sm_set_export_included') do |_ctx, payload|
+          data = parse(payload)
+          ids = data['ids'] || (data['id'] ? [data['id']] : [])
+          Core::SceneModel.set_export_included_bulk(ids, data['included'])
+          push_state
+        end
+
         dlg.add_action_callback('sm_log') do |_ctx, msg|
           puts "[SM+ UI] #{msg}"
         end

@@ -49,6 +49,7 @@ Feature aggiunte fuori-fase (Fase 3):
 | Persistenza settings | `Sketchup.write_default` per-leaf (vedi `SU2019-LESSONS.md`) |
 | Lingua UI | Inglese (UX standard) |
 | Preview scene | NON implementata nel pannello, per richiesta utente (no rallentamento refresh). Esiste come thumbnails inline opzionali. |
+| Export-include per-scena | Checkbox in row (tra ⟳ e idx). Flag persistente come page attribute `SceneManagerPlus/export_included` (default true). Filtra solo scope `'all'` in `Exporter.collect_targets`; scope `selected` e `folders` lo ignorano per design. Click su checkbox di scena in multi-selezione → bulk: target = `!tutte_incluse` (mixed→tutte; all-on→all-off). Singola `start_operation` per il bulk = un Ctrl+Z. **Numerazione `{nnn}` / "Tavola nr." mantiene i buchi** (es. escludendo la 3 i numeri sono 1,2,4,5): l'index resta la posizione 1-based in `Naming.ordered_scene_pairs` (ordine logico globale), non un counter sui soli target — la posizione tavola resta stabile a prescindere dall'inclusione. |
 
 ## Struttura repo
 

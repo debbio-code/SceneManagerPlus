@@ -37,6 +37,10 @@ window.SMBridge = (function () {
     generatePreviews:function (ids)   { call('sm_generate_previews', { ids: ids || [] }); },
     openExport:      function (sel)   { call('sm_open_export', { selected: sel || [] }); },
     cancelExport:    function ()      { call('sm_export_cancel_running'); },
+    setExportIncluded: function (ids, included) {
+                       var arr = Array.isArray(ids) ? ids : [ids];
+                       call('sm_set_export_included', { ids: arr, included: !!included });
+                     },
     log:             function (msg)   { call('sm_log', String(msg)); }
   };
 })();

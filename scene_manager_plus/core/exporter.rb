@@ -567,7 +567,7 @@ module SceneManagerPlus
           keep = case scope.to_s
                  when 'selected' then sel.include?(uid)
                  when 'folders'  then uid_in_folder[uid]
-                 else true
+                 else SceneModel.export_included?(page)
                  end
           result << [page, i + 1] if keep
         end

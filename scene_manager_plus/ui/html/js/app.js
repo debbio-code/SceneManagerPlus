@@ -149,9 +149,12 @@ window.SM = (function () {
     } else {
       thumbHtml = '<div class="thumb-empty">no preview</div>';
     }
+    var included = scene.export_included !== false;
     row.innerHTML =
       '<span class="grip">&#x2630;</span>' +
       '<span class="row-update" title="Update scene from view">&#x27F3;</span>' +
+      '<input type="checkbox" class="export-cb" title="Include in batch export (ignored when exporting only selected scenes)"' +
+        (included ? ' checked' : '') + '>' +
       '<span class="idx">' + idx + '</span>' +
       thumbHtml +
       pendingDot +
@@ -605,6 +608,42 @@ window.SM = (function () {
       var row = e.target.closest('.scene-row');
       if (!row || !row.dataset || !row.dataset.id) return;
       SMBridge.updateFromView(row.dataset.id);
+    });
+
+    // Export-include checkbox: blocca selezione/drag, invia toggle a Ruby.
+    // Se la row cliccata è dentro una selezione multipla, applica a tutte:
+    // tutte incluse → tutte escluse; altrimenti (mixed/tutte escluse) →
+    // tutte incluse. Anche al primo click di un set misto, tutte vengono
+    // marcate.
+    listEl.addEventListener('mousedown', function (e) {
+      if (!e.target.classList || !e.target.classList.contains('export-cb')) return;
+      e.stopPropagation();
+    }, true);
+    listEl.addEventListener('click', function (e) {
+      if (!e.target.classList || !e.target.classList.contains('export-cb')) return;
+      e.stopPropagation();
+      var row = e.target.closest('.scene-row');
+      if (!row || !row.dataset || !row.dataset.id) return;
+      var id = row.dataset.id;
+      var targetIds, newIncluded;
+      if (selection.length > 1 && selection.indexOf(id) !== -1) {
+        targetIds = selection.slice();
+        var allIncluded = targetIds.every(function (sid) {
+          var s = sceneById(sid);
+          return s && s.export_included !== false;
+        });
+        newIncluded = !allIncluded;
+      } else {
+        targetIds = [id];
+        // e.target.checked riflette già il nuovo stato (HTML toggle)
+        newIncluded = e.target.checked;
+      }
+      // Annulla il toggle visivo immediato del browser: render() seguirà a
+      // push_state e disegnerà lo stato reale per tutte le row coinvolte.
+      // Senza questo, su selezione multipla la checkbox cliccata potrebbe
+      // mostrare il toggle "browser-default" prima del re-render.
+      e.target.checked = newIncluded;
+      SMBridge.setExportIncluded(targetIds, newIncluded);
     });
 
     // PageUp/PageDown/Home/End: navigazione lungo l'ordine logico del plugin
