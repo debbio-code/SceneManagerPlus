@@ -54,8 +54,29 @@ module SceneManagerPlus
         },
         'ui' => {
           'show_order_banner' => true
+        },
+        'titleblock' => {
+          # Cartiglio sotto l'immagine (canvas extension). Coesiste con
+          # 'logo' (watermark overlay) e 'filename_label': indipendenti.
+          # Cliente = naming.prefix_custom (riuso). Tavola = stesso {nnn}
+          # del naming pattern. Dati aziendali + logo: bundlati in
+          # assets/titleblock/{company.txt, logo.jpg}.
+          'enabled'       => false,
+          'height_px'     => 160,
+          'font_family'   => 'Century Gothic',
+          # Dropdown a tre voci, gestite UI-side. Default identici.
+          'project_by'    => 'Arch. Nicola Debiasi',
+          'designer'      => 'Arch. Nicola Debiasi',
+          # Formato libero (es. "20/05/2026"). Vuoto = data del momento di export.
+          'date_override' => ''
         }
       }.freeze
+
+      TITLEBLOCK_PEOPLE = [
+        'Arch. Nicola Debiasi',
+        'Guido Bazzotti',
+        'Najafov Agharahim'
+      ].freeze
 
       # Storage: una entry per leaf via Sketchup.write_default. Ogni leaf usa
       # come "key" il path piatto "group.field", e il valore è il primitivo
@@ -132,6 +153,16 @@ module SceneManagerPlus
         return nil unless File.directory?(dir)
         pick = Dir.entries(dir).find { |n| n =~ /\.png\z/i }
         pick ? File.join(dir, pick) : nil
+      end
+
+      # Path agli asset bundlati del cartiglio (testo dati aziendali, logo).
+      # Stessa logica del default_logo_path: vivono dentro PLUGIN_DIR.
+      def titleblock_company_txt_path
+        File.join(PLUGIN_DIR, 'assets', 'titleblock', 'company.txt')
+      end
+
+      def titleblock_logo_path
+        File.join(PLUGIN_DIR, 'assets', 'titleblock', 'logo.jpg')
       end
 
       # Path effettivo del logo da usare: rispetta use_default.

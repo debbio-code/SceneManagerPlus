@@ -46,6 +46,7 @@ module SceneManagerPlus
         logo_cfg      = settings_all['logo']           || {}
         naming_cfg    = settings_all['naming']         || {}
         label_cfg     = settings_all['filename_label'] || {}
+        tb_cfg        = settings_all['titleblock']     || {}
 
         out_dir, dir_notes, dir_err = resolve_output_dir(export_cfg['output_dir'], model.path.to_s)
         unless out_dir
@@ -134,15 +135,61 @@ module SceneManagerPlus
           end
         end
 
+        # Pre-renderizza titleblock per ogni scena se abilitato. Una sola
+        # spawn PowerShell per export (batch). Cliente = naming.prefix_custom
+        # (riuso semantico richiesto dall'utente). Tavola nr. = stesso
+        # progressivo {nnn} del naming pattern (1-based su targets_meta).
+        tb_pngs = nil
+        tb_warn = nil
+        tb_height = (tb_cfg['height_px'] || 120).to_i
+        tb_height = 40 if tb_height < 40
+        if tb_cfg['enabled']
+          begin
+            client_str = (naming_cfg['prefix_custom'] || '').to_s
+            date_str   = if (do_str = tb_cfg['date_override'].to_s).strip.empty?
+                           Time.now.strftime('%d/%m/%Y')
+                         else
+                           do_str
+                         end
+            company_lines = TitleBlock.load_company_lines
+            logo_for_tb   = Settings.titleblock_logo_path
+            logo_for_tb   = '' unless File.file?(logo_for_tb)
+
+            pad = (naming_cfg['pad'] || 2).to_i
+            tb_items = targets_meta.map do |page, idx, _b, uid|
+              num_str = idx.to_s.rjust([pad, 1].max, '0')
+              { uid: uid, client: client_str, tavola: num_str, scene_name: page.name.to_s }
+            end
+            tb_pngs = TitleBlock.render_batch(tb_items,
+              width:              wpx,
+              height:             tb_height,
+              font_family:        (tb_cfg['font_family'] || 'Century Gothic'),
+              date:               date_str,
+              project_by:         (tb_cfg['project_by'] || ''),
+              designer:           (tb_cfg['designer']   || ''),
+              company_lines:      company_lines,
+              logo_path:          logo_for_tb,
+              tavola_placeholder: '0' * [pad, 1].max
+            )
+            produced = tb_pngs.keys.reject { |k| k == '_tmpdir' }.size
+            tb_warn = 'Title block: nessuna immagine generata' if produced.zero?
+          rescue => e
+            tb_warn = "Title block render failed: #{e.message}"
+            warn "[SM+] titleblock pre-render error: #{e.class}: #{e.message}"
+          end
+        end
+
         errors = []
         errors.concat(Array(dir_notes))
         errors << logo_warn  if logo_warn
         errors << label_warn if label_warn
+        errors << tb_warn    if tb_warn
 
         puts "[SM+] export start: out=#{out_dir} fmt=#{fmt} size=#{wpx}x#{hpx} aa=#{aa} " \
              "transp=#{transp} line_scale=#{line_scale} " \
              "logo_enabled=#{logo_cfg['enabled'].inspect} logo_img=#{logo_img ? 'loaded' : 'no'} " \
-             "label_enabled=#{label_cfg['enabled'].inspect} labels_ready=#{label_pngs ? label_pngs.keys.size - 1 : 0}"
+             "label_enabled=#{label_cfg['enabled'].inspect} labels_ready=#{label_pngs ? label_pngs.keys.size - 1 : 0} " \
+             "tb_enabled=#{tb_cfg['enabled'].inspect} tb_ready=#{tb_pngs ? tb_pngs.keys.size - 1 : 0} tb_h=#{tb_height}"
 
         # SU 2019: write_image non supporta :scale_factor (aggiunto in SU 2020).
         # Fallback: prima del render aumentiamo temporaneamente RenderingOptions
@@ -196,8 +243,9 @@ module SceneManagerPlus
             end
           rescue
           end
-          # Pulisci i PNG temporanei delle filename label
+          # Pulisci i PNG temporanei delle filename label e dei title block
           TextRender.cleanup(label_pngs) if label_pngs
+          TitleBlock.cleanup(tb_pngs)    if tb_pngs
           errors << 'Cancelled by user' if cancelled
           @cancel  = false
           @running = false
@@ -285,6 +333,19 @@ module SceneManagerPlus
               rescue => e
                 errors << "Overlay failed on '#{page.name}': #{e.message}"
                 warn "[SM+] apply_overlays failed on '#{page.name}': #{e.class}: #{e.message}"
+                warn e.backtrace.first(3).join("\n") if e.backtrace
+              end
+            end
+
+            # Title block: estende il canvas verso il basso e appende il
+            # cartiglio. Va DOPO apply_overlays così logo+label restano
+            # confinati nell'immagine originale (il cartiglio non li copre).
+            if tb_pngs && (tb_png = tb_pngs[uid]) && File.file?(tb_png)
+              begin
+                append_titleblock(fpath, tb_png)
+              rescue => e
+                errors << "Title block failed on '#{page.name}': #{e.message}"
+                warn "[SM+] append_titleblock failed on '#{page.name}': #{e.class}: #{e.message}"
                 warn e.backtrace.first(3).join("\n") if e.backtrace
               end
             end
@@ -420,6 +481,69 @@ module SceneManagerPlus
             buf.setbyte(j + 2, (lr * la + br  * inv).round)
           end
         end
+      end
+
+      # Estende il canvas verso il basso e appende il cartiglio PNG.
+      # Carica l'immagine base (bw×bh) e il cartiglio (tw×th); produce
+      # buffer BGRA (bw × (bh + th)) top-down, salva alla stessa path.
+      # Se tw ≠ bw, il cartiglio è ri-campionato a larghezza bw mantenendo
+      # th (PowerShell l'ha già renderizzato a width = wpx, quindi tw==bw
+      # nel caso normale; il branch ri-sample è di sicurezza).
+      def append_titleblock(image_path, tb_png_path)
+        base = Sketchup::ImageRep.new
+        base.load_file(image_path)
+        bw = base.width
+        bh = base.height
+
+        tb = Sketchup::ImageRep.new
+        tb.load_file(tb_png_path)
+        tw = tb.width
+        th = tb.height
+        resample = (tw != bw)
+
+        nh = bh + th
+        buf = ("\0" * (bw * nh * 4)).force_encoding(Encoding::BINARY)
+
+        # Riga superiore: immagine originale (BGRA, top-down)
+        i = 0
+        base.colors.each do |c|
+          buf.setbyte(i,     c.blue)
+          buf.setbyte(i + 1, c.green)
+          buf.setbyte(i + 2, c.red)
+          buf.setbyte(i + 3, 255)
+          i += 4
+        end
+
+        # Riga inferiore: cartiglio. Se le larghezze coincidono, copy
+        # diretto (fast path). Altrimenti UV resample.
+        if resample
+          th.times do |dy|
+            v = 1.0 - (dy + 0.5) / th.to_f
+            row_off = ((bh + dy) * bw) * 4
+            bw.times do |dx|
+              u = (dx + 0.5) / bw.to_f
+              c = tb.color_at_uv(u, v, true)
+              j = row_off + dx * 4
+              buf.setbyte(j,     c.blue)
+              buf.setbyte(j + 1, c.green)
+              buf.setbyte(j + 2, c.red)
+              buf.setbyte(j + 3, 255)
+            end
+          end
+        else
+          j = bw * bh * 4
+          tb.colors.each do |c|
+            buf.setbyte(j,     c.blue)
+            buf.setbyte(j + 1, c.green)
+            buf.setbyte(j + 2, c.red)
+            buf.setbyte(j + 3, 255)
+            j += 4
+          end
+        end
+
+        base.set_data(bw, nh, 32, 0, buf)
+        ok = base.save_file(image_path)
+        puts "[SM+] titleblock append ok=#{ok.inspect} → #{File.basename(image_path)} (#{bw}x#{nh})"
       end
 
       # Lista [page, name_index] dove name_index è la posizione 1-based in

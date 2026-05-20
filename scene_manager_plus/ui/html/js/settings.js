@@ -184,12 +184,14 @@
     const preview = (state.settings && state.settings.preview)        || {};
     const logo    = (state.settings && state.settings.logo)           || {};
     const label   = (state.settings && state.settings.filename_label) || {};
+    const tb      = (state.settings && state.settings.titleblock)     || {};
     const ui      = (state.settings && state.settings.ui)             || {};
     writeForm(naming);
     writeExport(exp);
     writePreview(preview);
     writeLogo(logo, state.default_logo_name);
     writeLabel(label);
+    writeTitleblock(tb);
     writeUi(ui);
     requestPreview();
   };
@@ -245,6 +247,31 @@
   }
   function setLabelStatus(msg) {
     const el = $('#label-status');
+    if (!el) return;
+    el.textContent = msg;
+    if (msg) setTimeout(() => { el.textContent = ''; }, 2500);
+  }
+
+  function readTitleblock() {
+    return {
+      enabled:       $('#tb-enabled').checked,
+      height_px:     toIntOr($('#tb-height').value, 120),
+      font_family:   $('#tb-font-family').value || 'Century Gothic',
+      project_by:    $('#tb-project-by').value || 'Arch. Nicola Debiasi',
+      designer:      $('#tb-designer').value || 'Arch. Nicola Debiasi',
+      date_override: $('#tb-date-override').value || ''
+    };
+  }
+  function writeTitleblock(t) {
+    setIfNotFocused($('#tb-enabled'),       'checked', !!t.enabled);
+    setIfNotFocused($('#tb-height'),        'value',   (t.height_px == null ? 120 : t.height_px));
+    setIfNotFocused($('#tb-font-family'),   'value',   t.font_family || 'Century Gothic');
+    setIfNotFocused($('#tb-project-by'),    'value',   t.project_by || 'Arch. Nicola Debiasi');
+    setIfNotFocused($('#tb-designer'),      'value',   t.designer || 'Arch. Nicola Debiasi');
+    setIfNotFocused($('#tb-date-override'), 'value',   t.date_override || '');
+  }
+  function setTbStatus(msg) {
+    const el = $('#tb-status');
     if (!el) return;
     el.textContent = msg;
     if (msg) setTimeout(() => { el.textContent = ''; }, 2500);
@@ -437,6 +464,25 @@
         syncColorSwatch();
         saveLabelNow();
       });
+    });
+
+    // Titleblock form: stesso pattern auto-save.
+    let tbSaveTimer = null;
+    function saveTbNow() {
+      call('sm_settings_set', { group: 'titleblock', values: readTitleblock() });
+      setTbStatus('Saved');
+    }
+    function saveTbDebounced() {
+      clearTimeout(tbSaveTimer);
+      tbSaveTimer = setTimeout(saveTbNow, 350);
+    }
+    ['tb-height', 'tb-font-family', 'tb-date-override'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.addEventListener('input', saveTbDebounced);
+    });
+    ['tb-enabled', 'tb-project-by', 'tb-designer'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.addEventListener('change', saveTbNow);
     });
 
     // UI form: auto-save su change checkbox.

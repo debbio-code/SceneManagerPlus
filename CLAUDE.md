@@ -57,14 +57,19 @@ scene_manager_plus.rb               # loader, registra l'extension
 scene_manager_plus/
 ├── main.rb                         # entry point: menu + toolbar + comando
 ├── assets/default_logo.png         # logo bundled per watermark
+├── assets/titleblock/              # asset bundlati per il cartiglio
+│   ├── company.txt                 # 4 righe dati aziendali
+│   └── logo.jpg                    # logo aziendale per il cartiglio
 ├── core/
 │   ├── buffer.rb                   # Defer mode: stato globale edit in RAM + flush!
-│   ├── exporter.rb                 # Batch export PNG/JPG + watermark via ImageRep
+│   ├── exporter.rb                 # Batch export PNG/JPG + watermark + titleblock via ImageRep
 │   ├── folders.rb                  # cartelle logiche (schema + load/save)
 │   ├── naming.rb                   # format/preview/apply_rename pattern
 │   ├── previews.rb                 # cache PNG anteprime per-modello persistente
 │   ├── scene_model.rb              # wrapper su Sketchup.active_model.pages
-│   └── settings.rb                 # config persistente con defaults
+│   ├── settings.rb                 # config persistente con defaults
+│   ├── text_render.rb              # PowerShell+System.Drawing per filename label
+│   └── titleblock.rb               # PowerShell+System.Drawing per cartiglio
 └── ui/
     ├── dialog.rb                   # Main HtmlDialog + bridge + polling scene attiva
     ├── export_dialog.rb            # Dialog Export (scope picker + progress)
@@ -305,6 +310,66 @@ offset_x/y, opacity).
   e l'input rimane a `#000000`; il `change` event non sempre scatta).
   Usato invece input testuale hex + swatch + 6 preset clickabili
   (vedi `settings.html` group-filename-label). Sempre lowercase.
+
+## Title block (cartiglio) sull'export
+
+`Core::TitleBlock` aggiunge un cartiglio sotto l'immagine esportata
+(estende il canvas verso il basso, NON copre l'immagine). Coesiste
+indipendente da logo watermark e filename label.
+
+Layout 5 box (left → right):
+1. **Cliente / Oggetto** — left-aligned. Cliente = `naming.prefix_custom`
+   (riuso esplicito), Oggetto = `page.name`. 2 righe con label "CLIENTE:"
+   e "OGGETTO:" allineate alla stessa X, valore subito dopo la rispettiva
+   label (no doppia colonna). Auto-fit del FONT del valore se sfora.
+2. **Tavola nr. / Data** — MID font (`midRatio = 0.82` × labelSz/valueSz),
+   block centrato come unità nel box; label "TAVOLA nr.:" e "DATA:"
+   alla stessa X, valore inline dopo. Tavola = stesso `{nnn}` del naming
+   pattern padded. Data = `Time.now.strftime('%d/%m/%Y')` o override da
+   `titleblock.date_override`.
+3. **Progetto / Disegnato e controllato da** — stessi MID font del box 2.
+4. **Dati aziendali** — bundlato in `assets/titleblock/company.txt`. Prima
+   riga in `boldFont`, le altre in `smallFont`. Interlinea compatta
+   (`lineHeight = smallSz`, no descent intero), blocco centrato verticalmente.
+   Tutte le righe left-aligned alla stessa X.
+5. **Logo** — bundlato in `assets/titleblock/logo.jpg`, 10% di W fissa.
+
+Assets bundlati in `scene_manager_plus/assets/titleblock/`:
+`company.txt` (4 righe), `logo.jpg`. Letti da
+`Settings.titleblock_company_txt_path` / `Settings.titleblock_logo_path`
+(percorsi sotto `PLUGIN_DIR` per funzionare anche su Junction install).
+
+**Auto-size dei box**: Logo fisso 10%; box 2/3/4 = larghezza testo
+× `boxBreath` (1.15, "respiro" 15%) + 2×pad; box Cliente = remainder.
+
+**Font global auto-shrink**: il calcolo larghezze gira in loop. Se
+`sum(box widths) > target`, scala TUTTI i font -1px e ricalcola.
+Mid font ricreati al volo a `labelSz × midRatio`. Ferma quando entra
+o a `valueSz ≤ 10`. Iters tipico 5-10.
+
+**Cross-box baseline alignment**: `bY_top` e `bY_bot` calcolati una sola
+volta sul `labelFont`/`valueFont` (box 1, font più grande). Tutti i
+testi degli altri box vengono posizionati a `bY - propria_ascent`
+(via `Get-Asc`, che calcola ascent in pixel da `FontFamily.GetCellAscent
+/ GetEmHeight × Font.Size`). Così la riga superiore di tutti i box ha
+la stessa baseline anche con font size diverse.
+
+**Render**: `Core::TitleBlock.render_batch` — singola spawn PowerShell
+in batch (uno per scena, cambia solo Cliente/Tavola/Oggetto). Stesso
+pattern hidden-spawn di `TextRender`.
+
+**Composite**: `Exporter.append_titleblock(image_path, tb_png_path)`
+estende il canvas verso il basso. Carica image base + titleblock,
+costruisce buffer BGRA top-down `bw × (bh + th)`, copia base nella parte
+superiore e titleblock in quella inferiore, salva via `ImageRep.set_data`
++ `save_file`. Applicato DOPO `apply_overlays` così logo+label restano
+nell'immagine originale.
+
+**Trappola PS case-insensitive**: PowerShell tratta `$w` e `$W`,
+`$h` e `$H` come la STESSA variabile. Mai usare `$w` come temp se in
+scope esterno c'è `$W` (width canvas) — collassa width totale a un
+numero piccolo e l'output viene schiacciato. Usare `$ww`, `$bw`, ecc.
+Già successo due volte durante lo sviluppo del cartiglio.
 
 ## Line scale multiplier
 

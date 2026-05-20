@@ -281,6 +281,77 @@
       </div>
     </section>
 
+    <section class="group" id="group-titleblock">
+      <h2>Title block (cartiglio)</h2>
+      <small class="muted" style="display:block; margin-bottom:8px;">
+        Aggiunge un cartiglio sotto l'immagine esportata (estende il canvas
+        verso il basso, non copre l'immagine). Indipendente da logo watermark
+        e filename label.
+      </small>
+
+      <div class="row">
+        <label class="check">
+          <input type="checkbox" id="tb-enabled">
+          <span>Add title block on export</span>
+        </label>
+      </div>
+
+      <div class="row two-col">
+        <div>
+          <label>Height (px)</label>
+          <input type="number" id="tb-height" min="40" max="600" step="1">
+        </div>
+        <div>
+          <label>Font family</label>
+          <input type="text" id="tb-font-family" placeholder="Century Gothic" list="tb-fonts">
+          <datalist id="tb-fonts">
+            <option value="Century Gothic">
+            <option value="Arial">
+            <option value="Calibri">
+            <option value="Tahoma">
+            <option value="Verdana">
+            <option value="Segoe UI">
+            <option value="Times New Roman">
+            <option value="Georgia">
+          </datalist>
+        </div>
+      </div>
+
+      <div class="row">
+        <label>Progetto:</label>
+        <select id="tb-project-by">
+          <option value="Arch. Nicola Debiasi">Arch. Nicola Debiasi</option>
+          <option value="Guido Bazzotti">Guido Bazzotti</option>
+          <option value="Najafov Agharahim">Najafov Agharahim</option>
+        </select>
+      </div>
+
+      <div class="row">
+        <label>Disegnato e controllato da:</label>
+        <select id="tb-designer">
+          <option value="Arch. Nicola Debiasi">Arch. Nicola Debiasi</option>
+          <option value="Guido Bazzotti">Guido Bazzotti</option>
+          <option value="Najafov Agharahim">Najafov Agharahim</option>
+        </select>
+      </div>
+
+      <div class="row">
+        <label>Data override (optional)</label>
+        <input type="text" id="tb-date-override" placeholder="empty = export date (e.g. 20/05/2026)">
+        <small class="muted" style="margin-top:4px;">
+          Lascia vuoto per usare la data del momento di export. Cliente
+          si legge da "Custom prefix" (sezione Naming pattern). Tavola nr.
+          è lo stesso progressivo {nnn} del naming pattern. Dati aziendali
+          e logo aziendali sono bundlati nel plugin.
+        </small>
+      </div>
+
+      <div class="actions">
+        <span class="auto-save-hint">Changes are saved automatically.</span>
+        <span id="tb-status" class="status"></span>
+      </div>
+    </section>
+
     <section class="group" id="group-ui">
       <h2>Interface</h2>
 
