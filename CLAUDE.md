@@ -395,6 +395,55 @@ sull'export funziona. Ipotesi non confermata: a 300×150 con
 Va indagato più a fondo — per ora il moltiplicatore Thumbnails è esposto
 ma di fatto inefficace.
 
+## Investigazione aperta — `add_from_view` e layer accesi manualmente
+
+**Stato**: in pausa, da riprendere con dati diagnostici dall'utente.
+
+**Sintomo riportato**: partendo da una scena esistente, accendendo manualmente
+qualche layer dal Layer Manager e poi creando una nuova scena dalla vista (📷+),
+i layer accesi NON risultano visibili nella nuova scena.
+
+**Ipotesi finora**: il codice in `SceneModel.add_from_view` usa
+`!hidden_on_active.include?(layer)` (cioè la hidden-list SALVATA della scena
+attiva) per ricostruire la visibilità sulla nuova pagina. Questo è giusto per
+preservare i layer "Add visible tag" del Layers Manager (vedi
+`docs/SU2019-LESSONS.md`), ma potrebbe ignorare modifiche manuali post-
+attivazione se SU non aggiorna `active.layers` quando l'utente toggla un layer.
+
+**Tentativo scartato**: sostituire con `layer.visible?` puro rompe "Add visible
+tag" (lessons doc lo dichiara esplicitamente come "bug opposto").
+
+**Possibile fix**: OR delle due fonti — `layer.visible? || !active.layers.include?(layer)`
+— ma ha un caso ambiguo (layer globalmente visibile + page hidden-list lo
+nasconde → OR dice "visibile" ma viewport dice "hidden"). Da chiarire con
+diagnostica prima di scegliere.
+
+**Diagnostica già installata** in `add_from_view` (scene_model.rb): stampa
+sulla Ruby Console:
+- `active.use_hidden_layers?`, dimensione di `active.layers`
+- elenco "mismatches": layer dove `!active.layers.include?(l)` diverge da
+  `l.visible?` (cioè dove page-override e model-visibility raccontano cose
+  diverse)
+- stato del nuovo page subito dopo `pages.add` + override
+
+**Prossimo step alla ripresa**: chiedere all'utente di riprodurre il bug con
+Ruby Console aperta e incollare l'output `[SM+] add_from_view DIAG: ...`.
+In base ai mismatch capiremo se SU aggiorna `active.layers`, `layer.visible?`,
+entrambi, o nessuno, quando l'utente toggla un layer nel Layer Manager —
+e di conseguenza qual è la formula corretta per `effective_visibility`.
+
+Tabella di verità da costruire (X = da scoprire):
+
+| Caso                          | layer.visible? | in active.layers | effective viewport |
+|-------------------------------|----------------|------------------|--------------------|
+| "Add visible tag"             | F              | F                | T (visible)        |
+| Layer normalmente hidden      | X              | T                | F                  |
+| Layer normalmente visible     | T              | F                | T                  |
+| Utente accende layer hidden   | X              | X                | T                  |
+| Utente spegne layer visible   | X              | X                | F                  |
+
+I log diagnostici servono a riempire le X.
+
 ## Note per future sessioni
 
 - Lavoro condiviso tra postazioni → utente continuerà da un'altra macchina.
