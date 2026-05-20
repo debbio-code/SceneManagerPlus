@@ -179,16 +179,76 @@
 
   SMS.setState = function (state) {
     SMS.state = state;
-    const naming = (state.settings && state.settings.naming) || {};
-    const exp    = (state.settings && state.settings.export) || {};
-    const logo   = (state.settings && state.settings.logo)   || {};
-    const ui     = (state.settings && state.settings.ui)     || {};
+    const naming  = (state.settings && state.settings.naming)         || {};
+    const exp     = (state.settings && state.settings.export)         || {};
+    const preview = (state.settings && state.settings.preview)        || {};
+    const logo    = (state.settings && state.settings.logo)           || {};
+    const label   = (state.settings && state.settings.filename_label) || {};
+    const ui      = (state.settings && state.settings.ui)             || {};
     writeForm(naming);
     writeExport(exp);
+    writePreview(preview);
     writeLogo(logo, state.default_logo_name);
+    writeLabel(label);
     writeUi(ui);
     requestPreview();
   };
+
+  function readPreview() {
+    return {
+      line_scale_multiplier: toFloatOr($('#preview-line-scale').value, 1.0)
+    };
+  }
+  function writePreview(p) {
+    setIfNotFocused($('#preview-line-scale'), 'value',
+      p.line_scale_multiplier == null ? 1 : p.line_scale_multiplier);
+  }
+
+  function normalizeHex(s) {
+    if (!s) return '#ffffff';
+    var v = String(s).trim().toLowerCase();
+    if (v[0] !== '#') v = '#' + v;
+    // espande #abc → #aabbcc
+    if (/^#[0-9a-f]{3}$/.test(v)) {
+      v = '#' + v[1] + v[1] + v[2] + v[2] + v[3] + v[3];
+    }
+    if (!/^#[0-9a-f]{6}$/.test(v)) return '#ffffff';
+    return v;
+  }
+  function syncColorSwatch() {
+    var v = normalizeHex($('#label-color').value);
+    var sw = $('#label-color-swatch');
+    if (sw) sw.style.background = v;
+  }
+  function readLabel() {
+    return {
+      enabled:     $('#label-enabled').checked,
+      font_family: $('#label-font-family').value || 'Arial',
+      font_size:   toIntOr($('#label-font-size').value, 28),
+      bold:        $('#label-bold').checked,
+      color:       normalizeHex($('#label-color').value),
+      offset_x:    toIntOr($('#label-offset-x').value, 20),
+      offset_y:    toIntOr($('#label-offset-y').value, 20),
+      opacity:     toIntOr($('#label-opacity').value, 100)
+    };
+  }
+  function writeLabel(l) {
+    setIfNotFocused($('#label-enabled'),     'checked', !!l.enabled);
+    setIfNotFocused($('#label-font-family'), 'value',   l.font_family || 'Arial');
+    setIfNotFocused($('#label-font-size'),   'value',   (l.font_size == null ? 28 : l.font_size));
+    setIfNotFocused($('#label-bold'),        'checked', !!l.bold);
+    setIfNotFocused($('#label-color'),       'value',   normalizeHex(l.color));
+    setIfNotFocused($('#label-offset-x'),    'value',   (l.offset_x == null ? 20 : l.offset_x));
+    setIfNotFocused($('#label-offset-y'),    'value',   (l.offset_y == null ? 20 : l.offset_y));
+    setIfNotFocused($('#label-opacity'),     'value',   (l.opacity  == null ? 100 : l.opacity));
+    syncColorSwatch();
+  }
+  function setLabelStatus(msg) {
+    const el = $('#label-status');
+    if (!el) return;
+    el.textContent = msg;
+    if (msg) setTimeout(() => { el.textContent = ''; }, 2500);
+  }
 
   function readUi() {
     return {
@@ -277,6 +337,19 @@
       const el = document.getElementById(id);
       if (el) el.addEventListener('input', saveExportDebounced);
     });
+
+    // Preview line scale: auto-save indipendente (gruppo 'preview').
+    let prevSaveTimer = null;
+    function savePreviewNow() {
+      call('sm_settings_set', { group: 'preview', values: readPreview() });
+      setExportStatus('Saved');
+    }
+    function savePreviewDebounced() {
+      clearTimeout(prevSaveTimer);
+      prevSaveTimer = setTimeout(savePreviewNow, 350);
+    }
+    const prevLs = document.getElementById('preview-line-scale');
+    if (prevLs) prevLs.addEventListener('input', savePreviewDebounced);
     ['export-format', 'export-antialias', 'export-transparent'].forEach(id => {
       const el = document.getElementById(id);
       if (el) el.addEventListener('change', saveExportNow);
@@ -316,6 +389,55 @@
       call('sm_pick_logo', { current: $('#logo-path').value });
     });
     $('#logo-use-default').addEventListener('change', updateLogoPathRow);
+
+    // Filename label form: stesso pattern auto-save (debounce su testo/numeri,
+    // immediato su checkbox e color).
+    let labelSaveTimer = null;
+    function saveLabelNow() {
+      call('sm_settings_set', { group: 'filename_label', values: readLabel() });
+      setLabelStatus('Saved');
+    }
+    function saveLabelDebounced() {
+      clearTimeout(labelSaveTimer);
+      labelSaveTimer = setTimeout(saveLabelNow, 350);
+    }
+    ['label-font-family', 'label-font-size', 'label-offset-x', 'label-offset-y', 'label-opacity'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.addEventListener('input', saveLabelDebounced);
+    });
+    ['label-enabled', 'label-bold'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.addEventListener('change', saveLabelNow);
+    });
+    // Color: input testuale (CEF 2019 ha <input type=color> instabile).
+    // - 'input' aggiorna swatch in tempo reale e fa autosave debounced.
+    // - 'blur'/'change' normalizza il valore (es. 'fff' → '#ffffff').
+    const labelColor = document.getElementById('label-color');
+    if (labelColor) {
+      labelColor.addEventListener('input', () => {
+        syncColorSwatch();
+        saveLabelDebounced();
+      });
+      labelColor.addEventListener('change', () => {
+        labelColor.value = normalizeHex(labelColor.value);
+        syncColorSwatch();
+        saveLabelNow();
+      });
+      labelColor.addEventListener('blur', () => {
+        labelColor.value = normalizeHex(labelColor.value);
+        syncColorSwatch();
+      });
+    }
+    // Preset buttons: click → set value + save immediato
+    document.querySelectorAll('.color-preset').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const c = btn.getAttribute('data-color');
+        if (!c || !labelColor) return;
+        labelColor.value = c;
+        syncColorSwatch();
+        saveLabelNow();
+      });
+    });
 
     // UI form: auto-save su change checkbox.
     function saveUiNow() {

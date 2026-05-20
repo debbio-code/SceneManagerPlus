@@ -139,6 +139,31 @@ module SceneManagerPlus
           page_opts['ShowTransition'] = false unless saved_show_trans.nil?
         end
 
+        # Line scale specifico per le thumbnail: SU 2019 non supporta
+        # scale_factor in write_image, quindi mutiamo EdgeWidth/ProfileWidth
+        # temporaneamente (come fa Exporter per i suoi). Indipendente dal
+        # multiplier dell'export.
+        prev_cfg = Settings.get('preview') || {}
+        prev_scale = (prev_cfg['line_scale_multiplier'] || 1.0).to_f
+        prev_scale = 1.0 if prev_scale <= 0
+        ropts = model.rendering_options
+        saved_edge_width   = ropts['EdgeWidth']
+        saved_profile_widt = (ropts['ProfileWidth'] rescue nil)
+        apply_edge_scale   = prev_scale != 1.0 && saved_edge_width.is_a?(Numeric)
+        if apply_edge_scale
+          new_ew = [(saved_edge_width * prev_scale).round, 1].max
+          new_pw = (saved_profile_widt.is_a?(Numeric) ? [(saved_profile_widt * prev_scale).round, 1].max : nil)
+          begin
+            ropts['EdgeWidth']    = new_ew
+            ropts['ProfileWidth'] = new_pw if new_pw
+            puts "[SM+] previews line scale ×#{prev_scale}: EdgeWidth #{saved_edge_width}→#{new_ew}" +
+                 (new_pw ? ", ProfileWidth #{saved_profile_widt}→#{new_pw}" : '')
+          rescue => e
+            warn "[SM+] could not apply preview edge scale: #{e.message}"
+            apply_edge_scale = false
+          end
+        end
+
         finish = lambda do
           begin
             if prev_page
@@ -152,6 +177,13 @@ module SceneManagerPlus
           if page_opts
             page_opts['TransitionTime'] = saved_trans_time unless saved_trans_time.nil?
             page_opts['ShowTransition'] = saved_show_trans unless saved_show_trans.nil?
+          end
+          if apply_edge_scale
+            begin
+              ropts['EdgeWidth']    = saved_edge_width
+              ropts['ProfileWidth'] = saved_profile_widt if saved_profile_widt.is_a?(Numeric)
+            rescue
+            end
           end
           on_done&.call(count)
         end
@@ -174,6 +206,18 @@ module SceneManagerPlus
           path = File.join(dir, "#{uid}.png")
           begin
             pages.selected_page = page
+            # Riapplica il line scale DOPO pages.selected_page=: se la scena
+            # ha PAGE_USE_RENDERING_OPTIONS, SU appena cambia pagina ripristina
+            # EdgeWidth/ProfileWidth salvati nella scena, sovrascrivendo la
+            # nostra modifica fatta prima del loop. Settando qui garantiamo
+            # che write_image veda i valori scalati.
+            if apply_edge_scale
+              begin
+                ropts['EdgeWidth']    = new_ew
+                ropts['ProfileWidth'] = new_pw if new_pw
+              rescue
+              end
+            end
             view.write_image(
               filename:    path,
               width:       WIDTH,

@@ -153,17 +153,21 @@ Firma `sm_reorder`: `{ ids: [], before_id: id|null, dest_folder_id: id|null }`.
 **Macchina dev (questa postazione)**: i file in
 `%APPDATA%\SketchUp\SketchUp 2019\SketchUp\Plugins\scene_manager_plus`
 sono **copie reali**, non junction (admin privileges non disponibili sempre).
-Dopo ogni modifica:
+
+**Claude esegue automaticamente la copia** dopo ogni modifica al codice del
+plugin (anche dopo `git pull` che tocca file del plugin), senza chiedere
+conferma. Comando da eseguire:
 
 ```powershell
-$src = "D:\Claude\SceneManager+"
+$src = "C:\Claude\Sketchup Plugins\SceneManagerPlus"
 $plug = "$env:APPDATA\SketchUp\SketchUp 2019\SketchUp\Plugins"
-Remove-Item "$plug\scene_manager_plus" -Recurse -Force
+Remove-Item "$plug\scene_manager_plus" -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item "$plug\scene_manager_plus.rb" -Force -ErrorAction SilentlyContinue
 Copy-Item "$src\scene_manager_plus.rb" "$plug\scene_manager_plus.rb" -Force
 Copy-Item "$src\scene_manager_plus" "$plug\" -Recurse
 ```
 
-- Modifiche **Ruby (.rb)** → **riavvia SketchUp**.
+- Modifiche **Ruby (.rb)** → **avvisare l'utente di riavviare SketchUp**.
 - Modifiche **HTML/CSS/JS** → basta chiudere+riaprire la finestra del plugin
   (c'è cache-bust su `index.html` / `settings.html` / `properties.html`).
 
@@ -279,6 +283,51 @@ Le note di archivio entrano negli `errors` mostrati nel messagebox finale.
 Cartelle annidabili nel modello (`parent_id`), ma UI/DnD oggi filtra le
 nested. Scene non in nessuna cartella vivono al root. L'ordine root è
 quello di `Core::SceneModel.logical_order`.
+
+## Filename label sull'export
+
+Stampa il nome file (senza estensione) in basso-sx dell'immagine esportata.
+Settings group `filename_label` (font_family, font_size, bold, color hex,
+offset_x/y, opacity).
+
+- **Render testo**: `Core::TextRender.render_batch` lancia PowerShell +
+  `System.Drawing` (font/size/colore real). Una sola spawn per export
+  (rende tutte le label in batch, una PNG ciascuna). Spawn **nascosta**
+  via `WScript.Shell.Run(cmd, 0, true)` — niente flash di console.
+  Fallback a `system()` se Win32OLE non c'è.
+- **Composite**: `Core::Exporter.apply_overlays(image_path, specs)` sostituisce
+  il vecchio `apply_watermark` e gestisce logo + label in **un solo**
+  load/blend/save → su JPG niente doppia ri-codifica quando entrambi attivi.
+  Le spec hanno `anchor_x` (`:left`/`:right`), `anchor_y` (`:top`/`:bottom`),
+  `offset_x/y`, opzionale `width_pct` per scalare, `opacity`.
+- **Color picker**: `<input type="color">` in CEF di SU 2019 è inaffidabile
+  (accetta solo hex lowercase, `#FFFFFF` viene rifiutato silenziosamente
+  e l'input rimane a `#000000`; il `change` event non sempre scatta).
+  Usato invece input testuale hex + swatch + 6 preset clickabili
+  (vedi `settings.html` group-filename-label). Sempre lowercase.
+
+## Line scale multiplier
+
+Due moltiplicatori separati nei settings:
+- `export.line_scale_multiplier` (default 2.0): applicato durante l'export.
+- `preview.line_scale_multiplier` (default 1.0): applicato durante la
+  generazione thumbnail 300×150.
+
+Pattern (SU 2019 senza `scale_factor` in write_image): si mutano
+temporaneamente `RenderingOptions['EdgeWidth']` e `['ProfileWidth']` e si
+ripristinano in `finish`. **Trappola**: se la scena ha
+`PAGE_USE_RENDERING_OPTIONS`, SU al `pages.selected_page = page` ripristina
+i valori salvati nella scena, sovrascrivendo la modifica fatta prima del
+loop. Soluzione: settare EdgeWidth/ProfileWidth **dentro lo step**, dopo
+`pages.selected_page = page` e prima di `view.write_image` (sia in Exporter
+sia in Previews).
+
+**Limite noto sulle thumbnails**: anche con il fix sopra, il line scale
+multiplier sulle thumbnail **non sembra produrre cambio visibile**, mentre
+sull'export funziona. Ipotesi non confermata: a 300×150 con
+`antialias: false` la rasterizzazione di SU clampa la line width a 1px.
+Va indagato più a fondo — per ora il moltiplicatore Thumbnails è esposto
+ma di fatto inefficace.
 
 ## Note per future sessioni
 

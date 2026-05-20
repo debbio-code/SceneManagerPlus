@@ -42,9 +42,10 @@ module SceneManagerPlus
         return on_done&.call(0, nil, ['No active model'], false) unless model
 
         settings_all  = Settings.all
-        export_cfg    = settings_all['export'] || {}
-        logo_cfg      = settings_all['logo']   || {}
-        naming_cfg    = settings_all['naming'] || {}
+        export_cfg    = settings_all['export']         || {}
+        logo_cfg      = settings_all['logo']           || {}
+        naming_cfg    = settings_all['naming']         || {}
+        label_cfg     = settings_all['filename_label'] || {}
 
         out_dir, dir_notes, dir_err = resolve_output_dir(export_cfg['output_dir'], model.path.to_s)
         unless out_dir
@@ -104,13 +105,44 @@ module SceneManagerPlus
           puts "[SM+] watermark DISABLED in settings (logo.enabled=false)"
         end
 
+        # Pre-computa metadata per ogni target: filename base (senza ext) e uid.
+        # Usato sia dal naming sia dal pre-render delle filename label.
+        targets_meta = targets.map do |page, idx|
+          name_out = if naming_cfg['enabled']
+                       Naming.format(idx, page.name.to_s, skp_title, naming_cfg)
+                     else
+                       page.name.to_s
+                     end
+          name_out = page.name.to_s if name_out.to_s.strip.empty?
+          base_name = sanitize_filename(name_out)
+          [page, idx, base_name, SceneModel.page_id(page)]
+        end
+
+        # Pre-renderizza tutte le filename label in un'unica chiamata PowerShell
+        # (riusa System.Drawing per font/size/colore configurabili).
+        label_pngs = nil
+        label_warn = nil
+        if label_cfg['enabled']
+          begin
+            items = targets_meta.map { |_p, _i, base_name, uid| [uid, base_name] }
+            label_pngs = TextRender.render_batch(items, label_cfg)
+            produced = label_pngs.keys.reject { |k| k == '_tmpdir' }.size
+            label_warn = "Filename labels: nessuna immagine generata" if produced.zero?
+          rescue => e
+            label_warn = "Filename label render failed: #{e.message}"
+            warn "[SM+] label pre-render error: #{e.class}: #{e.message}"
+          end
+        end
+
         errors = []
         errors.concat(Array(dir_notes))
-        errors << logo_warn if logo_warn
+        errors << logo_warn  if logo_warn
+        errors << label_warn if label_warn
 
         puts "[SM+] export start: out=#{out_dir} fmt=#{fmt} size=#{wpx}x#{hpx} aa=#{aa} " \
              "transp=#{transp} line_scale=#{line_scale} " \
-             "logo_enabled=#{logo_cfg['enabled'].inspect} logo_img=#{logo_img ? 'loaded' : 'no'}"
+             "logo_enabled=#{logo_cfg['enabled'].inspect} logo_img=#{logo_img ? 'loaded' : 'no'} " \
+             "label_enabled=#{label_cfg['enabled'].inspect} labels_ready=#{label_pngs ? label_pngs.keys.size - 1 : 0}"
 
         # SU 2019: write_image non supporta :scale_factor (aggiunto in SU 2020).
         # Fallback: prima del render aumentiamo temporaneamente RenderingOptions
@@ -164,6 +196,8 @@ module SceneManagerPlus
             end
           rescue
           end
+          # Pulisci i PNG temporanei delle filename label
+          TextRender.cleanup(label_pngs) if label_pngs
           errors << 'Cancelled by user' if cancelled
           @cancel  = false
           @running = false
@@ -180,19 +214,25 @@ module SceneManagerPlus
             finish.call(false); next
           end
 
-          page, idx_for_name = targets[i]
+          page, _idx_for_name, base_name, uid = targets_meta[i]
           i += 1
-          name_out = if naming_cfg['enabled']
-                       Naming.format(idx_for_name, page.name.to_s, skp_title, naming_cfg)
-                     else
-                       page.name.to_s
-                     end
-          name_out = page.name.to_s if name_out.to_s.strip.empty?
-          fname    = sanitize_filename(name_out) + ext
-          fpath    = unique_path(File.join(out_dir, fname))
+          fname = base_name + ext
+          fpath = unique_path(File.join(out_dir, fname))
 
           begin
             pages.selected_page = page
+            # Riapplica EdgeWidth/ProfileWidth DOPO pages.selected_page=: se la
+            # scena ha PAGE_USE_RENDERING_OPTIONS, SU al cambio pagina ripristina
+            # i valori salvati nella scena, sovrascrivendo la nostra modifica
+            # fatta prima del loop. Settando qui garantiamo che write_image
+            # veda i valori scalati su SU 2019 (dove scale_factor non c'è).
+            if apply_edge_scale
+              begin
+                ropts['EdgeWidth']    = new_ew
+                ropts['ProfileWidth'] = new_pw if new_pw
+              rescue
+              end
+            end
             write_args = {
               filename:     fpath,
               width:        wpx,
@@ -205,12 +245,46 @@ module SceneManagerPlus
             # dialog "JPG Image Options".
             write_args[:compression] = 0.9 if fmt != 'png'
             view.write_image(write_args)
+
+            # Costruisci la lista di overlay (logo + filename label) per
+            # comporli in un solo load/blend/save → niente doppia ri-codifica
+            # JPG quando entrambi sono attivi.
+            specs = []
             if logo_img
+              specs << {
+                img:       logo_img,
+                width_pct: (logo_cfg['width_pct'] || 15).to_f,
+                anchor_x:  :right,
+                anchor_y:  :bottom,
+                offset_x:  (logo_cfg['offset_x'] || 20).to_i,
+                offset_y:  (logo_cfg['offset_y'] || 20).to_i,
+                opacity:   ((logo_cfg['opacity'] || 100).to_f / 100.0)
+              }
+            end
+            if label_pngs && (label_png = label_pngs[uid]) && File.file?(label_png)
               begin
-                apply_watermark(fpath, logo_img, logo_cfg, fmt)
+                label_img = Sketchup::ImageRep.new
+                label_img.load_file(label_png)
+                specs << {
+                  img:      label_img,
+                  # native size: nessuno scale
+                  anchor_x: :left,
+                  anchor_y: :bottom,
+                  offset_x: (label_cfg['offset_x'] || 20).to_i,
+                  offset_y: (label_cfg['offset_y'] || 20).to_i,
+                  opacity:  ((label_cfg['opacity'] || 100).to_f / 100.0)
+                }
               rescue => e
-                errors << "Watermark failed on '#{page.name}': #{e.message}"
-                warn "[SM+] apply_watermark failed on '#{page.name}': #{e.class}: #{e.message}"
+                errors << "Filename label load failed on '#{page.name}': #{e.message}"
+              end
+            end
+
+            unless specs.empty?
+              begin
+                apply_overlays(fpath, specs)
+              rescue => e
+                errors << "Overlay failed on '#{page.name}': #{e.message}"
+                warn "[SM+] apply_overlays failed on '#{page.name}': #{e.class}: #{e.message}"
                 warn e.backtrace.first(3).join("\n") if e.backtrace
               end
             end
@@ -228,65 +302,35 @@ module SceneManagerPlus
         step.call
       end
 
-      # Compone il logo sull'immagine appena scritta (in-place).
-      # Per JPG, ImageRep.save_file scrive secondo l'estensione di destinazione.
-      def apply_watermark(image_path, logo_img, logo_cfg, fmt)
+      # Compone una lista di overlay (logo, filename label, ecc.) sopra
+      # l'immagine appena scritta. Un solo load + blend + save per gestire
+      # N overlay → su JPG niente doppia ri-codifica.
+      #
+      # Ogni spec è un hash:
+      #   img:       Sketchup::ImageRep da sovrapporre (richiesto)
+      #   width_pct: % della larghezza base a cui scalare l'overlay (opz.;
+      #              se assente → dimensione nativa di img)
+      #   anchor_x:  :left | :right    (default :left)
+      #   anchor_y:  :top  | :bottom   (default :bottom)
+      #   offset_x:  px dal bordo dell'anchor (default 0)
+      #   offset_y:  px dal bordo dell'anchor (default 0)
+      #   opacity:   0.0..1.0          (default 1.0)
+      def apply_overlays(image_path, specs)
+        return if specs.nil? || specs.empty?
         base = Sketchup::ImageRep.new
         base.load_file(image_path)
         bw = base.width
         bh = base.height
-        puts "[SM+] watermark on #{File.basename(image_path)}: base=#{bw}x#{bh} bpp=#{base.bits_per_pixel}"
+        puts "[SM+] overlays on #{File.basename(image_path)}: base=#{bw}x#{bh} n=#{specs.size}"
 
-        width_pct = (logo_cfg['width_pct'] || 15).to_f
-        width_pct = 1.0 if width_pct < 1
-        width_pct = 100.0 if width_pct > 100
-        target_w  = [(bw * width_pct / 100.0).round, 1].max
-        scale     = target_w.to_f / logo_img.width
-        target_h  = [(logo_img.height * scale).round, 1].max
+        # Resolve placement (può saltare overlay fuori dalla canvas)
+        resolved = specs.map { |s| resolve_overlay(s, bw, bh) }.compact
+        return if resolved.empty?
 
-        off_x = (logo_cfg['offset_x'] || 20).to_i
-        off_y = (logo_cfg['offset_y'] || 20).to_i
-        opacity = (logo_cfg['opacity'] || 100).to_f / 100.0
-        opacity = 0.0 if opacity < 0
-        opacity = 1.0 if opacity > 1
-
-        # Logo position: bottom-right by default (più comune per watermark);
-        # offset_x/offset_y sono margini dal bordo destro/inferiore.
-        x0 = bw - target_w - off_x
-        y0 = bh - target_h - off_y
-        x0 = 0 if x0 < 0
-        y0 = 0 if y0 < 0
-
-        puts "[SM+] watermark place: target=#{target_w}x#{target_h} at (#{x0},#{y0}) opacity=#{opacity}"
-        composite_bilinear!(base, logo_img, x0, y0, target_w, target_h, opacity)
-
-        # save_file usa l'estensione per determinare il formato
-        ok = base.save_file(image_path)
-        puts "[SM+] watermark save_file ok=#{ok.inspect} → #{image_path}"
-      end
-
-      # Composita logo_img scalato a (tw,th) sopra base partendo da (x0,y0)
-      # con `opacity` applicata al canale alpha del logo.
-      #
-      # Byte layout: ImageRep#set_data su Windows con 32 bpp si aspetta
-      # pixel data in ordine BGRA (DIB top-down), NON RGBA. Inoltre
-      # color_at_uv usa convenzione OpenGL: v=0 in basso, v=1 in alto;
-      # noi indicizziamo top-down quindi flippiamo v.
-      #
-      # Performance: pre-alloca un buffer binario di bw*bh*4 byte con setbyte
-      # (molto più veloce di String#<< o Array#pack per immagine grande).
-      # Il logo viene pre-campionato una volta sulla griglia (tw,th).
-      def composite_bilinear!(base, logo, x0, y0, tw, th, opacity)
-        bw = base.width
-        bh = base.height
-        base_colors = base.colors
-
-        # Pre-alloca buffer BGRA. "\0" * N è veloce in Ruby.
+        # Pre-alloca buffer BGRA (DIB top-down, vedi SU2019-LESSONS.md).
         buf = ("\0" * (bw * bh * 4)).force_encoding(Encoding::BINARY)
-
-        # Pass 1: scrivi tutta la base nel buffer (BGRA order).
         i = 0
-        base_colors.each do |c|
+        base.colors.each do |c|
           buf.setbyte(i,     c.blue)
           buf.setbyte(i + 1, c.green)
           buf.setbyte(i + 2, c.red)
@@ -294,47 +338,88 @@ module SceneManagerPlus
           i += 4
         end
 
-        # Clamp bbox
+        resolved.each { |ov| blend_into_buffer!(buf, bw, bh, ov) }
+
+        base.set_data(bw, bh, 32, 0, buf)
+        ok = base.save_file(image_path)
+        puts "[SM+] overlays save_file ok=#{ok.inspect} → #{File.basename(image_path)}"
+      end
+
+      def resolve_overlay(spec, bw, bh)
+        img = spec[:img]
+        return nil unless img
+
+        if spec[:width_pct]
+          pct = spec[:width_pct].to_f
+          pct = 1.0   if pct < 1
+          pct = 100.0 if pct > 100
+          tw  = [(bw * pct / 100.0).round, 1].max
+          scale = tw.to_f / img.width
+          th  = [(img.height * scale).round, 1].max
+        else
+          tw = img.width
+          th = img.height
+        end
+
+        ax = spec[:anchor_x] || :left
+        ay = spec[:anchor_y] || :bottom
+        ox = (spec[:offset_x] || 0).to_i
+        oy = (spec[:offset_y] || 0).to_i
+
+        x0 = (ax == :right)  ? (bw - tw - ox) : ox
+        y0 = (ay == :bottom) ? (bh - th - oy) : oy
+        x0 = 0 if x0 < 0
+        y0 = 0 if y0 < 0
+
+        opacity = (spec[:opacity] || 1.0).to_f
+        opacity = 0.0 if opacity < 0
+        opacity = 1.0 if opacity > 1
+
+        puts "[SM+]   overlay: #{tw}x#{th} at (#{x0},#{y0}) anchor=#{ax}/#{ay} opacity=#{opacity}"
+        { img: img, x: x0, y: y0, w: tw, h: th, opacity: opacity }
+      end
+
+      # Pre-campiona overlay su griglia (tw,th) e blenda nella bbox del buf
+      # (BGRA, top-down). FLIP v: color_at_uv usa origine in basso, noi
+      # indicizziamo top-down quindi v = 1 - (dy+0.5)/th.
+      def blend_into_buffer!(buf, bw, bh, ov)
+        img = ov[:img]; x0 = ov[:x]; y0 = ov[:y]
+        tw  = ov[:w];   th = ov[:h]; opacity = ov[:opacity]
+
         x1 = [x0 + tw, bw].min
         y1 = [y0 + th, bh].min
         x0c = [x0, 0].max
         y0c = [y0, 0].max
-        if x1 > x0c && y1 > y0c
-          # Pass 2: pre-campiona il logo sulla griglia (tw,th).
-          # FLIP v: il logo ha origine in alto (immagine), color_at_uv usa
-          # origine in basso, quindi dy=0 (top bbox) ↔ v ~1.0 (top logo).
-          logo_rgba = Array.new(tw * th)
-          th.times do |dy|
-            v = 1.0 - (dy + 0.5) / th.to_f
-            tw.times do |dx|
-              u = (dx + 0.5) / tw.to_f
-              c = logo.color_at_uv(u, v, true)
-              logo_rgba[dy * tw + dx] = [c.red, c.green, c.blue, c.alpha]
-            end
-          end
+        return unless x1 > x0c && y1 > y0c
 
-          # Pass 3: blend solo nella bbox (BGRA order)
-          (y0c...y1).each do |y|
-            dy = y - y0
-            base_row = y * bw
-            (x0c...x1).each do |x|
-              dx = x - x0
-              lr, lg, lb, lalpha = logo_rgba[dy * tw + dx]
-              la = (lalpha.to_f / 255.0) * opacity
-              next if la <= 0.001
-              j = (base_row + x) * 4
-              bb = buf.getbyte(j)     # base Blue
-              bgc = buf.getbyte(j + 1) # base Green
-              br = buf.getbyte(j + 2)  # base Red
-              inv = 1.0 - la
-              buf.setbyte(j,     (lb * la + bb  * inv).round)
-              buf.setbyte(j + 1, (lg * la + bgc * inv).round)
-              buf.setbyte(j + 2, (lr * la + br  * inv).round)
-            end
+        img_rgba = Array.new(tw * th)
+        th.times do |dy|
+          v = 1.0 - (dy + 0.5) / th.to_f
+          tw.times do |dx|
+            u = (dx + 0.5) / tw.to_f
+            c = img.color_at_uv(u, v, true)
+            img_rgba[dy * tw + dx] = [c.red, c.green, c.blue, c.alpha]
           end
         end
 
-        base.set_data(bw, bh, 32, 0, buf)
+        (y0c...y1).each do |y|
+          dy = y - y0
+          base_row = y * bw
+          (x0c...x1).each do |x|
+            dx = x - x0
+            lr, lg, lb, lalpha = img_rgba[dy * tw + dx]
+            la = (lalpha.to_f / 255.0) * opacity
+            next if la <= 0.001
+            j = (base_row + x) * 4
+            bb  = buf.getbyte(j)
+            bgc = buf.getbyte(j + 1)
+            br  = buf.getbyte(j + 2)
+            inv = 1.0 - la
+            buf.setbyte(j,     (lb * la + bb  * inv).round)
+            buf.setbyte(j + 1, (lg * la + bgc * inv).round)
+            buf.setbyte(j + 2, (lr * la + br  * inv).round)
+          end
+        end
       end
 
       # Lista [page, name_index] dove name_index è la posizione 1-based in

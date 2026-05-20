@@ -7,6 +7,7 @@ module SceneManagerPlus
   require File.join(PLUGIN_DIR, 'core', 'settings')
   require File.join(PLUGIN_DIR, 'core', 'naming')
   require File.join(PLUGIN_DIR, 'core', 'previews')
+  require File.join(PLUGIN_DIR, 'core', 'text_render')
   require File.join(PLUGIN_DIR, 'core', 'exporter')
   require File.join(PLUGIN_DIR, 'ui', 'dialog')
   require File.join(PLUGIN_DIR, 'ui', 'settings_dialog')

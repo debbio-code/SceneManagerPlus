@@ -122,13 +122,16 @@
 
       <div class="row two-col">
         <div>
-          <label>Line scale multiplier</label>
+          <label>Line scale multiplier — Export</label>
           <input type="number" id="export-line-scale" min="0.1" max="10" step="0.1">
         </div>
-        <div></div>
+        <div>
+          <label>Line scale multiplier — Thumbnails</label>
+          <input type="number" id="preview-line-scale" min="0.1" max="10" step="0.1">
+        </div>
       </div>
       <small class="muted" style="margin-top:-4px;">
-        Multiplies edge thickness in the export (SU 2020+: native; SU 2019: applied via temporary EdgeWidth/ProfileWidth).
+        Multiplies edge thickness. Export multiplier applies to PNG/JPG output; Thumbnails multiplier only to the 300×150 in-list previews — keeps lines/text readable at small scale.
       </small>
 
       <div class="actions">
@@ -191,6 +194,90 @@
       <div class="actions">
         <span class="auto-save-hint">Changes are saved automatically.</span>
         <span id="logo-status" class="status"></span>
+      </div>
+    </section>
+
+    <section class="group" id="group-filename-label">
+      <h2>Filename label</h2>
+      <small class="muted" style="display:block; margin-bottom:8px;">
+        Stampa il nome del file (senza estensione) sull'immagine esportata.
+      </small>
+
+      <div class="row">
+        <label class="check">
+          <input type="checkbox" id="label-enabled">
+          <span>Print filename on export</span>
+        </label>
+      </div>
+
+      <div class="row two-col">
+        <div>
+          <label>Font family</label>
+          <input type="text" id="label-font-family" placeholder="Arial" list="label-fonts">
+          <datalist id="label-fonts">
+            <option value="Arial">
+            <option value="Calibri">
+            <option value="Tahoma">
+            <option value="Verdana">
+            <option value="Segoe UI">
+            <option value="Times New Roman">
+            <option value="Georgia">
+            <option value="Courier New">
+            <option value="Consolas">
+          </datalist>
+        </div>
+        <div>
+          <label>Font size (px)</label>
+          <input type="number" id="label-font-size" min="6" max="512" step="1">
+        </div>
+      </div>
+
+      <div class="row two-col">
+        <div>
+          <label>Color (hex)</label>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span id="label-color-swatch" style="display:inline-block; width:24px; height:24px; border:1px solid #888; border-radius:3px; background:#ffffff;"></span>
+            <input type="text" id="label-color" maxlength="7" placeholder="#ffffff" style="flex:1; font-family:monospace;">
+          </div>
+          <div id="label-color-presets" style="margin-top:6px; display:flex; gap:4px;">
+            <button type="button" class="color-preset" data-color="#ffffff" style="width:22px; height:22px; padding:0; background:#ffffff; border:1px solid #888; cursor:pointer;" title="White"></button>
+            <button type="button" class="color-preset" data-color="#000000" style="width:22px; height:22px; padding:0; background:#000000; border:1px solid #888; cursor:pointer;" title="Black"></button>
+            <button type="button" class="color-preset" data-color="#ff0000" style="width:22px; height:22px; padding:0; background:#ff0000; border:1px solid #888; cursor:pointer;" title="Red"></button>
+            <button type="button" class="color-preset" data-color="#ffff00" style="width:22px; height:22px; padding:0; background:#ffff00; border:1px solid #888; cursor:pointer;" title="Yellow"></button>
+            <button type="button" class="color-preset" data-color="#00aaff" style="width:22px; height:22px; padding:0; background:#00aaff; border:1px solid #888; cursor:pointer;" title="Light blue"></button>
+            <button type="button" class="color-preset" data-color="#888888" style="width:22px; height:22px; padding:0; background:#888888; border:1px solid #888; cursor:pointer;" title="Gray"></button>
+          </div>
+        </div>
+        <div>
+          <label class="check" style="margin-top:18px;">
+            <input type="checkbox" id="label-bold">
+            <span>Bold</span>
+          </label>
+        </div>
+      </div>
+
+      <div class="row two-col">
+        <div>
+          <label>Offset X (px from left)</label>
+          <input type="number" id="label-offset-x" min="0" max="4096" step="1">
+        </div>
+        <div>
+          <label>Offset Y (px from bottom)</label>
+          <input type="number" id="label-offset-y" min="0" max="4096" step="1">
+        </div>
+      </div>
+
+      <div class="row two-col">
+        <div>
+          <label>Opacity (%)</label>
+          <input type="number" id="label-opacity" min="0" max="100" step="1">
+        </div>
+        <div></div>
+      </div>
+
+      <div class="actions">
+        <span class="auto-save-hint">Changes are saved automatically.</span>
+        <span id="label-status" class="status"></span>
       </div>
     </section>
 

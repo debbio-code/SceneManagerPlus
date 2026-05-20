@@ -26,6 +26,13 @@ module SceneManagerPlus
           'output_dir' => '',
           'line_scale_multiplier' => 2.0
         },
+        'preview' => {
+          # Moltiplicatore independente di EdgeWidth/ProfileWidth applicato
+          # durante la generazione delle thumbnail (300×150). A scale piccola,
+          # 1px di edge sparisce: alzando questo si ottengono linee più
+          # leggibili e testo che appare più proporzionato.
+          'line_scale_multiplier' => 1.0
+        },
         'logo' => {
           'enabled'      => false,
           'use_default'  => true,
@@ -34,6 +41,16 @@ module SceneManagerPlus
           'offset_x'     => 20,
           'offset_y'     => 20,
           'opacity'      => 100
+        },
+        'filename_label' => {
+          'enabled'     => false,
+          'font_family' => 'Arial',
+          'font_size'   => 28,
+          'bold'        => false,
+          'color'       => '#ffffff', # lowercase: HTML5 <input type=color> rifiuta hex uppercase
+          'offset_x'    => 20, # px dal bordo SINISTRO
+          'offset_y'    => 20, # px dal bordo INFERIORE
+          'opacity'     => 100
         },
         'ui' => {
           'show_order_banner' => true
