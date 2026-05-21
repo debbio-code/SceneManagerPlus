@@ -54,7 +54,13 @@ module SceneManagerPlus
           'opacity'     => 100
         },
         'ui' => {
-          'show_order_banner' => true
+          'show_order_banner'       => true,
+          # Workaround bug SU 2019: alla riapertura del file le Scene Tabs
+          # possono restare visibili nel viewport anche se nel menu sono off.
+          # Se true, all'apertura del dialog SM+ inviamo due send_action di
+          # toggle (on→off) per ri-sincronizzare. Default false: chi vuole
+          # le tabs ON non vuole vederle nascoste da noi.
+          'hide_scene_tabs_on_open' => false
         },
         'titleblock' => {
           # Cartiglio sotto l'immagine (canvas extension). Coesiste con

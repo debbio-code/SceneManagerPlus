@@ -281,11 +281,13 @@
 
   function readUi() {
     return {
-      show_order_banner: $('#ui-show-order-banner').checked
+      show_order_banner:       $('#ui-show-order-banner').checked,
+      hide_scene_tabs_on_open: $('#ui-hide-scene-tabs-on-open').checked
     };
   }
   function writeUi(u) {
     setIfNotFocused($('#ui-show-order-banner'), 'checked', u.show_order_banner !== false);
+    setIfNotFocused($('#ui-hide-scene-tabs-on-open'), 'checked', !!u.hide_scene_tabs_on_open);
   }
   function setUiStatus(msg) {
     const el = $('#ui-status');
@@ -494,6 +496,8 @@
     }
     const uiBanner = document.getElementById('ui-show-order-banner');
     if (uiBanner) uiBanner.addEventListener('change', saveUiNow);
+    const uiHideTabs = document.getElementById('ui-hide-scene-tabs-on-open');
+    if (uiHideTabs) uiHideTabs.addEventListener('change', saveUiNow);
 
     call('sm_settings_ready');
   });

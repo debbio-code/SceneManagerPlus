@@ -59,6 +59,52 @@ module SceneManagerPlus
         warn "[SM+] poll_active_scene: #{e.class}: #{e.message}"
       end
 
+      # Workaround bug SU 2019: dopo apertura file le Scene Tabs possono
+      # restare visibili nel viewport anche se nel menu risultano off, e
+      # l'unico modo per ri-sincronizzare è togglare due volte dal menu
+      # (on → no-op visibile, off → spegne davvero). Riproduciamo la
+      # stessa cosa via send_action. Opt-in da Settings → Interface
+      # (settings.ui.hide_scene_tabs_on_open, default false).
+      #
+      # Command IDs: su Mac il selettore string "showSceneTabs:" funziona;
+      # su Windows SU 2019 serve l'ID numerico, e Trimble non lo documenta.
+      # Identificato 10534 enumerando il menu di SU via Win32 GetMenu/
+      # GetMenuString (script tools/dump-su-menu.ps1, 2026-05-21).
+      # Override possibile via:
+      #   Sketchup.write_default('SceneManagerPlus', 'scene_tabs_cmd_id', N)
+      WIN_SHOW_SCENE_TABS_CMD_ID = 10534
+
+      def scene_tabs_cmd_id
+        Sketchup.read_default('SceneManagerPlus', 'scene_tabs_cmd_id', WIN_SHOW_SCENE_TABS_CMD_ID).to_i
+      end
+
+      def force_hide_scene_tabs_if_enabled
+        return unless Core::Settings.get('ui')['hide_scene_tabs_on_open']
+        toggle_scene_tabs!
+        toggle_scene_tabs!
+      rescue => e
+        warn "[SM+] force_hide_scene_tabs_if_enabled: #{e.class}: #{e.message}"
+      end
+
+      def toggle_scene_tabs!
+        if RUBY_PLATFORM =~ /darwin/
+          Sketchup.send_action('showSceneTabs:')
+        else
+          Sketchup.send_action(scene_tabs_cmd_id)
+        end
+      end
+
+      # Helper di diagnostica: prova un command ID dalla Ruby Console.
+      # Uso:
+      #   SceneManagerPlus::UI::Dialog.try_scene_tabs_cmd(21031)
+      # Se le Scene Tabs si toggle-ano (anche se in modo buggy), abbiamo
+      # trovato l'ID giusto. Per fissarlo in modo persistente:
+      #   Sketchup.write_default('SceneManagerPlus', 'scene_tabs_cmd_id', 21031)
+      def try_scene_tabs_cmd(id)
+        puts "[SM+] try send_action(#{id})"
+        Sketchup.send_action(id.to_i)
+      end
+
       # Accessor usato da ExportDialog per pushare progress al main dialog.
       def dialog_handle
         @dialog
@@ -128,6 +174,7 @@ module SceneManagerPlus
         @dialog.set_file(prepare_index)
         @dialog.show
         Sketchup.write_default('SceneManagerPlus', 'main_dialog_open', true)
+        force_hide_scene_tabs_if_enabled
         start_active_scene_poll
         # Fallback: se sm_ready non arriva entro 1s, forziamo push_state.
         # Utile se il bridge JS->Ruby non si aggancia per qualche motivo.

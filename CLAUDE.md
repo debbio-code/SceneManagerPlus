@@ -489,6 +489,46 @@ Tabella di verità chiusa:
 | Utente accende layer hidden   | T            | T (stale)        | T        | T ✓      |
 | Utente spegne layer visible   | F            | F (stale)        | F        | F ✓      |
 
+## Workaround Scene Tabs visibili dopo riapertura file (SU 2019)
+
+Bug noto SU 2019: se chiudi un file con Scene Tabs OFF, alla riapertura le
+tabs restano visibili nel viewport anche se nel menu `View → Scene Tabs`
+risultano off. Workaround manuale: clicca la voce nel menu (accende — no
+effetto visibile per il bug) e ricliccala (spegne davvero).
+
+Riprodotto in `Dialog#force_hide_scene_tabs_if_enabled` con due
+`Sketchup.send_action(10534)` consecutivi. Opt-in via Settings → Interface
+→ "Force Scene Tabs OFF when the plugin opens" (default false: chi vuole
+le tabs ON non vuole vederle nascoste da noi). Override dell'ID via
+`Sketchup.write_default('SceneManagerPlus', 'scene_tabs_cmd_id', N)`.
+
+### Come trovare command IDs su SU 2019 Windows
+
+Trimble non documenta gli ID numerici di `send_action` per Windows.
+Selectors string Mac (`"showSceneTabs:"` ecc.) ritornano `false` su
+Windows e non funzionano. Soluzione deterministica:
+`tools/dump-su-menu.ps1` enumera il menu di SU via Win32 `GetMenu` /
+`GetSubMenu` / `GetMenuString` / `GetMenuItemID` e stampa tutti gli item
+con percorso menu + command ID.
+
+Uso: SU aperto in primo piano, poi:
+```
+powershell -ExecutionPolicy Bypass -File tools/dump-su-menu.ps1
+```
+
+Output esempio: `ID=10534     > &View > &Scene Tabs`. ID utili scoperti:
+- 10534 = View → Scene Tabs
+- 10535 = View → Animation → Next Scene
+- 10536 = View → Animation → Previous Scene
+- 21067 = View → Animation → Add Scene
+- 21068 = View → Animation → Update Scene
+- 21078 = View → Animation → Delete Scene
+
+Anti-pattern (perso ~mezz'ora): cercare l'ID online. Su forum si trova
+10624 ma è "Camera Properties dialog" (undocumented Windows-only test
+window), NON Scene Tabs. Per qualsiasi nuovo bisogno di command ID,
+lanciare direttamente lo script.
+
 ## Note per future sessioni
 
 - Lavoro condiviso tra postazioni → utente continuerà da un'altra macchina.
