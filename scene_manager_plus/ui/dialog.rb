@@ -342,9 +342,12 @@ module SceneManagerPlus
         model      = Sketchup.active_model
         scenes_raw = Core::SceneModel.list_ordered
         tree       = Core::SceneModel.tree
+        active_pg  = model && model.pages.selected_page
+        active_id  = active_pg ? Core::SceneModel.page_id(active_pg) : nil
         state = {
           scenes:    scenes_raw,
           tree:      tree,
+          active_id: active_id,
           folders:   Core::Folders.all,
           flag_keys: Core::SceneModel::FLAG_KEYS,
           deferred:  Core::Buffer.deferred?,

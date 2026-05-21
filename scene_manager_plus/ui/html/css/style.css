@@ -165,6 +165,15 @@ body {
   margin-right: 6px;
   cursor: grab;
   font-size: 14px;
+  padding: 2px 4px;
+  border-radius: 2px;
+  display: inline-block;
+}
+/* Scena effettivamente visualizzata nel viewport (distinta dalla selezione,
+   che resta azzurra). Marker giallo pieno sull'handle. */
+.scene-row.active .grip {
+  background: #d4a017;
+  color: #1a1a1a;
 }
 .scene-row .row-update {
   color: #888;

@@ -4,6 +4,7 @@ window.SM = (function () {
   var lastPreviewSig = '';
   var lastPreviewTs  = 0;
   var selection = []; // array di scene id
+  var activeId  = null; // id della scena attualmente visualizzata nel viewport
   var anchorId  = null; // ultimo id cliccato (per shift-range)
   var pendingCollapseId = null; // id su cui collassare la selezione se mouseup senza drag
   var lastClickId = null;
@@ -20,6 +21,7 @@ window.SM = (function () {
     if (!state.tree)   state.tree   = [];
     if (!state.flag_keys) state.flag_keys = [];
     if (!state.previews) state.previews = {};
+    if (state.active_id) activeId = state.active_id;
     // preview_ts viene usato come cache-buster nell'<img src>. Bumparlo a
     // ogni setState (cosa che facevamo prima) forzava CEF a ri-richiedere
     // ogni PNG dopo OGNI operazione (rename, reorder, update_from_view,
@@ -139,6 +141,7 @@ window.SM = (function () {
     row.dataset.parent = parent;
     if (parent !== 'root') row.classList.add('in-folder');
     if (selection.indexOf(scene.id) !== -1) row.classList.add('selected');
+    if (scene.id === activeId) row.classList.add('active');
     var pendingDot = scene.pending ? '<span class="pending-dot" title="Pending edits"></span>' : '';
     var previewUrl = state.previews && state.previews[scene.id];
     var thumbHtml;
@@ -166,8 +169,8 @@ window.SM = (function () {
       if (selection.indexOf(scene.id) === -1) {
         selection = [scene.id];
         anchorId = scene.id;
+        selectPageLocal(scene.id);
         render();
-        if (!state.deferred) SMBridge.selectPage(scene.id);
       }
       showContextMenu(e.clientX, e.clientY, scene.id);
     });
@@ -469,12 +472,13 @@ window.SM = (function () {
       if (selection.indexOf(id) !== -1 && selection.length > 1) {
         pendingCollapseId = id;
         anchorId = id;
-        if (!state.deferred) SMBridge.selectPage(id);
+        selectPageLocal(id);
+        render();
         return;
       }
       selection = [id];
       anchorId = id;
-      if (!state.deferred) SMBridge.selectPage(id);
+      selectPageLocal(id);
     }
     render();
   }
@@ -708,7 +712,7 @@ window.SM = (function () {
       if (row && row.scrollIntoView) {
         try { row.scrollIntoView({ block: 'nearest' }); } catch (er) {}
       }
-      if (!state.deferred) SMBridge.selectPage(target);
+      selectPageLocal(target);
     });
 
     SMDnd.attach(listEl, {
@@ -744,11 +748,21 @@ window.SM = (function () {
     safeInit();
   }
 
+  // Chiamato dai click/keynav locali: aggiorna activeId immediatamente
+  // (no attesa del polling 250ms) e attiva la scena nel viewport.
+  function selectPageLocal(id) {
+    // In defer mode la scena nel viewport NON cambia, quindi nemmeno il
+    // marker giallo deve seguire la selezione. Aggiorniamo activeId solo
+    // quando attiviamo davvero la pagina.
+    if (state.deferred) return;
+    activeId = id;
+    SMBridge.selectPage(id);
+  }
+
   function setActiveFromNative(uid) {
     if (!uid) return;
-    // Solo cambio di selezione UI: NIENTE bridge call back.
-    selection = [uid];
-    anchorId  = uid;
+    if (activeId === uid) return;
+    activeId = uid;
     render();
   }
 
