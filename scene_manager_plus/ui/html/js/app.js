@@ -707,12 +707,12 @@ window.SM = (function () {
       e.stopPropagation();
       selection = [target];
       anchorId = target;
+      selectPageLocal(target);
       render();
       var row = listEl && listEl.querySelector('.scene-row[data-id="' + target + '"]');
       if (row && row.scrollIntoView) {
         try { row.scrollIntoView({ block: 'nearest' }); } catch (er) {}
       }
-      selectPageLocal(target);
     });
 
     SMDnd.attach(listEl, {
