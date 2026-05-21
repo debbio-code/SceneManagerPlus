@@ -433,6 +433,12 @@ window.SM = (function () {
   }
 
   function onRowClick(e, id) {
+    // Se l'utente ha cliccato sulla checkbox export-cb, non toccare la selezione:
+    // il click handler del listEl gestirà il bulk toggle.
+    if (e.target && e.target.classList && e.target.classList.contains('export-cb')) {
+      pendingCollapseId = null;
+      return;
+    }
     pendingCollapseId = null;
     // Manual dblclick detection: CEF in SU 2019 può non emettere dblclick
     // dopo che render() ricrea le row tra un click e l'altro.
@@ -477,6 +483,12 @@ window.SM = (function () {
   // collassa la selezione al solo id cliccato.
   function onContainerMouseUp(e) {
     if (pendingCollapseId === null) return;
+    // Non collassare la selezione se il mouseup è su un export-cb: il click
+    // handler gestirà il bulk toggle sulla selezione corrente.
+    if (e.target && e.target.classList && e.target.classList.contains('export-cb')) {
+      pendingCollapseId = null;
+      return;
+    }
     if (window.SMDnd && SMDnd.isDragging && SMDnd.isDragging()) {
       pendingCollapseId = null;
       return;

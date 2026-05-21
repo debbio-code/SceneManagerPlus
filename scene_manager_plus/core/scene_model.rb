@@ -140,11 +140,12 @@ module SceneManagerPlus
       def list_ordered
         pages.map.with_index do |p, i|
           {
-            id:           page_id(p),
-            native_index: i,
-            name:         p.name.to_s,
-            description:  p.description.to_s,
-            flags:        flags_hash(p)
+            id:              page_id(p),
+            native_index:    i,
+            name:            p.name.to_s,
+            description:     p.description.to_s,
+            flags:           flags_hash(p),
+            export_included: export_included?(p)
           }
         end
       end

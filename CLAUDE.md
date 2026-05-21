@@ -128,6 +128,26 @@ controintuitiva (è la lista degli hidden, non degli "override").
 Se in futuro aggiungiamo altri punti che creano scene da view (es.
 "Duplicate scene"), riusare la stessa logica.
 
+## `state.scenes` vs `state.tree` — due payload da tenere allineati
+
+In `push_state` (`ui/dialog.rb`) il JS riceve due rappresentazioni delle
+scene: `state.scenes` (flat list, da `SceneModel.list_ordered`) e
+`state.tree` (albero misto folder+scene, da `SceneModel.tree`, che internamente
+usa `scene_hash`). Il render legge dal tree; lookup come `sceneById(id)` in
+`app.js` leggono invece da `state.scenes`.
+
+**Trappola**: i due builder devono includere gli stessi campi che il JS
+consulta. Già successo con `export_included`: il bulk toggle in
+multi-selezione confrontava `state.scenes[i].export_included !== false` e
+con il campo mancante il check restituiva sempre `true` (undefined !== false),
+quindi `allIncluded` era sempre true e il toggle poteva solo escludere, mai
+re-includere. Fix: tenere `list_ordered` allineato a `scene_hash` su tutti i
+campi che il JS può leggere via `sceneById` (oggi: `export_included`,
+`flags`, `name`, `description`).
+
+Se in futuro si aggiungono attributi per-scena letti dal JS lato bulk/state,
+metterli in entrambi (o far convergere `list_ordered` a riusare `scene_hash`).
+
 ## Bridge Ruby ↔ JavaScript
 
 JS chiama Ruby via `window.sketchup.<callback>(JSON.stringify(payload))`.
