@@ -51,6 +51,43 @@ module SceneManagerPlus
         FLAG_KEYS.each_with_object({}) { |k, h| h[k] = page.send("#{k}?") }
       end
 
+      # Mapping stili del modello → lettera A,B,C... in ordine alfabetico.
+      # Include TUTTI gli stili del modello (anche quelli non usati da scene).
+      # Oltre la Z continua con AA, AB, ... ma in pratica un modello con >26
+      # stili è patologico.
+      def styles_map
+        m = model
+        return [] unless m && m.respond_to?(:styles) && m.styles
+        names = m.styles.map { |s| s.name.to_s }.sort_by { |n| n.downcase }
+        names.each_with_index.map do |name, i|
+          { name: name, letter: letter_for_index(i) }
+        end
+      rescue => e
+        warn "[SM+] styles_map: #{e.class}: #{e.message}"
+        []
+      end
+
+      def letter_for_index(i)
+        s = ''
+        i += 1
+        while i > 0
+          i -= 1
+          s = ((('A'.ord) + (i % 26)).chr) + s
+          i /= 26
+        end
+        s
+      end
+
+      # Nome dello stile assegnato alla scena, o nil se la pagina non espone
+      # uno stile (raro su SU 2019, ma defensivo).
+      def page_style_name(page)
+        return nil unless page.respond_to?(:style)
+        st = page.style
+        st ? st.name.to_s : nil
+      rescue
+        nil
+      end
+
       # Sposta la pagina con uid `id` all'indice `target_index` (0-based).
       # Usa l'API ufficiale: pages.add_matchphoto/erase non vanno bene,
       # usiamo invece swap iterativo perché Pages non ha move diretto.
@@ -145,7 +182,8 @@ module SceneManagerPlus
             name:            p.name.to_s,
             description:     p.description.to_s,
             flags:           flags_hash(p),
-            export_included: export_included?(p)
+            export_included: export_included?(p),
+            style_name:      page_style_name(p)
           }
         end
       end
@@ -214,6 +252,7 @@ module SceneManagerPlus
           description:     page.description.to_s,
           flags:           flags_hash(page),
           export_included: export_included?(page),
+          style_name:      page_style_name(page),
           pending:         false
         }
         # Overlay buffer edits
@@ -479,6 +518,64 @@ module SceneManagerPlus
           m.abort_operation
           warn "[SM+] add_from_view: #{e.class}: #{e.message}"
           nil
+        end
+      end
+
+      # Riassegna uno stile a una scena. Anche in defer mode l'operazione è
+      # immediata: assegnare uno stile dipende dal qui-e-ora del viewport e
+      # cambia model.styles.selected_style come effetto collaterale (come
+      # update_from_view).
+      #
+      # Flusso:
+      #   1) ricorda la pagina attualmente selezionata
+      #   2) attiva la pagina target (così page.update() captura sul target)
+      #   3) cambia model.styles.selected_style allo stile voluto
+      #   4) page.update(PAGE_USE_STYLE | PAGE_USE_RENDERING_OPTIONS) cattura
+      #   5) ripristina la pagina selezionata originale
+      #
+      # Side effect noto: se lo stile precedente era dirty, le modifiche
+      # pending vengono perse (analogo al comportamento native SU). Per Fase B
+      # accettiamo: l'utente che riassegna sa cosa sta facendo.
+      def assign_style(page_uid, style_name)
+        m = model
+        return false unless m
+        p = find_by_id(page_uid)
+        unless p
+          warn "[SM+] assign_style: page not found id=#{page_uid.inspect}"
+          return false
+        end
+        target_style = m.styles.find { |s| s.name.to_s == style_name.to_s }
+        unless target_style
+          warn "[SM+] assign_style: style '#{style_name}' not found in model"
+          return false
+        end
+        # Costanti PAGE_USE_* — lookup difensivo come in update_from_view
+        sc = lambda do |*names|
+          names.each { |n| return Object.const_get(n) if Object.const_defined?(n) }
+          0
+        end
+        style_bit = sc.call('PAGE_USE_STYLE', 'PAGE_USE_SKETCHCS', 'PAGE_USE_RENDERING_OPTIONS')
+        ro_bit    = sc.call('PAGE_USE_RENDERING_OPTIONS')
+        mask = style_bit | ro_bit
+        prev_page = m.pages.selected_page
+        m.start_operation('SM+ Assign style', true)
+        begin
+          m.pages.selected_page = p
+          m.styles.selected_style = target_style
+          # Forza il flag use_style a true: senza, page.update con STYLE bit
+          # non lega effettivamente lo stile alla scena (cfr. PAGE_USE_*).
+          p.use_style = true if p.respond_to?(:use_style=)
+          p.use_rendering_options = true if p.respond_to?(:use_rendering_options=)
+          p.update(mask)
+          m.pages.selected_page = prev_page if prev_page && prev_page != p
+          m.commit_operation
+          puts "[SM+] assign_style: page='#{p.name}' style='#{style_name}'"
+          true
+        rescue => e
+          m.abort_operation
+          warn "[SM+] assign_style: #{e.class}: #{e.message}"
+          warn e.backtrace.first(3).join("\n")
+          false
         end
       end
 

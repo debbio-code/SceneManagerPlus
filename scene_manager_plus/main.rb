@@ -14,6 +14,7 @@ module SceneManagerPlus
   require File.join(PLUGIN_DIR, 'ui', 'settings_dialog')
   require File.join(PLUGIN_DIR, 'ui', 'properties_dialog')
   require File.join(PLUGIN_DIR, 'ui', 'export_dialog')
+  require File.join(PLUGIN_DIR, 'ui', 'style_dialog')
 
   unless file_loaded?(__FILE__)
     cmd = ::UI::Command.new(PLUGIN_NAME) { SceneManagerPlus::UI::Dialog.show }

@@ -1,0 +1,128 @@
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  font-family: "Segoe UI", Tahoma, sans-serif;
+  font-size: 12px;
+  color: #ddd;
+  background: #2b2b2b;
+  user-select: none;
+}
+
+#app {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.hdr {
+  padding: 8px 12px;
+  background: #3a3a3a;
+  border-bottom: 1px solid #1e1e1e;
+}
+.hdr-title {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.hdr-label {
+  color: #888;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.hdr-style {
+  color: #ffd97a;
+  font-weight: bold;
+  font-size: 13px;
+}
+.hdr-scope {
+  margin-top: 4px;
+  color: #999;
+  font-size: 10px;
+  font-style: italic;
+}
+
+.group {
+  padding: 8px 12px;
+  border-bottom: 1px solid #1c1c1c;
+}
+.group h3 {
+  margin: 0 0 8px 0;
+  font-size: 10px;
+  font-weight: bold;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #888;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 0;
+  min-height: 24px;
+}
+.row .lbl { color: #ddd; }
+.row select {
+  background: #1a1a1a;
+  color: #ddd;
+  border: 1px solid #1e1e1e;
+  border-radius: 2px;
+  padding: 2px 4px;
+  font: inherit;
+  outline: none;
+  min-width: 130px;
+}
+.row select:focus { border-color: #4ea1ff; }
+.row input[type="checkbox"] {
+  margin: 0;
+  cursor: pointer;
+}
+
+.color-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.hex {
+  background: #1a1a1a;
+  color: #ddd;
+  border: 1px solid #1e1e1e;
+  border-radius: 2px;
+  padding: 2px 4px;
+  font: inherit;
+  font-family: Consolas, "Courier New", monospace;
+  outline: none;
+  width: 80px;
+  text-transform: lowercase;
+}
+.hex:focus { border-color: #4ea1ff; }
+.swatch {
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  border: 1px solid #1e1e1e;
+  border-radius: 2px;
+  background: #000;
+}
+
+.toggle-btn {
+  background: #4a4a4a;
+  border: 1px solid #1e1e1e;
+  color: #ddd;
+  padding: 2px 10px;
+  cursor: pointer;
+  border-radius: 2px;
+  font: inherit;
+}
+.toggle-btn:hover { background: #5a5a5a; }
+.toggle-btn:active { background: #2b5a86; color: #fff; }
+
+.ftr {
+  margin-top: auto;
+  padding: 4px 12px;
+  background: #1e1e1e;
+  color: #888;
+  font-size: 10px;
+  border-top: 1px solid #000;
+}

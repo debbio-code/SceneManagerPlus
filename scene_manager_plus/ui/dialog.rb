@@ -227,6 +227,17 @@ module SceneManagerPlus
           push_state
         end
 
+        dlg.add_action_callback('sm_assign_style') do |_ctx, payload|
+          data = parse(payload)
+          Core::SceneModel.assign_style(data['id'], data['style_name'])
+          push_state
+        end
+
+        dlg.add_action_callback('sm_open_style') do |_ctx, payload|
+          data = parse(payload)
+          StyleDialog.show_for(data['id'], data['style_name'])
+        end
+
         dlg.add_action_callback('sm_delete') do |_ctx, payload|
           data = parse(payload)
           Core::SceneModel.delete_pages(data['ids'])
@@ -350,6 +361,7 @@ module SceneManagerPlus
           active_id: active_id,
           folders:   Core::Folders.all,
           flag_keys: Core::SceneModel::FLAG_KEYS,
+          styles:    Core::SceneModel.styles_map,
           deferred:  Core::Buffer.deferred?,
           pending:   Core::Buffer.pending_count,
           previews:  Core::Previews.url_map,

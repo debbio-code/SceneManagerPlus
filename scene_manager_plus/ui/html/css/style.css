@@ -175,18 +175,31 @@ body {
   background: #d4a017;
   color: #1a1a1a;
 }
-.scene-row .row-update {
-  color: #888;
+/* Badge lettera dello stile assegnato alla scena (A,B,C... alfabetico
+   sui model.styles). In Fase A passivo; le Fasi B/C aggiungono interazioni. */
+.scene-row .row-style-letter {
+  display: inline-block;
+  min-width: 18px;
+  height: 18px;
   margin-right: 6px;
-  cursor: pointer;
-  font-size: 14px;
-  line-height: 1;
-  user-select: none;
-  padding: 2px 3px;
+  padding: 0 4px;
+  background: #3a3a3a;
+  border: 1px solid #1e1e1e;
   border-radius: 2px;
+  color: #cfd8e3;
+  font-size: 11px;
+  font-weight: bold;
+  line-height: 16px;
+  text-align: center;
+  cursor: pointer;
+  user-select: none;
+  font-family: Consolas, "Courier New", monospace;
 }
-.scene-row .row-update:hover { color: #4ea1ff; background: #1e1e1e; }
-.scene-row .row-update:active { color: #fff; }
+.scene-row .row-style-letter:hover {
+  background: #2b5a86;
+  color: #fff;
+  border-color: #1a4e8a;
+}
 .scene-row .export-cb {
   margin: 0 6px 0 0;
   cursor: pointer;
@@ -363,6 +376,51 @@ body {
   white-space: nowrap;
 }
 .context-menu .ctx-item:hover { background: #2b5a86; color: #fff; }
+
+/* Style picker (right-click sulla lettera) */
+.context-menu .ctx-header {
+  padding: 4px 10px;
+  font-size: 10px;
+  color: #888;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid #1e1e1e;
+  margin-bottom: 2px;
+  user-select: none;
+}
+.context-menu.style-picker-menu { min-width: 180px; }
+.context-menu .ctx-item.style-pick {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+}
+.context-menu .ctx-letter {
+  display: inline-block;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  background: #2b2b2b;
+  border: 1px solid #1e1e1e;
+  border-radius: 2px;
+  color: #cfd8e3;
+  font-size: 11px;
+  font-weight: bold;
+  line-height: 16px;
+  text-align: center;
+  font-family: Consolas, "Courier New", monospace;
+}
+.context-menu .ctx-item.style-pick:hover .ctx-letter {
+  background: #1a4e8a;
+  color: #fff;
+}
+.context-menu .ctx-item.style-pick.current {
+  background: #234055;
+}
+.context-menu .ctx-item.style-pick.current .ctx-letter {
+  background: #d4a017;
+  color: #1a1a1a;
+}
 
 .statusbar {
   background: #1e1e1e;

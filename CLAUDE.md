@@ -20,7 +20,14 @@ Feature aggiunte fuori-fase (Fase 3):
   progress bar.
 - **Inline thumbnails** nella lista (toggle Thumbs).
 - **Polling 250ms** per syncare in plugin la scena attivata da tab nativi SU.
-- **Per-row ⟳** icona update-from-view (come "Update Scene" nativo).
+
+Feature aggiunte post-Fase 4:
+- **Style letter badge** per-row al posto di ⟳: mostra A,B,C... (alfabetico
+  su tutti gli stili del modello). Click sx → mini Style Manager; click dx →
+  picker per riassegnare lo stile. Vedi "Style management" più in basso.
+- **Update from view in toolbar**: l'icona ⟳ è stata spostata dalla row al
+  bottone `btn-update` della toolbar, ora opera sulla selezione (anche
+  multipla). La row ha solo la lettera stile, non più due trigger di update.
 
 ## Documentazione di supporto
 
@@ -40,7 +47,10 @@ Feature aggiunte fuori-fase (Fase 3):
 | Stile finestra principale | `STYLE_UTILITY` (palette sempre sopra viewport, posizione+dimensione persistite affidabilmente — `STYLE_DIALOG` non salva la posizione su SU 2019). Auto-riaprire all'avvio se era aperta (flag `main_dialog_open` via `write_default`, ri-show con timer 0.5s dopo `file_loaded`). Settings/Properties restano `STYLE_DIALOG` (sono modali-ish). |
 | Navigazione tastiera | `PageUp`/`PageDown`/`Home`/`End` scorrono la selezione lungo l'ordine logico visibile (cartelle chiuse saltate). `ArrowUp`/`ArrowDown` invece **spostano** la selezione (singola o multi-contigua sotto lo stesso parent) nell'ordine logico. Non c'è modo pulito in SU 2019 di hijacker i tasti globalmente, quindi fuori dal plugin resta il comportamento nativo. |
 | Nuova scena da vista | Icona toolbar (📷+) → `SceneModel.add_from_view`. Replica gli override di visibilità layer della pagina attiva (vedi sotto, "Add visible tag"). **Forza tutti gli 8 `FLAG_KEYS` (use_camera, use_style, ecc.) a `true`** dopo `pages.add`, così la nuova scena cattura sempre lo state completo del viewport — `pages.add` da solo rispetta i "Default Scene Properties" globali di SU e se l'utente li ha personalizzati (es. Style/Fog OFF) la scena nascerebbe monca. Scelta UX: il flusso del plugin è "scatta foto completa", non "rispetta i miei default SU". |
-| Update da view (`⟳`) | `SceneModel.update_from_view(id)` costruisce una bitmask `PAGE_USE_*` con lookup difensivo (vedi `docs/SU2019-LESSONS.md`). Per `use_style?` tenta `PAGE_USE_STYLE` → `PAGE_USE_SKETCHCS` → `PAGE_USE_RENDERING_OPTIONS` (fallback piggyback). Per `use_axes?` tenta `PAGE_USE_AXES` → `PAGE_USE_CAMERA`. Script `tools/dump-page-use.rb` per verificare i nomi delle costanti effettivamente esposte dalla SU in uso. **Se lo stile attivo è dirty** (`styles.active_style_changed`), mostra un `UI.messagebox` 3-button YES/NO/CANCEL equivalente al "Warning - Scenes and Styles" nativo: YES → `update_selected_style` poi page.update; NO → mostra istruzioni per "Save as new" via browser (l'API Ruby SU 2019 non lo espone) e abort; CANCEL → toglie il bit style dal mask, salva il resto. Senza questo dialog le modifiche pending allo stile si perdono silenziosamente: `page.update(PAGE_USE_SKETCHCS)` lega la scena allo stile ma non lo flusha. |
+| Update da view (`⟳`) | `SceneModel.update_from_view(id)` costruisce una bitmask `PAGE_USE_*` con lookup difensivo (vedi `docs/SU2019-LESSONS.md`). Per `use_style?` tenta `PAGE_USE_STYLE` → `PAGE_USE_SKETCHCS` → `PAGE_USE_RENDERING_OPTIONS` (fallback piggyback). Per `use_axes?` tenta `PAGE_USE_AXES` → `PAGE_USE_CAMERA`. Script `tools/dump-page-use.rb` per verificare i nomi delle costanti effettivamente esposte dalla SU in uso. **Se lo stile attivo è dirty** (`styles.active_style_changed`), mostra un `UI.messagebox` 3-button YES/NO/CANCEL equivalente al "Warning - Scenes and Styles" nativo: YES → `update_selected_style` poi page.update; NO → mostra istruzioni per "Save as new" via browser (l'API Ruby SU 2019 non lo espone) e abort; CANCEL → toglie il bit style dal mask, salva il resto. Senza questo dialog le modifiche pending allo stile si perdono silenziosamente: `page.update(PAGE_USE_SKETCHCS)` lega la scena allo stile ma non lo flusha. UI: il trigger ⟳ vive nella toolbar (`btn-update`), opera su selezione (anche multipla con loop client-side). Niente più icona update per-row: quello slot è occupato dal badge lettera stile. |
+| Style letter badge | Sostituisce la vecchia ⟳ per-row. Mostra A,B,C... derivato da `SceneModel.styles_map` (ordine alfabetico su `model.styles.map(&:name)`, **tutti** gli stili, anche orfani). Per-scena `scene.style_name` da `page.style.name`. JS lookup via `letterForStyle()` → '?' se manca. Render solo (zero interazione di update): click sx apre mini Style Manager, click dx apre picker riassegna. |
+| Style assignment (click dx lettera) | `SceneModel.assign_style(uid, name)` attiva la target page, fa `styles.selected_style = X`, forza `use_style/use_rendering_options = true`, `page.update(STYLE_BIT \| RO_BIT)`, ripristina la scena attiva precedente. Tutto in una `start_operation` (1 Ctrl+Z). Immediato anche in defer mode (operazione viewport-dipendente, analoga a `update_from_view`). Side-effect noto: se lo stile precedente era dirty, le pending si perdono (come comportamento native SU). |
+| Mini Style Manager (click sx lettera) | `UI::StyleDialog` (`STYLE_DIALOG`) con 3 gruppi: **Edges** (`EdgeColorMode` 0/1/2 = All same/By material/By axis — è il colore *delle linee*, non delle facce; `TransparencySort` 0/1/2); **Background** (`BackgroundColor`, `DrawHorizon` on/off, `SkyColor`); **Display** (`DrawHidden`, Model axes toggle, `DisplaySectionPlanes`, `DisplaySectionCuts`). Edit live → `rendering_options[k] = v` + `styles.update_selected_style` per committare al persistente. All'apertura, la scena di contesto viene attivata nel viewport per feedback live. **Scope sempre = "all scenes using this style"**: niente "only this scene" perché l'API Ruby SU 2019 non espone `style.name=` né `Styles#add_style` da memoria, quindi clonare programmaticamente uno stile non è fattibile pulitamente. Banner nel dialog spiega il workaround manuale: duplicare lo stile in Window → Styles nativo, poi riassegnare via right-click su lettera. **Model Axes è bottone Toggle**, non checkbox: SU 2019 non espone state né setter per il display degli assi nemmeno via `RenderingOption` né via `model.options` (verificato enumerando ogni provider/chiave). Implementato via `Sketchup.send_action(axes_cmd_id)` con `WIN_AXES_CMD_ID = 10522` su Windows (override `Sketchup.write_default('SceneManagerPlus', 'axes_cmd_id', N)`); Mac selector `'showHideAxes:'`. |
 | Rinomina inline | Right-click su scena → context menu → "Rename" → input nella row, Enter = commit, Esc/blur-senza-modifiche = annulla. |
 | Selezione vs scena attiva | Due stati **distinti** nel JS: `selection` (array, barra azzurra, può essere multipla) e `activeId` (singolo, marker giallo sul `.grip`, = scena effettivamente nel viewport). `push_state` invia `active_id` dal `pages.selected_page` di Ruby. `setActiveFromNative` (polling 250ms) aggiorna SOLO `activeId`, mai la selezione (prima la collassava all'uid, e ogni cambio tab nativo distruggeva la multi-selezione). Helper `selectPageLocal(id)` per i click/keynav: in **defer mode è no-op** (la scena nel viewport non cambia → il giallo non deve seguire la selezione), altrimenti setta `activeId` e chiama `SMBridge.selectPage` per feedback immediato senza attendere il polling. **Ordine obbligatorio nei handler keynav (PageUp/Down/Home/End) e click**: `selectPageLocal(id)` PRIMA di `render()`, perché `selectPageLocal` muta `activeId` ma non re-renderizza; se invertito, il marker giallo resta sulla scena precedente fino al successivo `push_state` (lag di 1 step). |
 | Preview thumbnail | 300×150 (stesso aspect ratio dell'export finale). Durante batch generation: transizioni scena disabilitate, antialias off, yield a CEF batched ogni ~total/25 scene. Cache-buster `?t=` bumpato solo a cambio set chiavi o fine-generazione, non a ogni `setState`. |
@@ -78,19 +88,22 @@ scene_manager_plus/
     ├── export_dialog.rb            # Dialog Export (scope picker + progress)
     ├── properties_dialog.rb        # Dialog Properties singola scena (dblclick)
     ├── settings_dialog.rb          # Dialog Settings (naming + export + logo)
+    ├── style_dialog.rb             # Mini Style Manager (click lettera badge)
     └── html/
         ├── index.html              # finestra principale
         ├── export.html             # finestra Export
         ├── properties.html         # finestra Properties
         ├── settings.html           # finestra Settings
-        ├── css/{style,export,properties,settings}.css
+        ├── style.html              # finestra Mini Style Manager
+        ├── css/{style,export,properties,settings,style_dialog}.css
         └── js/
             ├── app.js              # logica lista, selezione, defer, thumbs
             ├── bridge.js           # window.SMBridge → sketchup.<callback>
             ├── dnd.js              # drag&drop custom (no HTML5 native)
             ├── export.js           # logica dialog Export
-            ├── properties.js       # logica dialog Properties (live commit)
-            └── settings.js         # logica dialog Settings
+            ├── properties.js      # logica dialog Properties (live commit)
+            ├── settings.js         # logica dialog Settings
+            └── style_dialog.js     # logica Mini Style Manager (window.SMS)
 ```
 
 ## Limite SU 2019 e scelta "ordine logico only"
@@ -145,7 +158,7 @@ con il campo mancante il check restituiva sempre `true` (undefined !== false),
 quindi `allIncluded` era sempre true e il toggle poteva solo escludere, mai
 re-includere. Fix: tenere `list_ordered` allineato a `scene_hash` su tutti i
 campi che il JS può leggere via `sceneById` (oggi: `export_included`,
-`flags`, `name`, `description`).
+`flags`, `name`, `description`, `style_name`).
 
 Se in futuro si aggiungono attributi per-scena letti dal JS lato bulk/state,
 metterli in entrambi (o far convergere `list_ordered` a riusare `scene_hash`).
@@ -168,13 +181,16 @@ Callback principali in `ui/dialog.rb`:
 | `sm_update_from_view` | come bottone Update nativo |
 | `sm_delete` | cancella scene selezionate |
 | `sm_folder_create` / `_update` / `_delete` / `_toggle` | CRUD cartelle |
+| `sm_assign_style` | riassegna stile a scena (`{ id, style_name }`) |
+| `sm_open_style` | apre Mini Style Manager (`{ id, style_name }`) |
 | `sm_log` | debug → `Ruby Console` |
 
 Firma `sm_reorder`: `{ ids: [], before_id: id|null, dest_folder_id: id|null }`.
 `dest_folder_id=null` = root; `before_id=null` = append in coda.
 
-`SettingsDialog`, `PropertiesDialog`, `ExportDialog` registrano i propri callback
-(prefissi `sm_settings_*`, `sm_properties_*`, `sm_export_*` rispettivamente).
+`SettingsDialog`, `PropertiesDialog`, `ExportDialog`, `StyleDialog` registrano i
+propri callback (prefissi `sm_settings_*`, `sm_properties_*`, `sm_export_*`,
+`sm_style_*` rispettivamente).
 
 ## Installazione e deploy locale
 
@@ -197,7 +213,8 @@ Copy-Item "$src\scene_manager_plus" "$plug\" -Recurse
 
 - Modifiche **Ruby (.rb)** → **avvisare l'utente di riavviare SketchUp**.
 - Modifiche **HTML/CSS/JS** → basta chiudere+riaprire la finestra del plugin
-  (c'è cache-bust su `index.html` / `settings.html` / `properties.html`).
+  (c'è cache-bust su `index.html` / `settings.html` / `properties.html` /
+  `style.html` / `export.html`).
 
 Per il deploy ideale via symlink/junction (richiede admin) e altre note vedi
 `docs/SU2019-LESSONS.md` (sezione "Deploy / packaging").
@@ -230,6 +247,10 @@ le pending-delete.
 Eccezioni che restano immediate anche in defer mode:
 - `select_page` (navigation)
 - `update_from_view` (cattura viewport dipende dal qui-e-ora)
+- `assign_style` (modifica `styles.selected_style` + `page.update` con bit STYLE,
+  dipende dal qui-e-ora come `update_from_view`)
+- Mini Style Manager (`StyleDialog.apply_changes`): edit live, scrive
+  `rendering_options` + `styles.update_selected_style` immediatamente
 
 Auto-flush in `Dialog.set_on_closed`.
 
@@ -519,6 +540,8 @@ powershell -ExecutionPolicy Bypass -File tools/dump-su-menu.ps1
 ```
 
 Output esempio: `ID=10534     > &View > &Scene Tabs`. ID utili scoperti:
+- 10522 = View → Axes (per Mini Style Manager: SU 2019 Ruby API non espone
+  state né setter per il display assi nemmeno via RenderingOptions/options)
 - 10534 = View → Scene Tabs
 - 10535 = View → Animation → Next Scene
 - 10536 = View → Animation → Previous Scene
@@ -530,6 +553,64 @@ Anti-pattern (perso ~mezz'ora): cercare l'ID online. Su forum si trova
 10624 ma è "Camera Properties dialog" (undocumented Windows-only test
 window), NON Scene Tabs. Per qualsiasi nuovo bisogno di command ID,
 lanciare direttamente lo script.
+
+## Style management (lettera badge + Mini Style Manager)
+
+Tre layer di interazione sulla stessa lettera per-row:
+
+| Trigger | Effetto |
+|---|---|
+| Render | Lettera A,B,C... (badge mono) = lo stile assegnato alla scena |
+| Click sx | Apre Mini Style Manager (`StyleDialog.show_for`) per quello stile |
+| Click dx | Apre style picker (`showStylePickerMenu` in app.js) — lista A `<name>`, B `<name>`... lo stile corrente in giallo, click per riassegnare |
+
+**Letter mapping** (`SceneModel.styles_map`): ordine alfabetico per nome stile,
+include **tutti** gli stili del modello (non solo quelli usati). Oltre la Z
+continua con AA, AB... (`letter_for_index`, base 26). Esposto nel `push_state`
+come `state.styles = [{ name, letter }, ...]`. Per-scena `state.scenes[].style_name`
+da `Sketchup::Page#style` (esistente in SU 2019). JS `letterForStyle()` cerca
+e ritorna '?' se nil (stato pre-push o stile orfano).
+
+**Riassegnazione** (`SceneModel.assign_style`): non c'è un setter pulito
+`page.style=` in SU 2019. Workaround: attiva la pagina target, set
+`styles.selected_style = X`, forza `use_style = true` + `use_rendering_options =
+true` (altrimenti `page.update` con STYLE bit non lega davvero lo stile), poi
+`page.update(STYLE_BIT | RO_BIT)`, ripristina la pagina attiva precedente.
+Tutto in 1 `start_operation` = 1 Ctrl+Z. Side-effect: se lo stile uscente era
+dirty, le pending si perdono (comportamento equivalente al nativo). Anche in
+defer mode è immediata (dipende dal qui-e-ora del viewport).
+
+**Mini Style Manager** (`ui/style_dialog.rb`, `STYLE_DIALOG`): edit live di
+rendering options (chiavi `EdgeColorMode`, `TransparencySort`, `BackgroundColor`,
+`DrawHorizon`, `SkyColor`, `DrawHidden`, `DisplaySectionPlanes`,
+`DisplaySectionCuts`). Apre attivando la scena di contesto (live feedback nel
+viewport). Ogni edit → coerce per tipo (hex→`Sketchup::Color`, bool, int) →
+`ro[k] = v` → `styles.update_selected_style` (committa al persistente; senza
+questo gli edit valgono solo per la sessione e all'attivazione successiva
+SU riapplica lo stile salvato perdendo le modifiche).
+
+**Scope = sempre "all scenes using this style"**: l'API Ruby SU 2019 non
+permette di clonare/rinominare uno stile programmaticamente
+(`Sketchup::Style` non ha `name=`; `Sketchup::Styles#add_style` accetta solo
+file `.style` da disco). Quindi "Only this scene" non è implementabile in
+modo pulito. Banner nel dialog spiega: per override per singola scena,
+duplicare lo stile via Window → Styles nativo, poi riassegnare con
+right-click sulla lettera.
+
+**Trappola "Color is for edges, not faces"**: il dropdown "Color" del Style
+panel SU si riferisce al colore delle **linee/spigoli** (RenderingOption
+`EdgeColorMode`, valori 0=All same / 1=By material / 2=By axis). Esiste
+anche `FaceColorMode` per le facce, ma il controllo nativo SU lo chiama
+"Color" e si applica agli edges — già confuso una volta in dev, lasciato
+come `EdgeColorMode`.
+
+**Model axes: niente API Ruby in SU 2019**. Non esiste rendering option né
+metodo `View#display_axes` né provider in `model.options` per leggere/settare
+il display degli assi del modello. Verificato enumerando tutto. L'unico
+modo è `Sketchup.send_action(10522)` (ID View → Axes su Windows; selector
+`'showHideAxes:'` su Mac). Quindi nel Mini Style Manager Model Axes è un
+**bottone Toggle** (non checkbox): fire-and-forget, no state tracking.
+Override ID via `Sketchup.write_default('SceneManagerPlus', 'axes_cmd_id', N)`.
 
 ## Note per future sessioni
 

@@ -1,4 +1,4 @@
-window.__SM_BUILD__ = 'phase2b-2';
+window.__SM_BUILD__ = 'phaseC-style-mini-mgr';
 window.SM = (function () {
   var state = { scenes: [], tree: [], folders: [], flag_keys: [], previews: {} };
   var lastPreviewSig = '';
@@ -15,12 +15,27 @@ window.SM = (function () {
 
   function $(id) { return document.getElementById(id); }
 
+  function escapeAttr(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+  }
+
+  // Lettera associata al nome stile (lookup in state.styles).
+  // Restituisce '?' se lo stile non è mappato o lo state non è ancora arrivato.
+  function letterForStyle(styleName) {
+    if (!styleName || !state.styles) return '?';
+    for (var i = 0; i < state.styles.length; i++) {
+      if (state.styles[i].name === styleName) return state.styles[i].letter;
+    }
+    return '?';
+  }
+
   function setState(newState) {
     state = newState || state;
     if (!state.scenes) state.scenes = [];
     if (!state.tree)   state.tree   = [];
     if (!state.flag_keys) state.flag_keys = [];
     if (!state.previews) state.previews = {};
+    if (!state.styles) state.styles = [];
     if (state.active_id) activeId = state.active_id;
     // preview_ts viene usato come cache-buster nell'<img src>. Bumparlo a
     // ogni setState (cosa che facevamo prima) forzava CEF a ri-richiedere
@@ -153,9 +168,11 @@ window.SM = (function () {
       thumbHtml = '<div class="thumb-empty">no preview</div>';
     }
     var included = scene.export_included !== false;
+    var letter = letterForStyle(scene.style_name);
+    var letterTitle = scene.style_name ? ('Style: ' + scene.style_name) : 'No style';
     row.innerHTML =
       '<span class="grip">&#x2630;</span>' +
-      '<span class="row-update" title="Update scene from view">&#x27F3;</span>' +
+      '<span class="row-style-letter" title="' + escapeAttr(letterTitle) + '">' + letter + '</span>' +
       '<input type="checkbox" class="export-cb" title="Include in batch export (ignored when exporting only selected scenes)"' +
         (included ? ' checked' : '') + '>' +
       '<span class="idx">' + idx + '</span>' +
@@ -200,6 +217,49 @@ window.SM = (function () {
     var m = document.getElementById('sm-ctx-menu');
     if (m && !m.contains(e.target)) hideContextMenu();
   }
+  // Picker stili: lista A nome / B nome / ... per riassegnare uno stile alla
+  // scena cliccata. Stesso pattern di showContextMenu (dismiss via blur/click).
+  function showStylePickerMenu(x, y, sceneId) {
+    hideContextMenu();
+    var styles = state.styles || [];
+    if (styles.length === 0) return;
+    var scene = sceneById(sceneId);
+    var currentName = scene && scene.style_name;
+    var menu = document.createElement('div');
+    menu.className = 'context-menu style-picker-menu';
+    menu.id = 'sm-ctx-menu';
+    var header = document.createElement('div');
+    header.className = 'ctx-header';
+    header.textContent = 'Assign style';
+    menu.appendChild(header);
+    styles.forEach(function (s) {
+      var item = document.createElement('div');
+      item.className = 'ctx-item style-pick';
+      if (s.name === currentName) item.classList.add('current');
+      var letterSpan = '<span class="ctx-letter">' + s.letter + '</span>';
+      item.innerHTML = letterSpan + '<span class="ctx-name"></span>';
+      item.querySelector('.ctx-name').textContent = s.name;
+      item.addEventListener('click', function () {
+        hideContextMenu();
+        if (s.name !== currentName) {
+          SMBridge.assignStyle(sceneId, s.name);
+        }
+      });
+      menu.appendChild(item);
+    });
+    document.body.appendChild(menu);
+    var mw = menu.offsetWidth, mh = menu.offsetHeight;
+    var vw = window.innerWidth, vh = window.innerHeight;
+    if (x + mw > vw) x = Math.max(0, vw - mw - 2);
+    if (y + mh > vh) y = Math.max(0, vh - mh - 2);
+    menu.style.left = x + 'px';
+    menu.style.top  = y + 'px';
+    setTimeout(function () {
+      document.addEventListener('mousedown', onDocMouseDownCloseMenu, true);
+      window.addEventListener('blur', hideContextMenu);
+    }, 0);
+  }
+
   function showContextMenu(x, y, sceneId) {
     hideContextMenu();
     var menu = document.createElement('div');
@@ -520,7 +580,11 @@ window.SM = (function () {
       if (n && n.trim()) SMBridge.folderCreate(n.trim());
     });
     $('btn-update').addEventListener('click', function () {
-      if (selection.length === 1) SMBridge.updateFromView(selection[0]);
+      if (selection.length === 0) return;
+      // Multi-update: itera. updateFromView in Ruby gestisce lo style-dirty
+      // dialog per singola pagina; con N scene selezionate l'utente potrebbe
+      // vedere il dialog più volte se più scene usano lo stesso stile dirty.
+      selection.forEach(function (id) { SMBridge.updateFromView(id); });
     });
     $('btn-delete').addEventListener('click', function () {
       if (selection.length === 0) return;
@@ -611,20 +675,32 @@ window.SM = (function () {
     // arrivava prima che il JS fosse pronto, e la seconda chiamata trovava
     // @dialog.visible? === true ma window.SMP ancora undefined).
 
-    // Click sull'icona "update scene" per riga (delegation, capture):
-    // ferma propagazione così non triggera selezione né drag.
+    // Lettera stile per riga:
+    //   - mousedown: blocca selezione/drag così non triggera click sulla row
+    //   - click sinistro: apre mini Style Manager per lo stile della scena
+    //   - contextmenu (right-click): apre picker con tutti gli stili A,B,C...
     listEl.addEventListener('mousedown', function (e) {
-      if (!e.target.classList || !e.target.classList.contains('row-update')) return;
+      if (!e.target.classList || !e.target.classList.contains('row-style-letter')) return;
       e.stopPropagation();
       e.preventDefault();
     }, true);
     listEl.addEventListener('click', function (e) {
-      if (!e.target.classList || !e.target.classList.contains('row-update')) return;
+      if (!e.target.classList || !e.target.classList.contains('row-style-letter')) return;
       e.stopPropagation();
       var row = e.target.closest('.scene-row');
       if (!row || !row.dataset || !row.dataset.id) return;
-      SMBridge.updateFromView(row.dataset.id);
+      var sc = sceneById(row.dataset.id);
+      if (!sc || !sc.style_name) return;
+      SMBridge.openStyle(row.dataset.id, sc.style_name);
     });
+    listEl.addEventListener('contextmenu', function (e) {
+      if (!e.target.classList || !e.target.classList.contains('row-style-letter')) return;
+      e.preventDefault();
+      e.stopPropagation();
+      var row = e.target.closest('.scene-row');
+      if (!row || !row.dataset || !row.dataset.id) return;
+      showStylePickerMenu(e.clientX, e.clientY, row.dataset.id);
+    }, true);
 
     // Export-include checkbox: blocca selezione/drag, invia toggle a Ruby.
     // Se la row cliccata è dentro una selezione multipla, applica a tutte:

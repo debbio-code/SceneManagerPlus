@@ -26,6 +26,8 @@ window.SMBridge = (function () {
     selectPage:      function (id)    { call('sm_select_page', { id: id }); },
     updatePage:      function (data)  { call('sm_update_page', data); },
     updateFromView:  function (id)    { call('sm_update_from_view', { id: id }); },
+    assignStyle:     function (id, name) { call('sm_assign_style', { id: id, style_name: name }); },
+    openStyle:       function (id, name) { call('sm_open_style', { id: id, style_name: name }); },
     deleteScenes:    function (ids)   { call('sm_delete', { ids: ids }); },
     newSceneFromView:function ()      { call('sm_new_scene_from_view'); },
     folderCreate:    function (name)  { call('sm_folder_create', { name: name }); },

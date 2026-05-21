@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Style</title>
+  <link rel="stylesheet" href="css/style_dialog.css">
+</head>
+<body>
+  <div id="app">
+    <header class="hdr">
+      <div class="hdr-title">
+        <span class="hdr-label">Style:</span>
+        <span id="style-name" class="hdr-style">—</span>
+      </div>
+      <div id="scope-note" class="hdr-scope">Applies to all scenes using this style</div>
+    </header>
+
+    <section class="group">
+      <h3>Edges</h3>
+      <label class="row">
+        <span class="lbl">Color</span>
+        <select id="ctrl-EdgeColorMode" data-key="EdgeColorMode">
+          <option value="0">All same</option>
+          <option value="1">By material</option>
+          <option value="2">By axis</option>
+        </select>
+      </label>
+      <label class="row">
+        <span class="lbl">Transparency quality</span>
+        <select id="ctrl-TransparencySort" data-key="TransparencySort">
+          <option value="0">Faster</option>
+          <option value="1">Medium</option>
+          <option value="2">Nicer</option>
+        </select>
+      </label>
+    </section>
+
+    <section class="group">
+      <h3>Background</h3>
+      <div class="row">
+        <span class="lbl">Background color</span>
+        <span class="color-control">
+          <input type="text" id="ctrl-BackgroundColor" data-key="BackgroundColor" class="hex" maxlength="7" placeholder="#aabbcc">
+          <span id="sw-BackgroundColor" class="swatch"></span>
+        </span>
+      </div>
+      <label class="row">
+        <span class="lbl">Sky</span>
+        <input type="checkbox" id="ctrl-DrawHorizon" data-key="DrawHorizon">
+      </label>
+      <div class="row">
+        <span class="lbl">Sky color</span>
+        <span class="color-control">
+          <input type="text" id="ctrl-SkyColor" data-key="SkyColor" class="hex" maxlength="7" placeholder="#aabbcc">
+          <span id="sw-SkyColor" class="swatch"></span>
+        </span>
+      </div>
+    </section>
+
+    <section class="group">
+      <h3>Display</h3>
+      <label class="row">
+        <span class="lbl">Hidden geometry</span>
+        <input type="checkbox" id="ctrl-DrawHidden" data-key="DrawHidden">
+      </label>
+      <div class="row">
+        <span class="lbl" title="SU 2019 Ruby API does not expose the current axes display state, so this is a toggle button (not a checkbox).">Model axes</span>
+        <button id="ctrl-ToggleAxes" class="toggle-btn">Toggle</button>
+      </div>
+      <label class="row">
+        <span class="lbl">Section planes</span>
+        <input type="checkbox" id="ctrl-DisplaySectionPlanes" data-key="DisplaySectionPlanes">
+      </label>
+      <label class="row">
+        <span class="lbl">Section cuts</span>
+        <input type="checkbox" id="ctrl-DisplaySectionCuts" data-key="DisplaySectionCuts">
+      </label>
+    </section>
+
+    <footer class="ftr">
+      <span id="footer-text">—</span>
+    </footer>
+  </div>
+
+  <script src="js/style_dialog.js"></script>
+</body>
+</html>
