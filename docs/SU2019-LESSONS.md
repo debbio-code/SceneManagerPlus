@@ -83,25 +83,56 @@ dentro una bridge callback: il timer non sempre fira in SU 2019.
 `Sketchup::Page#update(mask)` accetta una bitmask di costanti top-level
 `PAGE_USE_*`. **In SU 2019 i nomi differiscono dai docs SU recenti**.
 
-Costanti che esistono in SU 2019: `PAGE_USE_CAMERA`,
-`PAGE_USE_RENDERING_OPTIONS`, `PAGE_USE_SHADOWINFO`, `PAGE_USE_HIDDEN_LAYERS`,
-`PAGE_USE_HIDDEN`, `PAGE_USE_SECTION_PLANES`, `PAGE_USE_ALL`.
+Costanti effettivamente esposte in SU 2019 19.3.253 (verificato con
+`tools/dump-page-use.rb`):
+
+| Costante                     | Valore | Significato                |
+|------------------------------|-------:|----------------------------|
+| `PAGE_USE_CAMERA`            |      1 | camera + assi              |
+| `PAGE_USE_RENDERING_OPTIONS` |      2 | rendering options          |
+| `PAGE_USE_SHADOWINFO`        |      4 | shadow settings            |
+| `PAGE_USE_SKETCHCS`          |      8 | **style** (sketch coord sys) |
+| `PAGE_USE_HIDDEN`            |     16 | hidden geometry            |
+| `PAGE_USE_LAYER_VISIBILITY`  |     32 | tag visibility             |
+| `PAGE_USE_SECTION_PLANES`    |     64 | active section planes      |
+| `PAGE_USE_ALL`               |   4095 | tutto                      |
+| `PAGE_NO_CAMERA`             |   4094 | = ALL − CAMERA (NON 0)     |
 
 Costanti che **NON esistono** in SU 2019: `PAGE_USE_STYLE`, `PAGE_USE_AXES`,
-`PAGE_USE_HIDDEN_GEOMETRY`, `PAGE_USE_LAYER_VISIBILITY`,
+`PAGE_USE_HIDDEN_GEOMETRY`, `PAGE_USE_HIDDEN_LAYERS`,
 `PAGE_USE_ACTIVE_SECTION_PLANES`.
 
-Mappatura predicate → flag:
-- `use_camera?` / `use_axes?` → CAMERA (gli assi seguono camera)
-- `use_rendering_options?` / `use_style?` → RENDERING_OPTIONS (style è parte
-  di rendering)
+Note:
+- **`PAGE_USE_SKETCHCS = 8` è la costante per lo Style** (non per gli
+  assi/coordinate, malgrado il nome). Confermato dal dump.
+- Gli **assi non hanno un bit dedicato** in SU 2019: piggyback su
+  `PAGE_USE_CAMERA` (gli assi vengono salvati insieme alla camera).
+- `PAGE_USE_ALL = 4095 = 0xFFF` (12 bit) ma le costanti coprono solo 7 bit
+  (somma 127). I 5 bit alti sono usati internamente da SU per cose non
+  esposte all'API Ruby.
+
+Mappatura predicate → flag (con lookup difensivo, prova in ordine):
+- `use_camera?` → CAMERA
+- `use_axes?` → AXES → CAMERA (fallback piggyback se AXES non esiste)
+- `use_rendering_options?` → RENDERING_OPTIONS
+- `use_style?` → STYLE → SKETCHCS → RENDERING_OPTIONS (fallback piggyback)
 - `use_shadow_info?` → SHADOWINFO
-- `use_hidden_layers?` → HIDDEN_LAYERS (o LAYER_VISIBILITY su SU recenti)
-- `use_hidden?` → HIDDEN (o HIDDEN_GEOMETRY)
-- `use_section_planes?` → SECTION_PLANES (o ACTIVE_SECTION_PLANES)
+- `use_hidden_layers?` → LAYER_VISIBILITY → HIDDEN_LAYERS
+- `use_hidden?` → HIDDEN_GEOMETRY → HIDDEN
+- `use_section_planes?` → ACTIVE_SECTION_PLANES → SECTION_PLANES
 
 Usare lookup difensivo (`Object.const_defined?`) che prova più nomi e prende
-quello presente.
+quello presente. Per verificare quali costanti esistono effettivamente nella
+versione SU in uso → `load 'tools/dump-page-use.rb'` nella Ruby Console.
+Lo script stampa anche tutte le `Object.constants.grep(/\APAGE_/)` per non
+perdere nomi non previsti.
+
+**Nota su `use_style?` (2026-05)**: la mappatura precedente piggybackava
+sempre su RENDERING_OPTIONS partendo dall'assunzione "style è parte di
+rendering". Verificato che in SU recenti `PAGE_USE_STYLE` esiste come bit
+dedicato, e SU 2019 espone `PAGE_USE_SKETCHCS` con lo stesso significato.
+Se l'utente ha solo `use_style=true` (e `use_rendering_options=false`), il
+piggyback aggiornava il bit sbagliato → style non veniva catturato.
 
 ### `Sketchup::Page#layers`, `pages.add`, drift e AVT — quadro completo
 

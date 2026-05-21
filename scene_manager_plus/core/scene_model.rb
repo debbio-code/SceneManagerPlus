@@ -319,15 +319,18 @@ module SceneManagerPlus
         # Usiamo i flag attualmente settati sulla pagina (getter con "?").
         # Le costanti PAGE_USE_* variano tra versioni di SketchUp. Faccio un
         # lookup difensivo: prendo il valore se la costante esiste, altrimenti 0.
-        # Mappatura logica predicate → flag-name candidato:
-        #   use_camera?         → CAMERA
-        #   use_axes?           → CAMERA (gli assi seguono camera, no flag dedicato)
-        #   use_rendering_options? → RENDERING_OPTIONS
-        #   use_style?          → RENDERING_OPTIONS (style fa parte di rendering)
-        #   use_shadow_info?    → SHADOWINFO
-        #   use_hidden_layers?  → LAYER_VISIBILITY o HIDDEN_LAYERS
-        #   use_hidden?         → HIDDEN_GEOMETRY o HIDDEN
-        #   use_section_planes? → ACTIVE_SECTION_PLANES o SECTION_PLANES
+        # Mappatura verificata su SU 2019 19.3.253 (tools/dump-page-use.rb):
+        #   use_camera?         → PAGE_USE_CAMERA (1)
+        #   use_axes?           → PAGE_USE_CAMERA (1) — no costante dedicata in 2019
+        #   use_rendering_options? → PAGE_USE_RENDERING_OPTIONS (2)
+        #   use_style?          → PAGE_USE_SKETCHCS (8) — bit DEDICATO, non parte di RO
+        #   use_shadow_info?    → PAGE_USE_SHADOWINFO (4)
+        #   use_hidden_layers?  → PAGE_USE_LAYER_VISIBILITY (32)
+        #   use_hidden?         → PAGE_USE_HIDDEN (16)
+        #   use_section_planes? → PAGE_USE_SECTION_PLANES (64)
+        # In più: se use_style? e c'è una modifica pending allo stile attivo
+        # (styles.active_style_changed), mostriamo un dialog Yes/No/Cancel
+        # equivalente al "Warning - Scenes and Styles" nativo SU.
         sc = lambda do |*names|
           names.each do |n|
             return Object.const_get(n) if Object.const_defined?(n)
@@ -335,8 +338,15 @@ module SceneManagerPlus
           0
         end
         mask = 0
-        mask |= sc.call('PAGE_USE_CAMERA')                                  if p.use_camera? || p.use_axes?
-        mask |= sc.call('PAGE_USE_RENDERING_OPTIONS')                       if p.use_rendering_options? || p.use_style?
+        mask |= sc.call('PAGE_USE_CAMERA')                                  if p.use_camera?
+        # Axes: tenta costante dedicata, se assente piggyback su CAMERA.
+        mask |= sc.call('PAGE_USE_AXES', 'PAGE_USE_CAMERA')                 if p.use_axes?
+        mask |= sc.call('PAGE_USE_RENDERING_OPTIONS')                       if p.use_rendering_options?
+        # Style: tenta costanti dedicate (PAGE_USE_STYLE su SU recenti,
+        # PAGE_USE_SKETCHCS su 2019). Se nessuna esiste, piggyback su
+        # RENDERING_OPTIONS. Lo script tools/dump-page-use.rb permette di
+        # verificare quali costanti esistono realmente nella versione SU.
+        mask |= sc.call('PAGE_USE_STYLE', 'PAGE_USE_SKETCHCS', 'PAGE_USE_RENDERING_OPTIONS') if p.use_style?
         mask |= sc.call('PAGE_USE_SHADOWINFO')                              if p.use_shadow_info?
         mask |= sc.call('PAGE_USE_LAYER_VISIBILITY', 'PAGE_USE_HIDDEN_LAYERS') if p.use_hidden_layers?
         mask |= sc.call('PAGE_USE_HIDDEN_GEOMETRY', 'PAGE_USE_HIDDEN')       if p.use_hidden?
@@ -346,6 +356,61 @@ module SceneManagerPlus
           puts "[SM+] update_from_view: no flags resolved on '#{p.name}', fallback PAGE_USE_ALL=#{all_const}"
           mask = all_const
         end
+
+        # === Style "dirty" handling ===
+        # Page#update con PAGE_USE_SKETCHCS attivato lega la scena allo stile
+        # corrente, MA non sposta le modifiche pending dello stile dalla "in-
+        # memory dirty copy" allo stile salvato. Il dialog nativo SU "Update
+        # Scene" intercetta questo caso con un dialog "Warning - Scenes and
+        # Styles" (Save as new / Update selected / Don't save). Replichiamo
+        # la stessa scelta — solo se: lo style bit è nel mask, esistono i
+        # metodi API necessari, e c'è effettivamente una modifica pending.
+        style_bit = sc.call('PAGE_USE_STYLE', 'PAGE_USE_SKETCHCS')
+        styles    = model.styles
+        if p.use_style? && style_bit != 0 \
+           && styles.respond_to?(:active_style_changed) \
+           && styles.active_style_changed
+          style_name = (styles.active_style.name rescue 'current')
+          # MB_YESNOCANCEL=3, IDYES=6, IDNO=7, IDCANCEL=2 (costanti SU top-level).
+          mb_const  = Object.const_defined?(:MB_YESNOCANCEL) ? MB_YESNOCANCEL : 3
+          id_yes    = Object.const_defined?(:IDYES) ? IDYES : 6
+          id_no     = Object.const_defined?(:IDNO)  ? IDNO  : 7
+          id_cancel = Object.const_defined?(:IDCANCEL) ? IDCANCEL : 2
+          choice = ::UI.messagebox(
+            "Style '#{style_name}' has unsaved changes.\n\n" \
+            "YES = Update the selected style with the current modifications.\n" \
+            "NO  = Save as a new style (manual step required — see info).\n" \
+            "CANCEL = Don't touch the style (scene captures other properties only).",
+            mb_const
+          )
+          case choice
+          when id_yes
+            puts "[SM+] update_from_view: user chose 'Update selected style' for '#{style_name}'"
+            begin
+              styles.update_selected_style
+            rescue => e
+              warn "[SM+] update_selected_style failed: #{e.class}: #{e.message}"
+            end
+          when id_no
+            puts "[SM+] update_from_view: user chose 'Save as new style' — manual"
+            ::UI.messagebox(
+              "Saving as a new style is not exposed by the SketchUp 2019 Ruby API.\n\n" \
+              "How to do it manually:\n" \
+              "1. Open Window → Styles\n" \
+              "2. In the Styles browser, click 'Create new Style' (the small disc-with-plus icon)\n" \
+              "3. Re-run 'Update from view' on this scene\n\n" \
+              "Update aborted."
+            )
+            return false
+          else
+            # Cancel / chiusura dialog → preserva lo stile della scena come prima.
+            # Rimuoviamo il bit di style dal mask: gli altri property si aggiornano,
+            # lo stile no.
+            puts "[SM+] update_from_view: user chose 'Don't touch style' — skipping style bit"
+            mask &= ~style_bit
+          end
+        end
+
         puts "[SM+] update_from_view: page='#{p.name}' mask=#{mask} flags=#{flags_hash(p).inspect}"
         model.start_operation('SM+ Update from view', true)
         result = p.update(mask)
@@ -374,6 +439,19 @@ module SceneManagerPlus
         m.start_operation('SM+ New scene', true)
         begin
           page = m.pages.add(name.to_s)
+
+          # Forza tutti i flag use_* a true sulla nuova page. pages.add
+          # rispetta i "Default Scene Properties" globali di SU: se l'utente
+          # li ha personalizzati (es. Style and Fog disattivato), la nuova
+          # scena nascerebbe con quei flag OFF e SU non salverebbe quelle
+          # parti di state. Forziamo tutto ON così la scena cattura
+          # l'intero state del viewport.
+          FLAG_KEYS.each do |k|
+            setter = "#{k}="
+            page.send(setter, true) if page.respond_to?(setter)
+          rescue => e
+            warn "[SM+] add_from_view: setting #{k}=true failed: #{e.message}"
+          end
 
           # Ripristina il model state pre-add (caso AVT: LM observer ha
           # spento dei layer globalmente) e applica lo stesso state alla

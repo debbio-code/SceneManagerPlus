@@ -75,6 +75,51 @@ In SU 2019 alcune non esistono (es. `PAGE_USE_STYLE`, `PAGE_USE_AXES`).
 (`Object.const_defined?`) che prova più nomi e prende quello presente.
 Mappatura completa in `SU2019-LESSONS.md`.
 
+### Style non veniva salvato da `update_from_view` — due cause (2026-05)
+
+**Causa 1 — bit sbagliato**. `use_style?` era piggybackato su
+`PAGE_USE_RENDERING_OPTIONS` ("style fa parte di rendering"). In SU 2019
+esiste invece il bit dedicato `PAGE_USE_SKETCHCS = 8` (verificato con
+`tools/dump-page-use.rb`). Se l'utente aveva `use_style=true` e
+`use_rendering_options=false`, il bit 2 non aggiornava lo style.
+
+**Fix**: lookup difensivo `'PAGE_USE_STYLE', 'PAGE_USE_SKETCHCS',
+'PAGE_USE_RENDERING_OPTIONS'`. Stesso pattern per `use_axes?` →
+`'PAGE_USE_AXES', 'PAGE_USE_CAMERA'` (axes non ha bit dedicato in 2019).
+
+**Causa 2 — modifiche pending allo stile non flushate**. `Page#update`
+con `PAGE_USE_SKETCHCS` lega la scena allo stile corrente, ma NON sposta
+le modifiche dell'utente dalla "dirty in-memory copy" allo stile salvato.
+Il dialog nativo SU "Update Scene" mostra in questo caso "Warning -
+Scenes and Styles" (Save as new / Update selected / Don't save).
+`page.update` lo skippa silenziosamente → le modifiche allo stile si
+perdono quando l'utente naviga via dalla scena.
+
+**Fix**: in `update_from_view`, se `p.use_style?` e
+`model.styles.active_style_changed`, mostriamo un `UI.messagebox`
+3-button (YES/NO/CANCEL) equivalente:
+- YES → `model.styles.update_selected_style`, poi `page.update(mask)`.
+- NO → "Save as a new style" non è esposto dall'API Ruby di SU 2019
+  (nessun `Style#save_as` / `Style#export`). Mostriamo un messaggio con
+  le istruzioni manuali (browser Styles → "+") e abort.
+- CANCEL → togliamo il bit `PAGE_USE_SKETCHCS` dal mask: gli altri
+  property si aggiornano, lo stile resta com'era.
+
+Script `tools/dump-styles-api.rb` per ispezionare quali metodi
+`Sketchup::Styles` espone su una versione SU specifica.
+
+### Nuova scena nasce con flag mancanti (2026-05)
+
+`pages.add` rispetta i "Default Scene Properties" globali di SU (UI di
+"Add Scene Options"). Se l'utente ha disattivato voci come "Style and Fog"
+in quei default, la nuova scena nasceva con `use_style?=false` → SU non
+salvava lo style su quella scena. Quindi un successivo `update_from_view`
+non poteva ripristinarlo (use_style off = nessun bit attivato).
+
+**Fix**: in `SceneModel.add_from_view`, dopo `pages.add`, forzare tutti
+gli 8 `FLAG_KEYS` a `true` via setter. La nuova scena cattura sempre lo
+state completo del viewport, indipendentemente dai default SU.
+
 ---
 
 ## Fase 2-3
