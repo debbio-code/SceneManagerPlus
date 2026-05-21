@@ -7,6 +7,7 @@ module SceneManagerPlus
       module_function
 
       SECTION = 'SceneManagerPlus'.freeze
+      MODEL_CFG_DICT = 'SceneManagerPlus_cfg'.freeze
 
       DEFAULTS = {
         'naming' => {
@@ -61,14 +62,16 @@ module SceneManagerPlus
           # Cliente = naming.prefix_custom (riuso). Tavola = stesso {nnn}
           # del naming pattern. Dati aziendali + logo: bundlati in
           # assets/titleblock/{company.txt, logo.jpg}.
-          'enabled'       => false,
-          'height_px'     => 160,
-          'font_family'   => 'Century Gothic',
+          'enabled'        => false,
+          'height_px'      => 160,
+          'font_family'    => 'Century Gothic',
           # Dropdown a tre voci, gestite UI-side. Default identici.
-          'project_by'    => 'Arch. Nicola Debiasi',
-          'designer'      => 'Arch. Nicola Debiasi',
+          'project_by'     => 'Arch. Nicola Debiasi',
+          'designer'       => 'Arch. Nicola Debiasi',
           # Formato libero (es. "20/05/2026"). Vuoto = data del momento di export.
-          'date_override' => ''
+          'date_override'  => '',
+          # Fase del progetto: 'Preliminare' | 'Definitivo' | 'Esecutivo'
+          'project_phase'  => 'Definitivo'
         }
       }.freeze
 
@@ -85,26 +88,32 @@ module SceneManagerPlus
       # e ha comportamenti inaffidabili con stringhe complesse contenenti
       # virgolette/backslash su alcune versioni.
       def read_one(group, key, default)
-        flat = "#{group}.#{key}"
-        v = Sketchup.read_default(SECTION, flat, default)
-        # write_default('foo', true) viene letto come 1/0 in alcune build.
-        # Normalizziamo in base al tipo del default.
-        case default
-        when TrueClass, FalseClass
-          return !!v if v.is_a?(TrueClass) || v.is_a?(FalseClass)
-          return v.to_i != 0 if v.is_a?(Numeric)
-          return default
-        when Integer
-          return v.to_i if v.respond_to?(:to_i)
-        when Float
-          return v.to_f if v.respond_to?(:to_f)
-        when String
-          return v.to_s
+        model = Sketchup.active_model
+        if model
+          flat = "#{group}.#{key}"
+          v = model.get_attribute(MODEL_CFG_DICT, flat)
+          unless v.nil?
+            case default
+            when TrueClass, FalseClass
+              return !!v if v.is_a?(TrueClass) || v.is_a?(FalseClass)
+              return v.to_i != 0 if v.is_a?(Numeric)
+              return default
+            when Integer
+              return v.to_i if v.respond_to?(:to_i)
+            when Float
+              return v.to_f if v.respond_to?(:to_f)
+            when String
+              return v.to_s
+            end
+            return v
+          end
         end
-        v
+        default
       end
 
       def write_one(group, key, value, default)
+        model = Sketchup.active_model
+        return unless model
         flat = "#{group}.#{key}"
         coerced = case default
                   when TrueClass, FalseClass then value ? true : false
@@ -112,7 +121,7 @@ module SceneManagerPlus
                   when Float                 then value.to_f
                   else                            value.to_s
                   end
-        Sketchup.write_default(SECTION, flat, coerced)
+        model.set_attribute(MODEL_CFG_DICT, flat, coerced)
       end
 
       def get(group)

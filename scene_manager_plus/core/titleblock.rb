@@ -31,8 +31,10 @@ module SceneManagerPlus
         $logoPath = [string]$cfg.logo_path
         $companyLines = @($cfg.company_lines)
         $date = [string]$cfg.date
-        $projectBy = [string]$cfg.project_by
-        $designer  = [string]$cfg.designer
+        $projectBy  = [string]$cfg.project_by
+        $designer   = [string]$cfg.designer
+        $phaseValue = [string]$cfg.project_phase
+        if ([string]::IsNullOrEmpty($phaseValue)) { $phaseValue = "Definitivo" }
 
         # Carica logo una sola volta (se path valido)
         $logoImg = $null
@@ -141,8 +143,11 @@ module SceneManagerPlus
             if ($ww -gt $dW) { $dW = $ww }
           }
           $datiW = [int]([Math]::Ceiling($dW * $boxBreath)) + 2 * $pad
+          # Box FASE (right sub-box of Cliente): auto-sized on "PROGETTO:" + phase value.
+          $wFase = Measure-LV $measureG "PROGETTO:" $phaseValue $midLabelFont $midValueFont
+          $faseW = [int]([Math]::Ceiling($wFase * $boxBreath)) + 2 * $pad
 
-          $autoSum = $clienteW + $tavolaW + $progW + $datiW
+          $autoSum = $clienteW + $faseW + $tavolaW + $progW + $datiW
           if ($autoSum -le $target) { break }
           # Scala globalmente i font -1px e riprova.
           if ($valueSz -le 10.0) { break }
@@ -160,9 +165,9 @@ module SceneManagerPlus
           $iter++
           if ($iter -gt 60) { break }
         }
-        # Spazio rimanente al Cliente (di solito è il box più "elastico").
-        $clienteW = $W - $logoW - $tavolaW - $progW - $datiW
-        $widths = @($clienteW, $tavolaW, $progW, $datiW, $logoW)
+        # Spazio rimanente al Cliente (box più "elastico"), dedotto il box FASE.
+        $clienteW = $W - $logoW - $faseW - $tavolaW - $progW - $datiW
+        $widths = @($clienteW, $faseW, $tavolaW, $progW, $datiW, $logoW)
         Write-Host "[SM+ TB] fonts: label=$labelSz value=$valueSz small=$smallSz bold=$boldSz iters=$iter widths=$($widths -join ',')"
 
         foreach ($item in $cfg.items) {
@@ -176,16 +181,21 @@ module SceneManagerPlus
           $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
           $g.TextRenderingHint = [System.Drawing.Text.TextRenderingHint]::AntiAliasGridFit
           $g.FillRectangle($whiteBrush, 0, 0, $W, $H)
+          $halfH = [int]($H / 2)
 
           # Bordi esterni + divisori verticali
           $g.DrawRectangle($borderPen, 0, 0, $W - 1, $H - 1)
           $xAccum = 0
           for ($i=0; $i -lt $widths.Length - 1; $i++) {
             $xAccum += $widths[$i]
-            $g.DrawLine($borderPen, $xAccum, 0, $xAccum, $H)
+            # Il divisore tra box 0 (CLIENTE) e box 1b (FASE) è parziale:
+            # solo riga superiore — la riga OGGETTO non è divisa.
+            if ($i -eq 0) {
+              $g.DrawLine($borderPen, $xAccum, 0, $xAccum, $halfH)
+            } else {
+              $g.DrawLine($borderPen, $xAccum, 0, $xAccum, $H)
+            }
           }
-
-          $halfH = [int]($H / 2)
 
           # Helper: ascent in pixel di un Font (offset dal top alla baseline).
           # Per allineare i baseline di font con size diverse: y_top_text =
@@ -235,9 +245,11 @@ module SceneManagerPlus
           $bY_top = [single](0 + (($halfH - 0) - $rowH) / 2.0 + $mAscR)
           $bY_bot = [single]($halfH + (($H - $halfH) - $rowH) / 2.0 + $mAscR)
 
-          # ---------- Box 1: Cliente + Oggetto (left, baseline-aligned) ----------
+          # ---------- Box 0+1b: Cliente (top) / Oggetto merged (bottom) ----------
           $x = 0
-          $g.DrawLine($linePen, $x, $halfH, $x + $widths[0], $halfH)
+          # Divisore orizzontale esteso a coprire anche il box FASE.
+          $g.DrawLine($linePen, $x, $halfH, $x + $widths[0] + $widths[1], $halfH)
+          # CLIENTE: solo nella metà sinistra (box 0).
           $rowMaxW = [single]($widths[0] - 2 * $pad)
 
           $lblCli = "CLIENTE:"
@@ -247,7 +259,9 @@ module SceneManagerPlus
 
           $lblOgg = "OGGETTO:"
           $lblOggW = $g.MeasureString($lblOgg, $labelFont).Width
-          $valMaxW2 = [single]($rowMaxW - $lblOggW - 8)
+          # OGGETTO: occupa la larghezza unificata box 0 + box 1b.
+          $rowMaxW_ogg = [single]($widths[0] + $widths[1] - 2 * $pad)
+          $valMaxW2 = [single]($rowMaxW_ogg - $lblOggW - 8)
           $fScene = Fit-Fnt $g $sceneName $fontFamily $valueSz ([System.Drawing.FontStyle]::Regular) $valMaxW2 9.0
 
           # Label CLIENTE:/OGGETTO: alla stessa X (left). Valore subito dopo
@@ -262,39 +276,46 @@ module SceneManagerPlus
           $fClient.Dispose(); $fScene.Dispose()
           $x += $widths[0]
 
-          # Metriche per i MID font (box 2 e 3). Le baseline $bY_top/$bY_bot
+          # Metriche per i MID font (box 1b, 2 e 3). Le baseline $bY_top/$bY_bot
           # restano quelle calcolate sul font grande (box 1) per allineamento
           # cross-box; ogni testo si posiziona a $bY - propria_ascent.
           $mLblAsc = Get-Asc $midLabelFont
           $mValAsc = Get-Asc $midValueFont
 
+          # ---------- Box 1b: Fase di progetto (MID font, solo riga superiore) ----------
+          # Centrata nel range [0, halfH] — la riga inferiore è unificata con OGGETTO.
+          $wFr = (Measure-LV $g "PROGETTO:" $phaseValue $midLabelFont $midValueFont)
+          $startXf = $x + [int](($widths[1] - $wFr) / 2)
+          Draw-LV-At $g "PROGETTO:" $phaseValue $midLabelFont $midValueFont $brush $startXf 0 $halfH
+          $x += $widths[1]
+
           # ---------- Box 2: Tavola / Data (MID font) ----------
-          $g.DrawLine($linePen, $x, $halfH, $x + $widths[1], $halfH)
+          $g.DrawLine($linePen, $x, $halfH, $x + $widths[2], $halfH)
           $r2aW = (Measure-LV $g "TAVOLA nr.:" $tavola $midLabelFont $midValueFont)
           $r2bW = (Measure-LV $g "DATA:"       $date   $midLabelFont $midValueFont)
           $block2W = [Math]::Max($r2aW, $r2bW)
-          $startX2 = $x + [int](($widths[1] - $block2W) / 2)
+          $startX2 = $x + [int](($widths[2] - $block2W) / 2)
           $lblTavW = $g.MeasureString("TAVOLA nr.:", $midLabelFont).Width
           $lblDtW  = $g.MeasureString("DATA:",       $midLabelFont).Width
           $g.DrawString("TAVOLA nr.:", $midLabelFont, $brush, [single]$startX2, [single]($bY_top - $mLblAsc))
           $g.DrawString($tavola,       $midValueFont, $brush, [single]($startX2 + $lblTavW + 8), [single]($bY_top - $mValAsc))
           $g.DrawString("DATA:",       $midLabelFont, $brush, [single]$startX2, [single]($bY_bot - $mLblAsc))
           $g.DrawString($date,         $midValueFont, $brush, [single]($startX2 + $lblDtW  + 8), [single]($bY_bot - $mValAsc))
-          $x += $widths[1]
+          $x += $widths[2]
 
           # ---------- Box 3: Progetto / Disegnato (MID font) ----------
-          $g.DrawLine($linePen, $x, $halfH, $x + $widths[2], $halfH)
+          $g.DrawLine($linePen, $x, $halfH, $x + $widths[3], $halfH)
           $r3aW = (Measure-LV $g "PROGETTO:"                   $projectBy $midLabelFont $midValueFont)
           $r3bW = (Measure-LV $g "DISEGNATO E CONTROLLATO DA:" $designer  $midLabelFont $midValueFont)
           $block3W = [Math]::Max($r3aW, $r3bW)
-          $startX3 = $x + [int](($widths[2] - $block3W) / 2)
+          $startX3 = $x + [int](($widths[3] - $block3W) / 2)
           $lblPjW = $g.MeasureString("PROGETTO:",                   $midLabelFont).Width
           $lblDsW = $g.MeasureString("DISEGNATO E CONTROLLATO DA:", $midLabelFont).Width
           $g.DrawString("PROGETTO:",                   $midLabelFont, $brush, [single]$startX3, [single]($bY_top - $mLblAsc))
           $g.DrawString($projectBy,                    $midValueFont, $brush, [single]($startX3 + $lblPjW + 8), [single]($bY_top - $mValAsc))
           $g.DrawString("DISEGNATO E CONTROLLATO DA:", $midLabelFont, $brush, [single]$startX3, [single]($bY_bot - $mLblAsc))
           $g.DrawString($designer,                     $midValueFont, $brush, [single]($startX3 + $lblDsW + 8), [single]($bY_bot - $mValAsc))
-          $x += $widths[2]
+          $x += $widths[3]
 
           # ---------- Box 4: Dati aziendali ----------
           # Blocco di N righe centrate verticalmente come unità, tutte
@@ -315,7 +336,7 @@ module SceneManagerPlus
             $rw = $g.MeasureString([string]$companyLines[$k], $f).Width
             if ($rw -gt $maxRowW4) { $maxRowW4 = $rw }
           }
-          $startX4 = $x + [int](($widths[3] - $maxRowW4) / 2)
+          $startX4 = $x + [int](($widths[4] - $maxRowW4) / 2)
           # Baseline prima riga: yTop4 + boldAsc.
           # Righe successive: precedente baseline + lineHeight.
           $baseY4 = [single]($yTop4 + $boldAsc)
@@ -325,11 +346,11 @@ module SceneManagerPlus
             $g.DrawString([string]$companyLines[$k], $f, $brush, [single]$startX4, $top)
             $baseY4 = [single]($baseY4 + $lineHeight)
           }
-          $x += $widths[3]
+          $x += $widths[4]
 
           # ---------- Box 5: Logo ----------
           if ($logoImg) {
-            $boxW = $widths[4]
+            $boxW = $widths[5]
             $margin = [int]([Math]::Max(4, $H * 0.10))
             $availW = $boxW - 2 * $margin
             $availH = $H - 2 * $margin
@@ -400,6 +421,7 @@ module SceneManagerPlus
           'date'               => cfg[:date].to_s,
           'project_by'         => cfg[:project_by].to_s,
           'designer'           => cfg[:designer].to_s,
+          'project_phase'      => cfg[:project_phase].to_s,
           'company_lines'      => Array(cfg[:company_lines]).map(&:to_s),
           'logo_path'          => cfg[:logo_path].to_s,
           'tavola_placeholder' => placeholder,

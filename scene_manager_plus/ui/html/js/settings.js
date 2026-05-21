@@ -254,21 +254,23 @@
 
   function readTitleblock() {
     return {
-      enabled:       $('#tb-enabled').checked,
-      height_px:     toIntOr($('#tb-height').value, 120),
-      font_family:   $('#tb-font-family').value || 'Century Gothic',
-      project_by:    $('#tb-project-by').value || 'Arch. Nicola Debiasi',
-      designer:      $('#tb-designer').value || 'Arch. Nicola Debiasi',
-      date_override: $('#tb-date-override').value || ''
+      enabled:        $('#tb-enabled').checked,
+      height_px:      toIntOr($('#tb-height').value, 120),
+      font_family:    $('#tb-font-family').value || 'Century Gothic',
+      project_by:     $('#tb-project-by').value || 'Arch. Nicola Debiasi',
+      designer:       $('#tb-designer').value || 'Arch. Nicola Debiasi',
+      project_phase:  $('#tb-project-phase').value || 'Definitivo',
+      date_override:  $('#tb-date-override').value || ''
     };
   }
   function writeTitleblock(t) {
-    setIfNotFocused($('#tb-enabled'),       'checked', !!t.enabled);
-    setIfNotFocused($('#tb-height'),        'value',   (t.height_px == null ? 120 : t.height_px));
-    setIfNotFocused($('#tb-font-family'),   'value',   t.font_family || 'Century Gothic');
-    setIfNotFocused($('#tb-project-by'),    'value',   t.project_by || 'Arch. Nicola Debiasi');
-    setIfNotFocused($('#tb-designer'),      'value',   t.designer || 'Arch. Nicola Debiasi');
-    setIfNotFocused($('#tb-date-override'), 'value',   t.date_override || '');
+    setIfNotFocused($('#tb-enabled'),        'checked', !!t.enabled);
+    setIfNotFocused($('#tb-height'),         'value',   (t.height_px == null ? 120 : t.height_px));
+    setIfNotFocused($('#tb-font-family'),    'value',   t.font_family || 'Century Gothic');
+    setIfNotFocused($('#tb-project-by'),     'value',   t.project_by || 'Arch. Nicola Debiasi');
+    setIfNotFocused($('#tb-designer'),       'value',   t.designer || 'Arch. Nicola Debiasi');
+    setIfNotFocused($('#tb-project-phase'),  'value',   t.project_phase || 'Definitivo');
+    setIfNotFocused($('#tb-date-override'),  'value',   t.date_override || '');
   }
   function setTbStatus(msg) {
     const el = $('#tb-status');
@@ -480,7 +482,7 @@
       const el = document.getElementById(id);
       if (el) el.addEventListener('input', saveTbDebounced);
     });
-    ['tb-enabled', 'tb-project-by', 'tb-designer'].forEach(id => {
+    ['tb-enabled', 'tb-project-by', 'tb-designer', 'tb-project-phase'].forEach(id => {
       const el = document.getElementById(id);
       if (el) el.addEventListener('change', saveTbNow);
     });

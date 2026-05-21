@@ -312,17 +312,35 @@ offset_x/y, opacity).
   Usato invece input testuale hex + swatch + 6 preset clickabili
   (vedi `settings.html` group-filename-label). Sempre lowercase.
 
+## Settings: persistenza per-file (model attributes)
+
+Tutti i settings viaggiano col file `.skp` via `model.set_attribute` /
+`model.get_attribute` (dict `'SceneManagerPlus_cfg'`). Non più
+`Sketchup.write_default` (era globale per macchina).
+
+- `read_one`: legge da `model.get_attribute`, ritorna `default` se `nil`.
+- `write_one`: scrive su `model.set_attribute` con coercizione di tipo.
+- Se `Sketchup.active_model` è `nil`: no-op / ritorna default.
+
+La costante `SECTION = 'SceneManagerPlus'` non è più usata per i settings
+(resta per folder/order/uid page attributes).
+
 ## Title block (cartiglio) sull'export
 
 `Core::TitleBlock` aggiunge un cartiglio sotto l'immagine esportata
 (estende il canvas verso il basso, NON copre l'immagine). Coesiste
 indipendente da logo watermark e filename label.
 
-Layout 5 box (left → right):
-1. **Cliente / Oggetto** — left-aligned. Cliente = `naming.prefix_custom`
-   (riuso esplicito), Oggetto = `page.name`. 2 righe con label "CLIENTE:"
-   e "OGGETTO:" allineate alla stessa X, valore subito dopo la rispettiva
-   label (no doppia colonna). Auto-fit del FONT del valore se sfora.
+Layout 6 box (left → right):
+1. **Cliente** (top) / **Oggetto** (bottom, merged) — box 0. Cliente =
+   `naming.prefix_custom`. Oggetto = `page.name`. CLIENTE è nella sola riga
+   superiore del box 0; OGGETTO si estende su tutta la larghezza di box 0 +
+   box 1b (riga inferiore unificata).
+1b. **Fase di progetto** — box 1b, solo riga superiore. Label "PROGETTO:"
+   (midLabelFont bold), valore scelto nei settings tra "Preliminare",
+   "Definitivo", "Esecutivo" (midValueFont regular). Centrata in [0, halfH].
+   Il divisore verticale tra box 0 e box 1b è **parziale** (0..halfH), così
+   la riga OGGETTO non viene spezzata.
 2. **Tavola nr. / Data** — MID font (`midRatio = 0.82` × labelSz/valueSz),
    block centrato come unità nel box; label "TAVOLA nr.:" e "DATA:"
    alla stessa X, valore inline dopo. Tavola = stesso `{nnn}` del naming
@@ -335,13 +353,28 @@ Layout 5 box (left → right):
    Tutte le righe left-aligned alla stessa X.
 5. **Logo** — bundlato in `assets/titleblock/logo.jpg`, 10% di W fissa.
 
+**Trappola `$halfH` prima del loop bordi**: nel PS script `$halfH` DEVE essere
+definito PRIMA del loop che disegna i divisori verticali (che usa `$halfH` per
+il divisore parziale del box 1b). Se definito dopo, la riga parziale viene
+disegnata da 0 a 0 (invisibile). Già successo — `$halfH = [int]($H / 2)` va
+subito dopo `$g.FillRectangle`.
+
+**Divisore verticale parziale** (pattern per celle unite):
+```powershell
+if ($i -eq 0) {
+  $g.DrawLine($borderPen, $xAccum, 0, $xAccum, $halfH)  # solo metà
+} else {
+  $g.DrawLine($borderPen, $xAccum, 0, $xAccum, $H)
+}
+```
+
 Assets bundlati in `scene_manager_plus/assets/titleblock/`:
 `company.txt` (4 righe), `logo.jpg`. Letti da
 `Settings.titleblock_company_txt_path` / `Settings.titleblock_logo_path`
 (percorsi sotto `PLUGIN_DIR` per funzionare anche su Junction install).
 
-**Auto-size dei box**: Logo fisso 10%; box 2/3/4 = larghezza testo
-× `boxBreath` (1.15, "respiro" 15%) + 2×pad; box Cliente = remainder.
+**Auto-size dei box**: Logo fisso 10%; box 1b/2/3/4 = larghezza testo
+× `boxBreath` (1.15, "respiro" 15%) + 2×pad; box 0 (Cliente) = remainder.
 
 **Font global auto-shrink**: il calcolo larghezze gira in loop. Se
 `sum(box widths) > target`, scala TUTTI i font -1px e ricalcola.
