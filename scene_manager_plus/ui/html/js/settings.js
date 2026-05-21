@@ -258,7 +258,7 @@
       height_px:      toIntOr($('#tb-height').value, 120),
       font_family:    $('#tb-font-family').value || 'Century Gothic',
       project_by:     $('#tb-project-by').value || 'Arch. Nicola Debiasi',
-      designer:       $('#tb-designer').value || 'Arch. Nicola Debiasi',
+      designer:       $('#tb-designer').value,
       project_phase:  $('#tb-project-phase').value || 'Definitivo',
       date_override:  $('#tb-date-override').value || ''
     };
@@ -268,7 +268,7 @@
     setIfNotFocused($('#tb-height'),         'value',   (t.height_px == null ? 120 : t.height_px));
     setIfNotFocused($('#tb-font-family'),    'value',   t.font_family || 'Century Gothic');
     setIfNotFocused($('#tb-project-by'),     'value',   t.project_by || 'Arch. Nicola Debiasi');
-    setIfNotFocused($('#tb-designer'),       'value',   t.designer || 'Arch. Nicola Debiasi');
+    setIfNotFocused($('#tb-designer'),       'value',   (t.designer == null ? 'Arch. Nicola Debiasi' : t.designer));
     setIfNotFocused($('#tb-project-phase'),  'value',   t.project_phase || 'Definitivo');
     setIfNotFocused($('#tb-date-override'),  'value',   t.date_override || '');
   }

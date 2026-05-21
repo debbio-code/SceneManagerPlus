@@ -133,8 +133,8 @@ module SceneManagerPlus
           $w2a = Measure-LV $measureG "TAVOLA nr.:" $tavolaPlaceholder $midLabelFont $midValueFont
           $w2b = Measure-LV $measureG "DATA:"       $date              $midLabelFont $midValueFont
           $tavolaW = [int]([Math]::Ceiling([Math]::Max($w2a, $w2b) * $boxBreath)) + 2 * $pad
-          $w3a = Measure-LV $measureG "PROGETTO:"                   $projectBy $midLabelFont $midValueFont
-          $w3b = Measure-LV $measureG "DISEGNATO E CONTROLLATO DA:" $designer  $midLabelFont $midValueFont
+          $w3a = Measure-LV $measureG "PROGETTO:"      $projectBy $midLabelFont $midValueFont
+          $w3b = Measure-LV $measureG "CONTROLLATO DA:" $designer $midLabelFont $midValueFont
           $progW = [int]([Math]::Ceiling([Math]::Max($w3a, $w3b) * $boxBreath)) + 2 * $pad
           $dW = 0.0
           for ($k=0; $k -lt $companyLines.Count; $k++) {
@@ -305,16 +305,18 @@ module SceneManagerPlus
 
           # ---------- Box 3: Progetto / Disegnato (MID font) ----------
           $g.DrawLine($linePen, $x, $halfH, $x + $widths[3], $halfH)
-          $r3aW = (Measure-LV $g "PROGETTO:"                   $projectBy $midLabelFont $midValueFont)
-          $r3bW = (Measure-LV $g "DISEGNATO E CONTROLLATO DA:" $designer  $midLabelFont $midValueFont)
+          $r3aW = (Measure-LV $g "PROGETTO:"      $projectBy $midLabelFont $midValueFont)
+          $r3bW = (Measure-LV $g "CONTROLLATO DA:" $designer $midLabelFont $midValueFont)
           $block3W = [Math]::Max($r3aW, $r3bW)
           $startX3 = $x + [int](($widths[3] - $block3W) / 2)
-          $lblPjW = $g.MeasureString("PROGETTO:",                   $midLabelFont).Width
-          $lblDsW = $g.MeasureString("DISEGNATO E CONTROLLATO DA:", $midLabelFont).Width
-          $g.DrawString("PROGETTO:",                   $midLabelFont, $brush, [single]$startX3, [single]($bY_top - $mLblAsc))
-          $g.DrawString($projectBy,                    $midValueFont, $brush, [single]($startX3 + $lblPjW + 8), [single]($bY_top - $mValAsc))
-          $g.DrawString("DISEGNATO E CONTROLLATO DA:", $midLabelFont, $brush, [single]$startX3, [single]($bY_bot - $mLblAsc))
-          $g.DrawString($designer,                     $midValueFont, $brush, [single]($startX3 + $lblDsW + 8), [single]($bY_bot - $mValAsc))
+          $lblPjW = $g.MeasureString("PROGETTO:",      $midLabelFont).Width
+          $lblDsW = $g.MeasureString("CONTROLLATO DA:", $midLabelFont).Width
+          $g.DrawString("PROGETTO:",      $midLabelFont, $brush, [single]$startX3, [single]($bY_top - $mLblAsc))
+          $g.DrawString($projectBy,       $midValueFont, $brush, [single]($startX3 + $lblPjW + 8), [single]($bY_top - $mValAsc))
+          $g.DrawString("CONTROLLATO DA:", $midLabelFont, $brush, [single]$startX3, [single]($bY_bot - $mLblAsc))
+          if (-not [string]::IsNullOrEmpty($designer)) {
+            $g.DrawString($designer, $midValueFont, $brush, [single]($startX3 + $lblDsW + 8), [single]($bY_bot - $mValAsc))
+          }
           $x += $widths[3]
 
           # ---------- Box 4: Dati aziendali ----------

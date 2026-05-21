@@ -84,7 +84,7 @@ module SceneManagerPlus
       TITLEBLOCK_PEOPLE = [
         'Arch. Nicola Debiasi',
         'Guido Bazzotti',
-        'Najafov Agharahim'
+        'Rahim'
       ].freeze
 
       # Storage: una entry per leaf via Sketchup.write_default. Ogni leaf usa
