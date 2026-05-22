@@ -239,32 +239,27 @@ module SceneManagerPlus
         end
 
         # "Nuovo stile" da picker right-click. Alloca lo slot successivo
-        # dal pool, prompt per nickname via UI.inputbox (skippabile), poi
-        # assegna lo stile alla scena di contesto (se data['id'] presente).
+        # dal pool, prompt per nickname (skippabile, retry su duplicato),
+        # poi assegna lo stile alla scena di contesto.
         dlg.add_action_callback('sm_style_new') do |_ctx, payload|
           data = parse(payload)
           scene_id = data['id']
-          # UI.inputbox: 1° array = labels, 2° = defaults, 3° = title
-          prompt_result = ::UI.inputbox(
-            ['Nickname (lascia vuoto per usare il nome nativo "Slot NN"):'],
-            [''],
-            'Scene Manager+ — Nuovo stile'
+          result = Core::Styles.prompt_nickname_loop(
+            title: 'Scene Manager+ — Nuovo stile',
+            label: 'Nickname (vuoto = usa nome nativo "Slot NN"):'
           )
-          # ritorna false se utente cancella; altrimenti array di 1 elemento
-          if prompt_result == false
+          if result == :aborted
             puts "[SM+] sm_style_new: aborted by user"
           else
-            nickname = prompt_result[0].to_s.strip
+            nickname = result.empty? ? nil : result
             # Variante from_viewport: il nuovo stile cattura le rendering
-            # options correnti (dirty edit inclusi). Senza questo passo lo
-            # slot manterrebbe le RO del template (Architectural Design Style),
-            # che NON è quello che l'utente si aspetta cliccando "+ New style".
-            style = Core::Styles.allocate_new_slot_from_viewport(nickname: (nickname.empty? ? nil : nickname))
+            # options correnti (dirty edit inclusi). Senza questo lo slot
+            # manterrebbe le RO del template generator (Architectural Design
+            # Style), non quelle che l'utente vede nel viewport.
+            style = Core::Styles.allocate_new_slot_from_viewport(nickname: nickname)
             if style
               puts "[SM+] sm_style_new: allocated #{style.name.inspect} from viewport (nick=#{nickname.inspect})"
-              if scene_id
-                Core::SceneModel.assign_style(scene_id, style.name)
-              end
+              Core::SceneModel.assign_style(scene_id, style.name) if scene_id
             end
           end
           push_state

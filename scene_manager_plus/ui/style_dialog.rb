@@ -132,10 +132,19 @@ module SceneManagerPlus
 
         # Rinomina (nickname) lo stile correntemente in edit. Vuoto = clear.
         # Il nickname vive solo come attributo di modello (vedi Core::Styles).
+        # Se conflict (display_name già usato da altro stile), set_nickname
+        # ritorna false → messagebox di avviso e push_state rimette il valore
+        # precedente nell'input (il JS rispetta setIfNotFocused).
         dlg.add_action_callback('sm_style_set_nickname') do |_ctx, payload|
           data = parse(payload)
           nick = data['nickname'].to_s
-          Core::Styles.set_nickname(@style_name, nick)
+          ok = Core::Styles.set_nickname(@style_name, nick)
+          unless ok
+            ::UI.messagebox(
+              "Nickname '#{nick.strip}' is already used by another style.\n" \
+              "Please choose a different name."
+            )
+          end
           push_state
           # Refresh main dialog: lettere + tooltip + picker label dipendono dal
           # display_name calcolato sul nickname.

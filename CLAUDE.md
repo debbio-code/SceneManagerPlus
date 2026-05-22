@@ -815,15 +815,56 @@ Quindi cambia stile = perdi dirty edits sul precedente — comportamento
 voluto qui (gli edit sono stati "spostati" sul nuovo slot via snapshot
 + restore + update_selected_style).
 
-### Limiti noti / TODO
+### Validazione unicità nickname (Fase 1D)
 
-- **Pulizia slot inutilizzati**: se utente crea Slot 01 e poi non lo
-  assegna a nessuna scena, resta nel modello. Per ora si cancella a
-  mano dal native browser; valutare bottone "purge unused SM+ slots".
-- **Conflict nickname duplicati**: oggi nessun controllo se due stili
-  hanno lo stesso nickname → due lettere distinte ma stesso label nel
-  picker. Confonde. Valutare validazione di unicità nel set_nickname
-  con rifiuto + messagebox.
+`Core::Styles.set_nickname` rifiuta il write se il nickname (o il nome
+nativo) è già usato come display_name da un altro stile. Validazione
+case-sensitive, trim'ata, esclude lo stile target tramite parametro
+`except_native:`. Return value bool — true = scritto, false = conflict.
+
+Helper UI `Core::Styles.prompt_nickname_loop(title:, label:)`:
+re-prompt loop su `UI.inputbox` con messagebox + retry su conflict.
+Ritorna stringa nickname o `:aborted`. Usato da:
+- `sm_style_new` (picker "+ New style…") in `ui/dialog.rb`
+- Branch NO ("Save as new") in `update_from_view` e `add_from_view` in
+  `core/scene_model.rb`
+
+Per il Mini Style Manager (`sm_style_set_nickname`): no loop perché
+l'input è già "live" — su rifiuto mostriamo messagebox + push_state,
+JS rispetta `setIfNotFocused` quindi l'input torna al valore
+precedente automaticamente.
+
+### Purge stili non usati (Fase 1E)
+
+Limite SU 2019: nessuna API per cancellare uno stile specifico. Solo
+`styles.purge_unused` (model-wide).
+
+Bottone "Purge unused styles…" aggiunto a Settings dialog, sezione
+"Style pool". Flusso:
+1. `Core::Styles.unused_styles` enumera stili non referenziati da
+   alcuna scena (compresi non-SM+: c'è un disclaimer nel testo della
+   sezione)
+2. Callback `sm_settings_purge_unused_styles` mostra messagebox con
+   la lista completa (display_name + native se diverso) + warning
+   "not undoable"
+3. Conferma → `Core::Styles.purge_unused_styles` chiama
+   `styles.purge_unused` + `remove_nickname_attr` per ognuno → ritorna
+   l'array dei nomi rimossi
+4. Messagebox finale di conferma + `Dialog.push_state` per refresh
+
+`remove_nickname_attr(name)` usa `dict.delete_key(name)` invece di
+`set_nickname(name, '')` per cancellare proprio la entry dal dizionario
+modello (vs lasciare stringhe vuote che si accumulano).
+
+### Limiti noti / TODO ancora aperti
+
+Nessuno strettamente bloccante. Possibili miglioramenti futuri:
+- **Line scale multiplier su thumbnails**: ineffective in SU 2019 a
+  300×150 (documentato come limite presunto in sezione "Line scale
+  multiplier"). Da indagare se diventa fastidioso.
+- **WM_COMMAND Win32 per Match Photo**: tentativo non testato di
+  emulare un click di menù vero per clonare scene Match Photo. Esito
+  incerto. Vedi sezione "Match Photo" più sopra.
 
 ## Note per future sessioni
 

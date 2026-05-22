@@ -454,18 +454,16 @@ module SceneManagerPlus
             end
           when id_no
             puts "[SM+] update_from_view: user chose 'Save as new style' for '#{style_name}'"
-            prompt = ::UI.inputbox(
-              ['Nickname (vuoto = usa nome nativo "SM+ Slot NN"):'],
-              [''],
-              'Scene Manager+ — Save as new style'
+            result = Core::Styles.prompt_nickname_loop(
+              title: 'Scene Manager+ — Save as new style',
+              label: 'Nickname (vuoto = usa nome nativo "SM+ Slot NN"):'
             )
-            if prompt == false
+            if result == :aborted
               puts "[SM+] update_from_view: save-as-new aborted by user"
               return false
             end
-            nick = prompt[0].to_s.strip
             new_style = Core::Styles.allocate_new_slot_from_viewport(
-              nickname: (nick.empty? ? nil : nick)
+              nickname: (result.empty? ? nil : result)
             )
             unless new_style
               puts "[SM+] update_from_view: save-as-new failed (pool esaurito o errore)"
@@ -559,18 +557,16 @@ module SceneManagerPlus
             end
           when id_no
             puts "[SM+] add_from_view: user chose 'Save as new style' for '#{style_name}'"
-            prompt = ::UI.inputbox(
-              ['Nickname (vuoto = usa nome nativo "SM+ Slot NN"):'],
-              [''],
-              'Scene Manager+ — Save as new style'
+            result = Core::Styles.prompt_nickname_loop(
+              title: 'Scene Manager+ — Save as new style',
+              label: 'Nickname (vuoto = usa nome nativo "SM+ Slot NN"):'
             )
-            if prompt == false
+            if result == :aborted
               puts "[SM+] add_from_view: save-as-new aborted by user"
               return nil
             end
-            nick = prompt[0].to_s.strip
             new_style = Core::Styles.allocate_new_slot_from_viewport(
-              nickname: (nick.empty? ? nil : nick)
+              nickname: (result.empty? ? nil : result)
             )
             unless new_style
               puts "[SM+] add_from_view: save-as-new failed (pool esaurito o errore)"

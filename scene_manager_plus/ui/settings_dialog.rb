@@ -142,6 +142,43 @@ module SceneManagerPlus
         dlg.add_action_callback('sm_settings_log') do |_ctx, msg|
           puts "[SM+ Settings UI] #{msg}"
         end
+
+        # Purge degli stili non usati. SU 2019 non ha per-style delete via
+        # Ruby — solo styles.purge_unused (model-wide). Quindi mostriamo
+        # confirmation con lista degli stili che verranno cancellati
+        # (inclusi non-SM+) prima di procedere.
+        dlg.add_action_callback('sm_settings_purge_unused_styles') do |_ctx|
+          unused = Core::Styles.unused_styles
+          if unused.empty?
+            ::UI.messagebox("All styles are in use by at least one scene. Nothing to purge.")
+            next
+          end
+          list = unused.map { |h|
+            if h[:display_name] != h[:name]
+              "  • #{h[:display_name]} (native: #{h[:name]})"
+            else
+              "  • #{h[:name]}"
+            end
+          }.join("\n")
+          mb_yesno = Object.const_defined?(:MB_YESNO) ? MB_YESNO : 4
+          id_yes   = Object.const_defined?(:IDYES)   ? IDYES   : 6
+          answer = ::UI.messagebox(
+            "The following #{unused.size} style(s) will be deleted:\n\n" \
+            "#{list}\n\n" \
+            "This action cannot be undone via Ctrl+Z (styles.purge_unused is\n" \
+            "not transactional in SU 2019 Ruby API).\n\n" \
+            "Continue?",
+            mb_yesno
+          )
+          if answer == id_yes
+            removed = Core::Styles.purge_unused_styles
+            puts "[SM+] purge_unused_styles: removed #{removed.size} style(s): #{removed.inspect}"
+            ::UI.messagebox("Purged #{removed.size} style(s) and cleaned up their nicknames.")
+            Dialog.push_state if defined?(Dialog)
+          else
+            puts "[SM+] purge_unused_styles: aborted by user"
+          end
+        end
       end
 
       def push_state

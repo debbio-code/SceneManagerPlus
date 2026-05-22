@@ -206,27 +206,109 @@ module SceneManagerPlus
         s.empty? ? nil : s
       end
 
+      # Set nickname. Ritorna true se applicato, false se conflict (un altro
+      # stile ha già lo stesso display_name = stesso nickname, o nickname che
+      # collide con il nome nativo di un altro stile). Stringa vuota = clear,
+      # sempre OK.
+      #
+      # Validazione contro display_name (non solo nickname): se uno stile è
+      # senza nickname e si chiama nativamente "Foo", non vogliamo permettere
+      # ad un altro stile di nicknamarsi "Foo" — altrimenti il picker mostra
+      # due voci con lo stesso label e l'utente non capisce quale sceglie.
       def set_nickname(style_name, nickname)
         m = model
-        return unless m && style_name
+        return false unless m && style_name
         key = style_name.to_s
         nick = nickname.to_s.strip
         if nick.empty?
-          # set_attribute con nil non sempre cancella la entry: tipo string vuota.
           m.set_attribute(NICKNAMES_DICT, key, '')
-        else
-          m.set_attribute(NICKNAMES_DICT, key, nick)
+          return true
         end
+        return false if display_name_taken?(nick, except_native: key)
+        m.set_attribute(NICKNAMES_DICT, key, nick)
+        true
       end
 
       def clear_nickname(style_name)
         set_nickname(style_name, '')
       end
 
+      # Rimuove proprio la key dal dizionario (vs set_nickname che lascia '').
+      # Usato dopo purge_unused per non accumulare nickname orfani.
+      def remove_nickname_attr(style_name)
+        m = model
+        return unless m && style_name
+        d = m.attribute_dictionary(NICKNAMES_DICT, false)
+        return unless d
+        d.delete_key(style_name.to_s) if d.respond_to?(:delete_key)
+      end
+
+      # True se `name` è già usato come display_name (nickname o nativo) da
+      # uno stile diverso da `except_native`. Case-sensitive, trim'ata.
+      def display_name_taken?(name, except_native: nil)
+        target = name.to_s.strip
+        return false if target.empty?
+        m = model
+        return false unless m && m.respond_to?(:styles) && m.styles
+        m.styles.any? do |s|
+          sname = s.name.to_s
+          next false if except_native && sname == except_native.to_s
+          display_name(sname) == target
+        end
+      end
+
       # Nome da mostrare nella UI del plugin: nickname se presente, altrimenti
       # il nome nativo SU.
       def display_name(style_name)
         get_nickname(style_name) || style_name.to_s
+      end
+
+      # Enumera gli stili del modello NON usati da nessuna scena. Ritorna
+      # array di hash { name, display_name } ordinati per display_name.
+      def unused_styles
+        m = model
+        return [] unless m
+        used_names = m.pages.map { |p| (p.style.name.to_s rescue nil) }.compact.uniq
+        m.styles.reject { |s| used_names.include?(s.name.to_s) }
+                .map { |s| { name: s.name.to_s, display_name: display_name(s.name.to_s) } }
+                .sort_by { |h| h[:display_name].downcase }
+      end
+
+      # UI helper: prompt utente per nickname con retry su duplicato. Ritorna:
+      #   - una stringa (anche vuota = "no nickname")
+      #   - :aborted se l'utente cancella il dialog
+      # Usato da "+ New style" (picker), "Save as new" (dirty dialog branches).
+      def prompt_nickname_loop(title: 'Scene Manager+', label: 'Nickname:')
+        default = ''
+        loop do
+          res = ::UI.inputbox([label], [default], title)
+          return :aborted if res == false
+          nick = res[0].to_s.strip
+          return nick if nick.empty?
+          if display_name_taken?(nick)
+            ::UI.messagebox(
+              "Nickname '#{nick}' è già usato da un altro stile.\n" \
+              "Scegli un altro nome."
+            )
+            default = nick
+            next
+          end
+          return nick
+        end
+      end
+
+      # Purge degli unused via styles.purge_unused, + cleanup dei nickname
+      # orfani (cancella le entry del dict per gli stili rimossi).
+      # Ritorna l'array di nomi rimossi (per messagebox finale).
+      def purge_unused_styles
+        m = model
+        return [] unless m && m.styles.respond_to?(:purge_unused)
+        # Snapshot dei nomi unused PRIMA del purge, così sappiamo cosa pulire
+        # dal nickname dict dopo.
+        to_remove = unused_styles.map { |h| h[:name] }
+        m.styles.purge_unused
+        to_remove.each { |n| remove_nickname_attr(n) }
+        to_remove
       end
     end
   end

@@ -499,6 +499,15 @@
     const uiHideTabs = document.getElementById('ui-hide-scene-tabs-on-open');
     if (uiHideTabs) uiHideTabs.addEventListener('change', saveUiNow);
 
+    // Style pool: purge unused styles. UI a senso unico (Ruby fa il
+    // confirmation messagebox + purge_unused + cleanup nicknames).
+    const purgeBtn = document.getElementById('btn-purge-unused-styles');
+    if (purgeBtn) {
+      purgeBtn.addEventListener('click', () => {
+        call('sm_settings_purge_unused_styles');
+      });
+    }
+
     call('sm_settings_ready');
   });
 })();

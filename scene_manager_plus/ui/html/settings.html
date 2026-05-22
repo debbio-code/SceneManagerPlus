@@ -390,6 +390,21 @@
         <span id="ui-status" class="status"></span>
       </div>
     </section>
+
+    <section class="group" id="group-styles">
+      <h2>Style pool</h2>
+
+      <div class="row">
+        <small class="muted">
+          SketchUp 2019 Ruby API does not expose a per-style delete method. The button below uses SketchUp's native <code>styles.purge_unused</code>, which removes <strong>all</strong> styles not referenced by any scene — including non-SM+ styles you may have created but not yet assigned. A confirmation dialog will list every style about to be deleted.
+        </small>
+      </div>
+
+      <div class="actions">
+        <button type="button" id="btn-purge-unused-styles">Purge unused styles…</button>
+        <span id="styles-status" class="status"></span>
+      </div>
+    </section>
   </div>
 
   <script src="js/settings.js"></script>
