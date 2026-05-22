@@ -635,7 +635,9 @@ da API, quindi il dev fa l'export manuale una volta, poi PowerShell +
 System.IO.Compression duplica e rinomina lo style.name dentro
 `document.xml`). Vedi commit del tool e `tools/_slot_styles_ps.ps1`.
 
-A runtime `Core::Styles.allocate_new_slot`:
+Due funzioni di allocazione, una primitiva e una di alto livello:
+
+**`allocate_new_slot(nickname:)`** — primitiva pulita:
 1. Trova il primo NN il cui `"SM+ Slot NN"` non è già in `model.styles`
    (così supporta file legacy, riempie buchi se l'utente ha cancellato a
    mano slot, ecc. — niente counter persistito da mantenere in sync)
@@ -643,6 +645,31 @@ A runtime `Core::Styles.allocate_new_slot`:
    toccare lo `selected_style` se c'è uno style dirty pending
 3. Recupera il `Sketchup::Style` per nome (post-add) e lo ritorna
 4. Se nickname passato, `set_nickname(style.name, nick)`
+
+Lo stile risultante ha le rendering options del **template** (quello
+esportato a mano nella fase generator: "Architectural Design Style").
+Utile solo come primitiva interna: l'utente raramente vuole "uno stile
+generico".
+
+**`allocate_new_slot_from_viewport(nickname:)`** — quello che usa il
+picker "+ New style…" e quello che userà il futuro branch "Save as new"
+del dirty-style dialog. Cattura le rendering options correnti del
+viewport (dirty edit inclusi) dentro lo slot. Flusso:
+
+1. Snapshot di `model.rendering_options.each_pair` PRIMA di toccare nulla
+2. `add_style(slot_path, false)`
+3. `styles.selected_style = new_slot` — viewport ora mostra le RO
+   template dello slot; eventuali dirty edit sullo stile precedente
+   vengono droppati silenziosamente (è OK: li abbiamo nello snapshot,
+   e lo stile precedente torna pulito al suo state salvato — equivalente
+   al "Don't save" nativo)
+4. Riapplica snapshot sulle `ro[k] = v` (rescue su chiavi read-only)
+5. `styles.update_selected_style` — committa lo snapshot dentro lo slot
+6. Set nickname
+
+Tutto in 1 `start_operation` = 1 Ctrl+Z (l'assign_style alla scena di
+contesto fa una seconda operazione, quindi totale 2 Ctrl+Z per la
+sequenza completa "+ New style + assign").
 
 Pool esaurito → `UI.messagebox` con istruzioni per estendere
 (rigenerare con NUM_SLOTS > 25 in `tools/generate-slot-styles.rb` e
@@ -674,9 +701,10 @@ Helper `Core::Styles.display_name(style_name)` = nickname o nome nativo.
   cima, sopra l'elenco. Click → `SMBridge.newStyle(sceneId)` →
   `sm_style_new` callback in `dialog.rb`.
 - `sm_style_new`: prompt `UI.inputbox` per nickname (skippabile = stringa
-  vuota), poi `allocate_new_slot(nickname: ...)`, poi `assign_style` alla
-  scena di contesto se `scene_id` presente. Due `start_operation`
-  separate (allocate + assign) → 2 Ctrl+Z. Accettabile per ora.
+  vuota), poi `allocate_new_slot_from_viewport(nickname: ...)` (il nuovo
+  stile cattura ciò che il viewport sta mostrando!), poi `assign_style`
+  alla scena di contesto se `scene_id` presente. 2 Ctrl+Z totali
+  (allocate-from-viewport + assign).
 - Tooltip letter badge per row: "Style: <nickname> (native: <native>)"
   se nickname presente, altrimenti solo "Style: <native>".
 
@@ -688,9 +716,10 @@ Helper `Core::Styles.display_name(style_name)` = nickname o nome nativo.
   Style Manager con commit su blur/Enter.
 - **Dirty-style "Save as new"** (Fase 1C): oggi il branch NO del dialog
   Yes/No/Cancel su update_from_view e add_from_view mostra ancora le
-  istruzioni manuali. Va sostituito con: snapshot rendering_options
-  dirty → allocate_new_slot → riapplica le pending al nuovo slot →
-  assign al contesto. Lo stile originale resta clean.
+  istruzioni manuali. Va sostituito chiamando
+  `Core::Styles.allocate_new_slot_from_viewport(nickname:)` (la funzione
+  esiste già, fa esattamente quello — la usa anche "+ New style").
+  L'unica cosa che manca è il wiring nel dialog.
 - **Pulizia slot inutilizzati**: se utente crea Slot 01 e poi non lo
   assegna a nessuna scena, resta nel modello. Per ora si cancella a
   mano dal native browser; valutare bottone "purge unused SM+ slots".

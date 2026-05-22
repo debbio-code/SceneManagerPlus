@@ -106,6 +106,95 @@ module SceneManagerPlus
         end
       end
 
+      # Variante "save as new style": alloca uno slot dal pool e ci committa
+      # dentro le rendering options correnti del viewport. Il risultato è uno
+      # stile che, quando applicato a una scena, riproduce esattamente la vista
+      # corrente — comprese eventuali modifiche pending non ancora salvate
+      # sullo stile attivo (è esattamente lo use case del branch "NO = save as
+      # new" del dialog dirty-style).
+      #
+      # Flusso:
+      #   1. Snapshot di tutte le model.rendering_options (= ciò che il
+      #      viewport mostra ora, dirty edit inclusi)
+      #   2. add_style(slot_path, false) — aggiunge lo slot al modello
+      #   3. styles.selected_style = nuovo slot — viewport ora mostra le RO
+      #      "template" dello slot; eventuali pending edit sullo stile
+      #      precedente vengono droppate silenziosamente (è OK: le abbiamo
+      #      nello snapshot e lo stile precedente torna pulito allo state
+      #      salvato, comportamento equivalente al "Don't save" nativo)
+      #   4. Riapplica snapshot su model.rendering_options
+      #   5. styles.update_selected_style — committa le RO restored allo
+      #      stile nuovo
+      #   6. Set nickname
+      #
+      # Tutto in 1 start_operation = 1 Ctrl+Z.
+      def allocate_new_slot_from_viewport(nickname: nil)
+        m = model
+        return nil unless m
+        n = next_free_slot_index(m)
+        unless n
+          ::UI.messagebox(
+            "Pool di stili esaurito (#{MAX_SLOT_INDEX} slot occupati).\n\n" \
+            "Per estendere il pool: rilancia tools/generate-slot-styles.rb\n" \
+            "su una postazione dev aumentando NUM_SLOTS, poi commit dei\n" \
+            "nuovi assets/styles/slot_NN.style."
+          )
+          return nil
+        end
+        path = slot_path(n)
+        unless File.exist?(path)
+          ::UI.messagebox("File slot mancante: #{path}")
+          return nil
+        end
+
+        name = slot_name(n)
+
+        # Snapshot rendering options prima di toccare nulla.
+        ro = m.rendering_options
+        snapshot = {}
+        ro.each_pair { |k, v| snapshot[k] = v }
+
+        m.start_operation('SM+ New style from viewport', true)
+        begin
+          m.styles.add_style(path, false)
+          loaded = m.styles.find { |s| s.name == name }
+          unless loaded
+            m.abort_operation
+            warn "[SM+] allocate_new_slot_from_viewport: add_style non ha aggiunto '#{name}'"
+            return nil
+          end
+
+          # Switching active style: scrive le RO "template" dello slot su
+          # model.rendering_options (droppando dirty edit precedenti).
+          m.styles.selected_style = loaded
+
+          # Restore snapshot → ora model.rendering_options ricalca il viewport
+          # come prima dello switch.
+          snapshot.each do |k, v|
+            begin
+              ro[k] = v
+            rescue
+              # alcune chiavi possono essere read-only o non riassegnabili al
+              # valore corrente — ignoriamo, best-effort.
+            end
+          end
+
+          # Committa: lo slot 'name' ora contiene esattamente la vista
+          # catturata. È persistente sullo stile, non più "dirty".
+          m.styles.update_selected_style
+
+          set_nickname(name, nickname) if nickname && !nickname.to_s.strip.empty?
+
+          m.commit_operation
+          loaded
+        rescue => e
+          m.abort_operation
+          warn "[SM+] allocate_new_slot_from_viewport: #{e.class}: #{e.message}"
+          warn e.backtrace.first(3).join("\n")
+          nil
+        end
+      end
+
       # ── Nickname API ──────────────────────────────────────────────────
 
       def get_nickname(style_name)

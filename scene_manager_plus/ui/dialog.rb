@@ -255,9 +255,13 @@ module SceneManagerPlus
             puts "[SM+] sm_style_new: aborted by user"
           else
             nickname = prompt_result[0].to_s.strip
-            style = Core::Styles.allocate_new_slot(nickname: (nickname.empty? ? nil : nickname))
+            # Variante from_viewport: il nuovo stile cattura le rendering
+            # options correnti (dirty edit inclusi). Senza questo passo lo
+            # slot manterrebbe le RO del template (Architectural Design Style),
+            # che NON è quello che l'utente si aspetta cliccando "+ New style".
+            style = Core::Styles.allocate_new_slot_from_viewport(nickname: (nickname.empty? ? nil : nickname))
             if style
-              puts "[SM+] sm_style_new: allocated #{style.name.inspect} (nick=#{nickname.inspect})"
+              puts "[SM+] sm_style_new: allocated #{style.name.inspect} from viewport (nick=#{nickname.inspect})"
               if scene_id
                 Core::SceneModel.assign_style(scene_id, style.name)
               end
