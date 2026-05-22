@@ -93,6 +93,23 @@ module SceneManagerPlus
         nil
       end
 
+      # True se la pagina è una scena Match Photo. SU 2019 Ruby API NON espone
+      # Page#matchphoto? né Page#matchphoto, ma le camere Match Photo hanno
+      # aspect_ratio != 0 perché il valore è esplicitamente settato per
+      # matchare l'aspect della foto di sfondo. Le camere normali hanno
+      # aspect_ratio = 0 (significa "usa aspect del viewport").
+      # Verificato empiricamente: in un model con scene miste, solo la scena
+      # MP aveva aspect_ratio != 0 — tutte le altre 0.0.
+      def matchphoto?(page)
+        return false unless page && page.respond_to?(:camera)
+        c = page.camera
+        return false unless c
+        ratio = c.aspect_ratio.to_f rescue 0.0
+        ratio != 0.0
+      rescue
+        false
+      end
+
       # Sposta la pagina con uid `id` all'indice `target_index` (0-based).
       # Usa l'API ufficiale: pages.add_matchphoto/erase non vanno bene,
       # usiamo invece swap iterativo perché Pages non ha move diretto.
@@ -484,6 +501,36 @@ module SceneManagerPlus
       def add_from_view(name = nil)
         m = model
         return nil unless m
+
+        # === Match Photo warning ===
+        # SU 2019 Ruby API non espone Page#matchphoto, e pages.add() NON copia
+        # la foto Match Photo sulla nuova pagina. Anche send_action(21067)
+        # (View → Animation → Add Scene) ha lo stesso problema — solo la "+"
+        # nativa di Window → Scenes inspector preserva il Match Photo,
+        # tramite un C++ code path interno non esposto a Ruby. Quindi se
+        # l'utente è su una scena Match Photo e crea una nuova scena dal
+        # plugin, la foto sparirebbe silenziosamente.
+        # Detection euristica via Page#camera#aspect_ratio (vedi matchphoto?).
+        active = m.pages.selected_page
+        if matchphoto?(active)
+          mb_yesno = Object.const_defined?(:MB_YESNO) ? MB_YESNO : 4
+          id_yes   = Object.const_defined?(:IDYES)   ? IDYES   : 6
+          answer = ::UI.messagebox(
+            "The active scene '#{active.name}' is a Match Photo scene.\n\n" \
+            "Due to a SketchUp 2019 Ruby API limitation, Scene Manager+\n" \
+            "cannot clone the photo background to a new scene.\n\n" \
+            "To create a new scene that preserves the photo, please use\n" \
+            "the native SketchUp inspector:\n" \
+            "  Window → Scenes → click the '+' button\n\n" \
+            "Continue creating a new scene WITHOUT the photo background?",
+            mb_yesno
+          )
+          if answer != id_yes
+            puts "[SM+] add_from_view: aborted by user (Match Photo source)"
+            return nil
+          end
+          puts "[SM+] add_from_view: user proceeded despite Match Photo loss"
+        end
 
         # === Style "dirty" handling ===
         # Stesso dialog di update_from_view: se lo stile attivo ha modifiche

@@ -614,6 +614,60 @@ modo è `Sketchup.send_action(10522)` (ID View → Axes su Windows; selector
 **bottone Toggle** (non checkbox): fire-and-forget, no state tracking.
 Override ID via `Sketchup.write_default('SceneManagerPlus', 'axes_cmd_id', N)`.
 
+## Match Photo: limite invalicabile dell'API Ruby SU 2019
+
+**Sintomo**: creare una nuova scena dal plugin partendo da una scena Match
+Photo fa sparire la foto di sfondo nella nuova scena.
+
+**Causa**: SU 2019 Ruby API non espone praticamente nulla del Match Photo
+subsystem:
+- `Sketchup::Page#matchphoto?` NON esiste
+- `Sketchup::Page#matchphoto` NON esiste
+- Nessun flag `use_matchphoto?` né costante `PAGE_USE_MATCHPHOTO`
+- `Sketchup::Matchphoto` class NON definita
+- `Page#attribute_dictionaries` e `Model#attribute_dictionaries` NON
+  contengono nulla relativo a Match Photo (verificato con
+  `tools/dump-matchphoto-attrs.rb`)
+- Nessuna `Sketchup::Image` o ComponentDefinition nasconde la foto
+- Nessun path di file immagine accessibile via attributi
+
+L'unica API esposta è `Sketchup::Pages#add_matchphoto_page(image_filename,
+camera, page_name)` ma richiede di passare il path della foto a mano —
+e non c'è verso di leggerlo dall'API Ruby.
+
+**Code path nativi diversi**:
+- `pages.add(name)` (quello che usavamo) → NON copia Match Photo
+- `Sketchup.send_action(21067)` (View → Animation → Add Scene) → NON copia
+- **Window → Scenes inspector "+"** → copia correttamente
+
+L'inspector "+" usa una funzione C++ interna che ha accesso al Match Photo
+subsystem. Non corrisponde a nessun `send_action` ID Ruby (testato range
+21065..21077, 10530..10540, 10620..10630, nessuno aggiunge scena
+preservando Match Photo). Probabilmente è una command "privata" registrata
+solo in SU UI nativa.
+
+**Workaround scartati**:
+- `add_matchphoto_page` programmatico — serve il path foto, non leggibile
+- Win32 UI scripting (simulare click sulla "+" dell'inspector) —
+  fragile, dipende da window class hierarchy non documentata
+- send_action range più ampio — improbabile, ID inspector privati
+
+**Fix accettato** (in `SceneModel.add_from_view`):
+- Predicate `SceneModel.matchphoto?(page)` con euristica:
+  `page.camera.aspect_ratio != 0`. Verificato empiricamente: solo scene
+  Match Photo hanno aspect_ratio settato esplicitamente (matchando la
+  foto). Scene normali hanno 0.0 (= "usa aspect del viewport").
+- All'inizio di `add_from_view`, se `matchphoto?(active)` mostra
+  `UI.messagebox` YES/NO con spiegazione + suggerimento di usare la "+"
+  dell'inspector nativo. NO = abort.
+
+Se la heuristic si rivelasse insufficiente (false positive/negative su
+casi reali), valutare combinare con `camera.image_width` o altre signal.
+
+Documentazione di partenza: `tools/dump-matchphoto-api.rb` (cosa l'API
+Ruby espone su Match Photo) e `tools/dump-matchphoto-attrs.rb` (cosa
+salva negli attribute_dictionaries — niente di utile).
+
 ## Style pool + nickname per-modello (Fase 1A — "+ New style…")
 
 **Problema risolto**: SU 2019 Ruby API non permette di:
