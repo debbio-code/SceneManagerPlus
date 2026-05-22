@@ -58,9 +58,14 @@ module SceneManagerPlus
       def styles_map
         m = model
         return [] unless m && m.respond_to?(:styles) && m.styles
-        names = m.styles.map { |s| s.name.to_s }.sort_by { |n| n.downcase }
-        names.each_with_index.map do |name, i|
-          { name: name, letter: letter_for_index(i) }
+        # Ordiniamo per display_name (nickname o nativo) così la lettera
+        # rispecchia ciò che l'utente vede nel plugin. Stabile a parità di
+        # nome (rare).
+        pairs = m.styles.map { |s| [s.name.to_s, Core::Styles.display_name(s.name.to_s)] }
+        pairs.sort_by! { |(_, disp)| disp.downcase }
+        pairs.each_with_index.map do |(name, disp), i|
+          nick = Core::Styles.get_nickname(name)
+          { name: name, display_name: disp, nick: nick, letter: letter_for_index(i) }
         end
       rescue => e
         warn "[SM+] styles_map: #{e.class}: #{e.message}"

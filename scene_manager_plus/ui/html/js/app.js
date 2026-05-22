@@ -169,7 +169,21 @@ window.SM = (function () {
     }
     var included = scene.export_included !== false;
     var letter = letterForStyle(scene.style_name);
-    var letterTitle = scene.style_name ? ('Style: ' + scene.style_name) : 'No style';
+    var letterTitle = 'No style';
+    if (scene.style_name) {
+      // Mostra il nickname se c'è, indicando il nome nativo tra parentesi.
+      var styleEntry = null;
+      if (state.styles) {
+        for (var si = 0; si < state.styles.length; si++) {
+          if (state.styles[si].name === scene.style_name) { styleEntry = state.styles[si]; break; }
+        }
+      }
+      if (styleEntry && styleEntry.nick) {
+        letterTitle = 'Style: ' + styleEntry.nick + ' (native: ' + scene.style_name + ')';
+      } else {
+        letterTitle = 'Style: ' + scene.style_name;
+      }
+    }
     row.innerHTML =
       '<span class="grip">&#x2630;</span>' +
       '<span class="row-style-letter" title="' + escapeAttr(letterTitle) + '">' + letter + '</span>' +
@@ -222,7 +236,6 @@ window.SM = (function () {
   function showStylePickerMenu(x, y, sceneId) {
     hideContextMenu();
     var styles = state.styles || [];
-    if (styles.length === 0) return;
     var scene = sceneById(sceneId);
     var currentName = scene && scene.style_name;
     var menu = document.createElement('div');
@@ -232,13 +245,35 @@ window.SM = (function () {
     header.className = 'ctx-header';
     header.textContent = 'Assign style';
     menu.appendChild(header);
+
+    // Voce "+ Nuovo stile..." sempre in cima: alloca slot dal pool +
+    // (opzionale) nickname + assegna alla scena di contesto.
+    var newItem = document.createElement('div');
+    newItem.className = 'ctx-item style-pick style-pick-new';
+    newItem.innerHTML = '<span class="ctx-letter">+</span><span class="ctx-name">New style…</span>';
+    newItem.addEventListener('click', function () {
+      hideContextMenu();
+      SMBridge.newStyle(sceneId);
+    });
+    menu.appendChild(newItem);
+
+    if (styles.length > 0) {
+      var sep = document.createElement('div');
+      sep.className = 'ctx-sep';
+      menu.appendChild(sep);
+    }
+
     styles.forEach(function (s) {
       var item = document.createElement('div');
       item.className = 'ctx-item style-pick';
       if (s.name === currentName) item.classList.add('current');
       var letterSpan = '<span class="ctx-letter">' + s.letter + '</span>';
       item.innerHTML = letterSpan + '<span class="ctx-name"></span>';
-      item.querySelector('.ctx-name').textContent = s.name;
+      // Display: nickname se presente, altrimenti nome nativo.
+      var label = s.display_name || s.name;
+      item.querySelector('.ctx-name').textContent = label;
+      // Tooltip mostra il nome nativo se diverso dal display.
+      if (s.nick) item.title = 'Native: ' + s.name;
       item.addEventListener('click', function () {
         hideContextMenu();
         if (s.name !== currentName) {

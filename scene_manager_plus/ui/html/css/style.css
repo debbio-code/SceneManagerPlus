@@ -421,6 +421,23 @@ body {
   background: #d4a017;
   color: #1a1a1a;
 }
+.context-menu .ctx-sep {
+  height: 1px;
+  background: #1e1e1e;
+  margin: 3px 0;
+}
+.context-menu .ctx-item.style-pick-new .ctx-letter {
+  background: #2a4a2a;
+  color: #b8e0b8;
+}
+.context-menu .ctx-item.style-pick-new:hover .ctx-letter {
+  background: #3d6d3d;
+  color: #fff;
+}
+.context-menu .ctx-item.style-pick-new .ctx-name {
+  font-style: italic;
+  color: #cfd8c3;
+}
 
 .statusbar {
   background: #1e1e1e;

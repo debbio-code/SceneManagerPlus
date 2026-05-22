@@ -238,6 +238,34 @@ module SceneManagerPlus
           StyleDialog.show_for(data['id'], data['style_name'])
         end
 
+        # "Nuovo stile" da picker right-click. Alloca lo slot successivo
+        # dal pool, prompt per nickname via UI.inputbox (skippabile), poi
+        # assegna lo stile alla scena di contesto (se data['id'] presente).
+        dlg.add_action_callback('sm_style_new') do |_ctx, payload|
+          data = parse(payload)
+          scene_id = data['id']
+          # UI.inputbox: 1° array = labels, 2° = defaults, 3° = title
+          prompt_result = ::UI.inputbox(
+            ['Nickname (lascia vuoto per usare il nome nativo "Slot NN"):'],
+            [''],
+            'Scene Manager+ — Nuovo stile'
+          )
+          # ritorna false se utente cancella; altrimenti array di 1 elemento
+          if prompt_result == false
+            puts "[SM+] sm_style_new: aborted by user"
+          else
+            nickname = prompt_result[0].to_s.strip
+            style = Core::Styles.allocate_new_slot(nickname: (nickname.empty? ? nil : nickname))
+            if style
+              puts "[SM+] sm_style_new: allocated #{style.name.inspect} (nick=#{nickname.inspect})"
+              if scene_id
+                Core::SceneModel.assign_style(scene_id, style.name)
+              end
+            end
+          end
+          push_state
+        end
+
         dlg.add_action_callback('sm_delete') do |_ctx, payload|
           data = parse(payload)
           Core::SceneModel.delete_pages(data['ids'])

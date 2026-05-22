@@ -28,6 +28,7 @@ window.SMBridge = (function () {
     updateFromView:  function (id)    { call('sm_update_from_view', { id: id }); },
     assignStyle:     function (id, name) { call('sm_assign_style', { id: id, style_name: name }); },
     openStyle:       function (id, name) { call('sm_open_style', { id: id, style_name: name }); },
+    newStyle:        function (id)       { call('sm_style_new', { id: id }); },
     deleteScenes:    function (ids)   { call('sm_delete', { ids: ids }); },
     newSceneFromView:function ()      { call('sm_new_scene_from_view'); },
     folderCreate:    function (name)  { call('sm_folder_create', { name: name }); },

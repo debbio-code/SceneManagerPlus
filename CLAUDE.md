@@ -70,6 +70,7 @@ scene_manager_plus.rb               # loader, registra l'extension
 scene_manager_plus/
 ├── main.rb                         # entry point: menu + toolbar + comando
 ├── assets/default_logo.png         # logo bundled per watermark
+├── assets/styles/                  # pool slot_NN.style bundled (vedi sez. "Style pool + nickname")
 ├── assets/titleblock/              # asset bundlati per il cartiglio
 │   ├── company.txt                 # 4 righe dati aziendali
 │   └── logo.jpg                    # logo aziendale per il cartiglio
@@ -81,6 +82,7 @@ scene_manager_plus/
 │   ├── previews.rb                 # cache PNG anteprime per-modello persistente
 │   ├── scene_model.rb              # wrapper su Sketchup.active_model.pages
 │   ├── settings.rb                 # config persistente con defaults
+│   ├── styles.rb                   # pool slot + nickname per-modello
 │   ├── text_render.rb              # PowerShell+System.Drawing per filename label
 │   └── titleblock.rb               # PowerShell+System.Drawing per cartiglio
 └── ui/
@@ -611,6 +613,87 @@ modo è `Sketchup.send_action(10522)` (ID View → Axes su Windows; selector
 `'showHideAxes:'` su Mac). Quindi nel Mini Style Manager Model Axes è un
 **bottone Toggle** (non checkbox): fire-and-forget, no state tracking.
 Override ID via `Sketchup.write_default('SceneManagerPlus', 'axes_cmd_id', N)`.
+
+## Style pool + nickname per-modello (Fase 1A — "+ New style…")
+
+**Problema risolto**: SU 2019 Ruby API non permette di:
+- creare programmaticamente un nuovo stile da zero (`Styles#add_style`
+  accetta solo `.style` file da disco),
+- rinominare uno stile esistente (`Sketchup::Style#name=` non esiste),
+- clonare uno stile (no `Style#save_as`, no `Style#duplicate`).
+
+**Soluzione architetturale**: due meccanismi disaccoppiati che insieme
+emulano la creazione di stili nuovi con nomi arbitrari.
+
+### 1. Pool di slot bundled (`Core::Styles.allocate_new_slot`)
+
+25 file `.style` pre-generati in `scene_manager_plus/assets/styles/slot_NN.style`,
+ciascuno contenente uno stile col nome embedded `"SM+ Slot NN"` (NN = 01..25).
+Generati one-shot via `tools/generate-slot-styles.rb` + un `_template.style`
+esportato a mano dal native Styles browser (SU 2019 non espone Style#save_as
+da API, quindi il dev fa l'export manuale una volta, poi PowerShell +
+System.IO.Compression duplica e rinomina lo style.name dentro
+`document.xml`). Vedi commit del tool e `tools/_slot_styles_ps.ps1`.
+
+A runtime `Core::Styles.allocate_new_slot`:
+1. Trova il primo NN il cui `"SM+ Slot NN"` non è già in `model.styles`
+   (così supporta file legacy, riempie buchi se l'utente ha cancellato a
+   mano slot, ecc. — niente counter persistito da mantenere in sync)
+2. `model.styles.add_style(slot_path, false)` — activate=false per non
+   toccare lo `selected_style` se c'è uno style dirty pending
+3. Recupera il `Sketchup::Style` per nome (post-add) e lo ritorna
+4. Se nickname passato, `set_nickname(style.name, nick)`
+
+Pool esaurito → `UI.messagebox` con istruzioni per estendere
+(rigenerare con NUM_SLOTS > 25 in `tools/generate-slot-styles.rb` e
+committare i nuovi `slot_NN.style`).
+
+### 2. Nickname per-modello (`Core::Styles.{get,set,clear}_nickname`)
+
+Mappa `native_style_name → friendly_name` salvata come attribute dict
+del modello, key = `'SMP_style_nicks'`. Travels with the `.skp`.
+
+- **Plugin-only**: il native Styles browser SU mostra sempre il nome
+  reale ("SM+ Slot 03"). Solo il plugin sostituisce con il nickname
+  ovunque (letter badge tooltip, picker dropdown, scene letter mapping).
+- Funziona su **qualunque stile**, non solo sugli slot del pool: l'utente
+  può nickname-are anche stili pre-esistenti (es. "Default Style" →
+  "Vista normale") in file legacy senza toccare il nome nativo.
+- `set_nickname(name, '')` salva stringa vuota = clear logico
+  (`set_attribute(..., nil)` non garantisce delete della entry, usare ''
+  è più semplice e `get_nickname` ritorna nil per "" comunque).
+
+Helper `Core::Styles.display_name(style_name)` = nickname o nome nativo.
+
+### Integrazione UI (Fase 1A)
+
+- `SceneModel.styles_map` ora ritorna `[{ name, display_name, nick,
+  letter }, ...]` — ordinato per `display_name.downcase` (la lettera
+  riflette ciò che l'utente vede, non il nome nativo).
+- Picker stili (right-click su letter badge): voce "+ New style…" in
+  cima, sopra l'elenco. Click → `SMBridge.newStyle(sceneId)` →
+  `sm_style_new` callback in `dialog.rb`.
+- `sm_style_new`: prompt `UI.inputbox` per nickname (skippabile = stringa
+  vuota), poi `allocate_new_slot(nickname: ...)`, poi `assign_style` alla
+  scena di contesto se `scene_id` presente. Due `start_operation`
+  separate (allocate + assign) → 2 Ctrl+Z. Accettabile per ora.
+- Tooltip letter badge per row: "Style: <nickname> (native: <native>)"
+  se nickname presente, altrimenti solo "Style: <native>".
+
+### Limiti noti / TODO
+
+- **Mini Style Manager nickname rename** (Fase 1B): ad ora non c'è UI
+  per rinominare il nickname di uno stile *esistente* — solo per quelli
+  nuovi al momento della creazione. Aggiungere campo input nel Mini
+  Style Manager con commit su blur/Enter.
+- **Dirty-style "Save as new"** (Fase 1C): oggi il branch NO del dialog
+  Yes/No/Cancel su update_from_view e add_from_view mostra ancora le
+  istruzioni manuali. Va sostituito con: snapshot rendering_options
+  dirty → allocate_new_slot → riapplica le pending al nuovo slot →
+  assign al contesto. Lo stile originale resta clean.
+- **Pulizia slot inutilizzati**: se utente crea Slot 01 e poi non lo
+  assegna a nessuna scena, resta nel modello. Per ora si cancella a
+  mano dal native browser; valutare bottone "purge unused SM+ slots".
 
 ## Note per future sessioni
 
