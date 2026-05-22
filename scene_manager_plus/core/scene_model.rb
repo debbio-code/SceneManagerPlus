@@ -464,6 +464,51 @@ module SceneManagerPlus
       def add_from_view(name = nil)
         m = model
         return nil unless m
+
+        # === Style "dirty" handling ===
+        # Stesso dialog di update_from_view: se lo stile attivo ha modifiche
+        # pending, pages.add cattura il riferimento allo stile ma le pending
+        # restano in memoria dirty (non vengono persistite). Diamo all'utente
+        # la stessa scelta del flusso nativo "Warning - Scenes and Styles".
+        styles = m.styles
+        if styles.respond_to?(:active_style_changed) && styles.active_style_changed
+          style_name = (styles.active_style.name rescue 'current')
+          mb_const  = Object.const_defined?(:MB_YESNOCANCEL) ? MB_YESNOCANCEL : 3
+          id_yes    = Object.const_defined?(:IDYES) ? IDYES : 6
+          id_no     = Object.const_defined?(:IDNO)  ? IDNO  : 7
+          choice = ::UI.messagebox(
+            "Style '#{style_name}' has unsaved changes.\n\n" \
+            "YES = Update the selected style with the current modifications.\n" \
+            "NO  = Save as a new style (manual step required — see info).\n" \
+            "CANCEL = Don't touch the style (new scene captures the saved style only).",
+            mb_const
+          )
+          case choice
+          when id_yes
+            puts "[SM+] add_from_view: user chose 'Update selected style' for '#{style_name}'"
+            begin
+              styles.update_selected_style
+            rescue => e
+              warn "[SM+] update_selected_style failed: #{e.class}: #{e.message}"
+            end
+          when id_no
+            puts "[SM+] add_from_view: user chose 'Save as new style' — manual"
+            ::UI.messagebox(
+              "Saving as a new style is not exposed by the SketchUp 2019 Ruby API.\n\n" \
+              "How to do it manually:\n" \
+              "1. Open Window → Styles\n" \
+              "2. In the Styles browser, click 'Create new Style' (the small disc-with-plus icon)\n" \
+              "3. Re-run 'New scene from view'\n\n" \
+              "New scene aborted."
+            )
+            return nil
+          else
+            # Cancel → procediamo: la nuova scena cattura lo stile salvato
+            # (le pending edit restano in memoria dirty, ignorate).
+            puts "[SM+] add_from_view: user chose 'Don't touch style' — proceeding"
+          end
+        end
+
         active = m.pages.selected_page
         # Snapshot di layer.visible? PRIMA di pages.add. SU 2019 + Layers
         # Manager observer durante pages.add mutano il model: per i layer

@@ -835,6 +835,16 @@ window.SM = (function () {
     SMBridge.selectPage(id);
   }
 
+  // Selezione "esterna" (es. dopo creazione nuova scena lato Ruby): porta la
+  // fascia blu sul nuovo uid + ancora la selezione lì.
+  function selectId(uid) {
+    if (!uid) return;
+    selection = [uid];
+    anchorId = uid;
+    render();
+    scrollRowIntoCenter(uid);
+  }
+
   function setActiveFromNative(uid) {
     if (!uid) return;
     if (activeId === uid) return;
@@ -867,6 +877,7 @@ window.SM = (function () {
     setState: setState,
     setPreviewProgress: setPreviewProgress,
     setExportProgress: setExportProgress,
-    setActiveFromNative: setActiveFromNative
+    setActiveFromNative: setActiveFromNative,
+    selectId: selectId
   };
 })();

@@ -316,8 +316,13 @@ module SceneManagerPlus
         end
 
         dlg.add_action_callback('sm_new_scene_from_view') do |_ctx|
-          Core::SceneModel.add_from_view
+          page = Core::SceneModel.add_from_view
           push_state
+          if page
+            uid = Core::SceneModel.page_id(page)
+            js_uid = uid.to_s.inspect
+            dlg.execute_script("window.SM && SM.selectId && SM.selectId(#{js_uid});")
+          end
         end
 
         dlg.add_action_callback('sm_folder_create') do |_ctx, payload|
