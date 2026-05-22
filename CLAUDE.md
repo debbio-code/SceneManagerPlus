@@ -351,11 +351,23 @@ offset_x/y, opacity).
   load/blend/save → su JPG niente doppia ri-codifica quando entrambi attivi.
   Le spec hanno `anchor_x` (`:left`/`:right`), `anchor_y` (`:top`/`:bottom`),
   `offset_x/y`, opzionale `width_pct` per scalare, `opacity`.
-- **Color picker**: `<input type="color">` in CEF di SU 2019 è inaffidabile
-  (accetta solo hex lowercase, `#FFFFFF` viene rifiutato silenziosamente
-  e l'input rimane a `#000000`; il `change` event non sempre scatta).
-  Usato invece input testuale hex + swatch + 6 preset clickabili
-  (vedi `settings.html` group-filename-label). Sempre lowercase.
+- **Color picker**: `<input type="color">` in CEF di SU 2019 è
+  **completamente broken**: cliccato non apre il dialog nativo OS, non
+  scatena eventi, è un dead element. Stesso problema in tutti i contesti
+  dove viene usato. Quirks ulteriori scoperti prima (accetta solo hex
+  lowercase, change event inaffidabile) sono irrilevanti perché non
+  riusciamo nemmeno a interagire col picker. Per i settings (filename
+  label) usato input testuale hex + swatch + 6 preset clickabili. Per
+  il **Mini Style Manager** (Background + Sky color) costruito un picker
+  HSV custom in HTML/JS — `window.SMS` IIFE include un sub-modulo
+  privato `ColorPopup` con: SB square (saturation × value, gradient
+  CSS), hue slider verticale (gradient rainbow CSS), hex input, preview
+  swatch, 24 preset 8×3. Swatch della row clickabile apre il popup
+  posizionato sotto. Drag/click live-applica via `onApply` callback →
+  text input + swatch della row + Ruby (in viewport vedi il cambio
+  immediatamente). Outside click o Esc chiudono. Funziona al 100% in
+  CEF SU 2019 perché usa solo standard DOM/CSS senza el `<input
+  type="color">`.
 
 ## Settings: persistenza per-file (model attributes)
 
