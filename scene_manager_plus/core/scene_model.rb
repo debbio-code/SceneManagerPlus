@@ -423,7 +423,7 @@ module SceneManagerPlus
           choice = ::UI.messagebox(
             "Style '#{style_name}' has unsaved changes.\n\n" \
             "YES = Update the selected style with the current modifications.\n" \
-            "NO  = Save as a new style (manual step required — see info).\n" \
+            "NO  = Save as a new style (you'll be prompted for a nickname).\n" \
             "CANCEL = Don't touch the style (scene captures other properties only).",
             mb_const
           )
@@ -436,16 +436,31 @@ module SceneManagerPlus
               warn "[SM+] update_selected_style failed: #{e.class}: #{e.message}"
             end
           when id_no
-            puts "[SM+] update_from_view: user chose 'Save as new style' — manual"
-            ::UI.messagebox(
-              "Saving as a new style is not exposed by the SketchUp 2019 Ruby API.\n\n" \
-              "How to do it manually:\n" \
-              "1. Open Window → Styles\n" \
-              "2. In the Styles browser, click 'Create new Style' (the small disc-with-plus icon)\n" \
-              "3. Re-run 'Update from view' on this scene\n\n" \
-              "Update aborted."
+            puts "[SM+] update_from_view: user chose 'Save as new style' for '#{style_name}'"
+            prompt = ::UI.inputbox(
+              ['Nickname (vuoto = usa nome nativo "SM+ Slot NN"):'],
+              [''],
+              'Scene Manager+ — Save as new style'
             )
-            return false
+            if prompt == false
+              puts "[SM+] update_from_view: save-as-new aborted by user"
+              return false
+            end
+            nick = prompt[0].to_s.strip
+            new_style = Core::Styles.allocate_new_slot_from_viewport(
+              nickname: (nick.empty? ? nil : nick)
+            )
+            unless new_style
+              puts "[SM+] update_from_view: save-as-new failed (pool esaurito o errore)"
+              return false
+            end
+            # Riassegna la scena al nuovo stile. assign_style già forza
+            # use_style/use_rendering_options + page.update con i bit STYLE+RO,
+            # quindi togliamo quei bit dal mask per evitare doppi update redondanti.
+            assign_style(page_id(p), new_style.name)
+            mask &= ~style_bit
+            ro_bit = sc.call('PAGE_USE_RENDERING_OPTIONS')
+            mask &= ~ro_bit if ro_bit != 0
           else
             # Cancel / chiusura dialog → preserva lo stile della scena come prima.
             # Rimuoviamo il bit di style dal mask: gli altri property si aggiornano,
@@ -484,7 +499,7 @@ module SceneManagerPlus
           choice = ::UI.messagebox(
             "Style '#{style_name}' has unsaved changes.\n\n" \
             "YES = Update the selected style with the current modifications.\n" \
-            "NO  = Save as a new style (manual step required — see info).\n" \
+            "NO  = Save as a new style (you'll be prompted for a nickname).\n" \
             "CANCEL = Don't touch the style (new scene captures the saved style only).",
             mb_const
           )
@@ -497,16 +512,28 @@ module SceneManagerPlus
               warn "[SM+] update_selected_style failed: #{e.class}: #{e.message}"
             end
           when id_no
-            puts "[SM+] add_from_view: user chose 'Save as new style' — manual"
-            ::UI.messagebox(
-              "Saving as a new style is not exposed by the SketchUp 2019 Ruby API.\n\n" \
-              "How to do it manually:\n" \
-              "1. Open Window → Styles\n" \
-              "2. In the Styles browser, click 'Create new Style' (the small disc-with-plus icon)\n" \
-              "3. Re-run 'New scene from view'\n\n" \
-              "New scene aborted."
+            puts "[SM+] add_from_view: user chose 'Save as new style' for '#{style_name}'"
+            prompt = ::UI.inputbox(
+              ['Nickname (vuoto = usa nome nativo "SM+ Slot NN"):'],
+              [''],
+              'Scene Manager+ — Save as new style'
             )
-            return nil
+            if prompt == false
+              puts "[SM+] add_from_view: save-as-new aborted by user"
+              return nil
+            end
+            nick = prompt[0].to_s.strip
+            new_style = Core::Styles.allocate_new_slot_from_viewport(
+              nickname: (nick.empty? ? nil : nick)
+            )
+            unless new_style
+              puts "[SM+] add_from_view: save-as-new failed (pool esaurito o errore)"
+              return nil
+            end
+            # Il nuovo slot è già selected_style (lo fa allocate_new_slot_from_viewport).
+            # Procediamo con pages.add → la nuova page cattura selected_style =
+            # new_style, quindi nasce legata al nuovo stile pulito.
+            puts "[SM+] add_from_view: continuing with new style #{new_style.name.inspect}"
           else
             # Cancel → procediamo: la nuova scena cattura lo stile salvato
             # (le pending edit restano in memoria dirty, ignorate).

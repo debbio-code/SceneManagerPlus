@@ -19,11 +19,26 @@ window.SMS = (function () {
     state = newState || state;
     if (!state.values) state.values = {};
     $('style-name').textContent = state.style_name || '—';
+    // Nickname input: NON sovrascrivere se l'utente sta editando.
+    var nickEl = $('style-nickname');
+    if (nickEl && document.activeElement !== nickEl) {
+      nickEl.value = state.nickname || '';
+    }
     $('scope-note').textContent =
       'Applies to all scenes using this style (' + (state.scenes_count || 0) + '). ' +
       'To affect only one scene, duplicate the style in SU’s Window → Styles first.';
     $('footer-text').textContent = state.scenes_count + ' scene(s) use this style';
     populate(state.values);
+  }
+
+  // Commit del nickname: invia a Ruby. Vuoto = clear nickname.
+  function commitNickname() {
+    var el = $('style-nickname');
+    if (!el) return;
+    var v = el.value.trim();
+    // Evita scritture inutili se non cambiato.
+    if ((v || null) === (state.nickname || null)) return;
+    call('sm_style_set_nickname', { nickname: v });
   }
 
   // Imposta i controlli senza scatenare il change-handler che ri-invierebbe
@@ -121,6 +136,18 @@ window.SMS = (function () {
         var c = {}; c[k] = hex; sendChanges(c);
       }
     });
+    // Nickname input: commit su Enter o blur. Esc = ripristina.
+    var nickEl = $('style-nickname');
+    if (nickEl) {
+      nickEl.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') { e.preventDefault(); nickEl.blur(); }
+        else if (e.key === 'Escape') {
+          nickEl.value = state.nickname || '';
+          nickEl.blur();
+        }
+      });
+      nickEl.addEventListener('blur', commitNickname);
+    }
     listenersBound = true;
   }
 

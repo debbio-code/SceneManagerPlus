@@ -708,21 +708,55 @@ Helper `Core::Styles.display_name(style_name)` = nickname o nome nativo.
 - Tooltip letter badge per row: "Style: <nickname> (native: <native>)"
   se nickname presente, altrimenti solo "Style: <native>".
 
+### Nickname edit nel Mini Style Manager (Fase 1B)
+
+Header del dialog ora ha un input "Nickname:" editabile (commit su
+Enter/blur, Esc ripristina). Sotto, riga piccola "Native: <nome>".
+Stringa vuota = clear del nickname (mostra solo il nome nativo nel
+plugin).
+
+Callback `sm_style_set_nickname { nickname: str }`:
+- `Core::Styles.set_nickname(@style_name, str)`
+- `push_state` (refresha l'header del style dialog)
+- `Dialog.push_state` (refresha lettere/picker/tooltip nel main dialog,
+  che dipendono dal display_name calcolato sul nickname)
+
+Pattern setIfNotFocused per il nickname input: nel `setState` del JS, se
+l'input è attualmente in focus (utente sta scrivendo) NON sovrascriviamo
+il value — evita race con push_state che arriva durante l'edit.
+
+### "Save as new" nel dirty-style dialog (Fase 1C)
+
+`update_from_view` e `add_from_view` ora gestiscono il branch NO del
+dialog YES/NO/CANCEL con `Core::Styles.allocate_new_slot_from_viewport`:
+
+- `UI.inputbox` chiede il nickname (skippabile = stringa vuota)
+- `allocate_new_slot_from_viewport(nickname:)` cattura le RO correnti
+  nel nuovo slot
+- **update_from_view**: chiama `assign_style(scene, new_style.name)`
+  per riassegnare la scena al nuovo stile, poi maschera fuori dal
+  mask i bit STYLE+RO (li ha già gestiti assign_style) e continua
+  con `page.update(mask)` per gli altri flag (camera, layers, ecc.)
+- **add_from_view**: allocate_new_slot_from_viewport ha già fatto
+  `selected_style = new_style`, quindi il successivo `pages.add` crea
+  una page legata al nuovo stile pulito automaticamente
+
+Lo stile originale (dirty) torna allo state salvato silenziosamente:
+gli edit dirty erano in `model.rendering_options` (la "in-memory dirty
+copy" di SU), che viene riscritta quando si fa `selected_style = X`.
+Quindi cambia stile = perdi dirty edits sul precedente — comportamento
+voluto qui (gli edit sono stati "spostati" sul nuovo slot via snapshot
++ restore + update_selected_style).
+
 ### Limiti noti / TODO
 
-- **Mini Style Manager nickname rename** (Fase 1B): ad ora non c'è UI
-  per rinominare il nickname di uno stile *esistente* — solo per quelli
-  nuovi al momento della creazione. Aggiungere campo input nel Mini
-  Style Manager con commit su blur/Enter.
-- **Dirty-style "Save as new"** (Fase 1C): oggi il branch NO del dialog
-  Yes/No/Cancel su update_from_view e add_from_view mostra ancora le
-  istruzioni manuali. Va sostituito chiamando
-  `Core::Styles.allocate_new_slot_from_viewport(nickname:)` (la funzione
-  esiste già, fa esattamente quello — la usa anche "+ New style").
-  L'unica cosa che manca è il wiring nel dialog.
 - **Pulizia slot inutilizzati**: se utente crea Slot 01 e poi non lo
   assegna a nessuna scena, resta nel modello. Per ora si cancella a
   mano dal native browser; valutare bottone "purge unused SM+ slots".
+- **Conflict nickname duplicati**: oggi nessun controllo se due stili
+  hanno lo stesso nickname → due lettere distinte ma stesso label nel
+  picker. Confonde. Valutare validazione di unicità nel set_nickname
+  con rifiuto + messagebox.
 
 ## Note per future sessioni
 

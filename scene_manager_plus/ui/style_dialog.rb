@@ -130,6 +130,18 @@ module SceneManagerPlus
           toggle_axes!
         end
 
+        # Rinomina (nickname) lo stile correntemente in edit. Vuoto = clear.
+        # Il nickname vive solo come attributo di modello (vedi Core::Styles).
+        dlg.add_action_callback('sm_style_set_nickname') do |_ctx, payload|
+          data = parse(payload)
+          nick = data['nickname'].to_s
+          Core::Styles.set_nickname(@style_name, nick)
+          push_state
+          # Refresh main dialog: lettere + tooltip + picker label dipendono dal
+          # display_name calcolato sul nickname.
+          Dialog.push_state if defined?(Dialog)
+        end
+
         dlg.add_action_callback('sm_style_log') do |_ctx, msg|
           puts "[SM+ Style UI] #{msg}"
         end
@@ -141,6 +153,7 @@ module SceneManagerPlus
         return unless m
         state = {
           style_name:  @style_name,
+          nickname:    Core::Styles.get_nickname(@style_name),
           scene_id:    @scene_id,
           scenes_count: scenes_using_style(@style_name).size,
           values:      current_values
