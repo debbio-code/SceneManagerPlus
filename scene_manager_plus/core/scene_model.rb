@@ -158,10 +158,16 @@ module SceneManagerPlus
         # Ordiniamo per display_name (nickname o nativo) così la lettera
         # rispecchia ciò che l'utente vede nel plugin. Stabile a parità di
         # nome (rare).
-        pairs = m.styles.map { |s| [s.name.to_s, Core::Styles.display_name(s.name.to_s)] }
+        nick_dict = m.attribute_dictionary(Core::Styles::NICKNAMES_DICT, false) rescue nil
+        pairs = m.styles.map do |s|
+          name = s.name.to_s
+          nick = nick_dict ? nick_dict[name].to_s : ''
+          [name, nick.empty? ? name : nick]
+        end
         pairs.sort_by! { |(_, disp)| disp.downcase }
         pairs.each_with_index.map do |(name, disp), i|
-          nick = Core::Styles.get_nickname(name)
+          nick = nick_dict ? nick_dict[name].to_s : ''
+          nick = nil if nick.empty?
           { name: name, display_name: disp, nick: nick, letter: letter_for_index(i) }
         end
       rescue => e
@@ -286,6 +292,103 @@ module SceneManagerPlus
       rescue => e
         warn "[SM+] native_order_divergent?: #{e.class}: #{e.message}"
         false
+      end
+
+      # Snapshot unico per la main UI. Evita il percorso push_state storico
+      # che ricostruiva list_ordered, tree, folders e native_order_divergent
+      # con piu passaggi separati su pagine/cartelle/ordine.
+      def ui_payload(show_order_banner: true)
+        m = model
+        return {
+          scenes: [], tree: [], folders: [], active_id: nil,
+          native_order_divergent: false,
+          model_info: { title: '', pages_count: 0 }
+        } unless m
+
+        pages_arr = m.pages.to_a
+        ensure_all_uids(pages_arr)
+
+        folders_list = Core::Folders.all
+        folders_by_id = {}
+        in_folder = {}
+        folders_list.each do |f|
+          folders_by_id[f['id']] = f
+          Array(f['scene_ids']).each { |sid| in_folder[sid] = f['id'] }
+        end
+
+        page_by_uid = {}
+        scene_by_uid = {}
+        scenes = []
+        pages_arr.each_with_index do |p, i|
+          uid = page_id(p)
+          page_by_uid[uid] = p
+          h = scene_hash(p, uid)
+          scene_by_uid[uid] = h
+          scenes << h.merge(native_index: i)
+        end
+
+        order = logical_order_from(
+          read_order: Buffer.deferred? ? Buffer.ensure_order!.dup : read_order_raw,
+          scene_ids: page_by_uid.keys,
+          folders: folders_list,
+          in_folder: in_folder
+        )
+
+        tree = order.map do |id|
+          if (f = folders_by_id[id])
+            {
+              kind:     'folder',
+              id:       id,
+              name:     f['name'].to_s,
+              color:    f['color'].to_s,
+              expanded: !!f['expanded'],
+              scenes:   Array(f['scene_ids']).map { |sid|
+                next nil if Buffer.deleted?(sid)
+                next nil unless page_by_uid[sid]
+                scene_by_uid[sid]
+              }.compact
+            }
+          elsif page_by_uid[id]
+            next nil if Buffer.deleted?(id)
+            scene_by_uid[id].merge(kind: 'scene')
+          end
+        end.compact
+
+        active_pg = m.pages.selected_page
+        active_id = active_pg ? page_id(active_pg) : nil
+        divergent = false
+        if show_order_banner && !Buffer.deferred?
+          flat = []
+          order.each do |id|
+            if (f = folders_by_id[id])
+              Array(f['scene_ids']).each { |sid| flat << sid }
+            else
+              flat << id
+            end
+          end
+          divergent = page_by_uid.keys != flat
+        end
+
+        {
+          scenes: scenes,
+          tree: tree,
+          folders: folders_list,
+          active_id: active_id,
+          native_order_divergent: divergent,
+          model_info: {
+            title:       m.title.to_s,
+            pages_count: pages_arr.length
+          }
+        }
+      end
+
+      def logical_order_from(read_order:, scene_ids:, folders:, in_folder:)
+        ids = Array(read_order).dup
+        folder_ids = folders.map { |f| f['id'] }
+        valid = (scene_ids - in_folder.keys) + folder_ids
+        ids &= valid
+        valid.each { |id| ids << id unless ids.include?(id) }
+        ids
       end
 
       def set_logical_order(ids)

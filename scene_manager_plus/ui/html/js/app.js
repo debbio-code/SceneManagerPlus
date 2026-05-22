@@ -12,6 +12,8 @@ window.SM = (function () {
   var DBLCLICK_MS = 400;
   var thumbsOn = false; // session-only toggle
   var listEl, statusEl;
+  var sceneByIdMap = {};
+  var styleByNameMap = {};
 
   function $(id) { return document.getElementById(id); }
 
@@ -23,10 +25,7 @@ window.SM = (function () {
   // Restituisce '?' se lo stile non è mappato o lo state non è ancora arrivato.
   function letterForStyle(styleName) {
     if (!styleName || !state.styles) return '?';
-    for (var i = 0; i < state.styles.length; i++) {
-      if (state.styles[i].name === styleName) return state.styles[i].letter;
-    }
-    return '?';
+    return styleByNameMap[styleName] ? styleByNameMap[styleName].letter : '?';
   }
 
   function setState(newState) {
@@ -36,6 +35,10 @@ window.SM = (function () {
     if (!state.flag_keys) state.flag_keys = [];
     if (!state.previews) state.previews = {};
     if (!state.styles) state.styles = [];
+    sceneByIdMap = {};
+    state.scenes.forEach(function (s) { sceneByIdMap[s.id] = s; });
+    styleByNameMap = {};
+    state.styles.forEach(function (s) { styleByNameMap[s.name] = s; });
     if (state.active_id) activeId = state.active_id;
     // preview_ts viene usato come cache-buster nell'<img src>. Bumparlo a
     // ogni setState (cosa che facevamo prima) forzava CEF a ri-richiedere
@@ -172,12 +175,7 @@ window.SM = (function () {
     var letterTitle = 'No style';
     if (scene.style_name) {
       // Mostra il nickname se c'è, indicando il nome nativo tra parentesi.
-      var styleEntry = null;
-      if (state.styles) {
-        for (var si = 0; si < state.styles.length; si++) {
-          if (state.styles[si].name === scene.style_name) { styleEntry = state.styles[si]; break; }
-        }
-      }
+      var styleEntry = styleByNameMap[scene.style_name] || null;
       if (styleEntry && styleEntry.nick) {
         letterTitle = 'Style: ' + styleEntry.nick + ' (native: ' + scene.style_name + ')';
       } else {
@@ -510,10 +508,7 @@ window.SM = (function () {
   }
 
   function sceneById(id) {
-    for (var i = 0; i < state.scenes.length; i++) {
-      if (state.scenes[i].id === id) return state.scenes[i];
-    }
-    return null;
+    return sceneByIdMap[id] || null;
   }
 
   // Ordine visivo lineare delle scene (per shift-range), seguendo l'albero
@@ -883,8 +878,21 @@ window.SM = (function () {
   function setActiveFromNative(uid) {
     if (!uid) return;
     if (activeId === uid) return;
+    var prev = activeId;
     activeId = uid;
-    render();
+    updateActiveMarker(prev, uid);
+  }
+
+  function updateActiveMarker(prevId, nextId) {
+    if (!listEl) return;
+    if (prevId) {
+      var prev = listEl.querySelector('.scene-row[data-id="' + prevId + '"]');
+      if (prev) prev.classList.remove('active');
+    }
+    if (nextId) {
+      var next = listEl.querySelector('.scene-row[data-id="' + nextId + '"]');
+      if (next) next.classList.add('active');
+    }
   }
 
   function setExportProgress(done, total, name) {
