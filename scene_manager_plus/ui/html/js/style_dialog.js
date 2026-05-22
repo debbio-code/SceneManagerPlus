@@ -71,11 +71,15 @@ window.SMS = (function () {
   function setHex(key, val) {
     var el = $('ctrl-' + key);
     var sw = $('sw-' + key);
+    var pk = $('ctrl-' + key + '-picker');
     if (!el || !sw) return;
     var hex = normalizeHex(val) || '';
     // Solo se l'input non è in focus (l'utente potrebbe stare scrivendo)
     if (document.activeElement !== el) el.value = hex;
     sw.style.background = hex || '#000000';
+    // CEF SU 2019: <input type="color"> accetta solo lowercase hex (normalizeHex
+    // già lowercase). Salta sync se vuoto per non confondere il picker.
+    if (pk && hex) pk.value = hex;
   }
 
   function normalizeHex(s) {
@@ -111,14 +115,39 @@ window.SMS = (function () {
         var c = {}; c[k] = !!el.checked; sendChanges(c);
       });
     });
-    // Hex color
+    // Hex color: tre controlli sincronizzati per ciascuna chiave —
+    //   - <input type="color"> (picker nativo OS)
+    //   - <input type="text"> hex (#aabbcc, lowercase)
+    //   - swatch <span> (preview)
+    // CEF SU 2019 quirks (vedi CLAUDE.md "Color picker"):
+    //   - <input type="color"> accetta SOLO hex lowercase (normalizeHex già lo
+    //     fa). #FFFFFF uppercase viene rifiutato silenziosamente.
+    //   - L'event 'change' sul picker non sempre scatta affidabilmente; uso
+    //     'input' che fire continuamente durante il drag della color wheel.
     ['BackgroundColor', 'SkyColor'].forEach(function (k) {
       var el = $('ctrl-' + k);
       var sw = $('sw-' + k);
+      var pk = $('ctrl-' + k + '-picker');
       if (!el || !sw) return;
+
+      // Picker nativo: ogni cambio (anche durante drag) propaga a hex + swatch + Ruby.
+      if (pk) {
+        pk.addEventListener('input', function () {
+          var hex = normalizeHex(pk.value);
+          if (!hex) return;
+          el.value = hex;
+          sw.style.background = hex;
+          var c = {}; c[k] = hex; sendChanges(c);
+        });
+      }
+
+      // Text input: anteprima live durante typing, commit su change/blur.
       el.addEventListener('input', function () {
         var hex = normalizeHex(el.value);
-        if (hex) sw.style.background = hex;
+        if (hex) {
+          sw.style.background = hex;
+          if (pk) pk.value = hex;
+        }
       });
       el.addEventListener('change', commitHex);
       el.addEventListener('blur', commitHex);
@@ -129,10 +158,12 @@ window.SMS = (function () {
           var prev = normalizeHex(state.values && state.values[k]) || '';
           el.value = prev;
           sw.style.background = prev || '#000000';
+          if (pk && prev) pk.value = prev;
           return;
         }
         el.value = hex;
         sw.style.background = hex;
+        if (pk) pk.value = hex;
         var c = {}; c[k] = hex; sendChanges(c);
       }
     });
