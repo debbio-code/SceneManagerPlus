@@ -516,12 +516,11 @@ module SceneManagerPlus
           mb_yesno = Object.const_defined?(:MB_YESNO) ? MB_YESNO : 4
           id_yes   = Object.const_defined?(:IDYES)   ? IDYES   : 6
           answer = ::UI.messagebox(
-            "The active scene '#{active.name}' is a Match Photo scene.\n\n" \
-            "Due to a SketchUp 2019 Ruby API limitation, Scene Manager+\n" \
-            "cannot clone the photo background to a new scene.\n\n" \
-            "To create a new scene that preserves the photo, please use\n" \
-            "the native SketchUp inspector:\n" \
-            "  Window → Scenes → click the '+' button\n\n" \
+            "Scene '#{active.name}' has a Match Photo background.\n\n" \
+            "Scene Manager+ cannot clone Match Photo scenes due to a\n" \
+            "SketchUp 2019 Ruby API limitation. To create a new scene\n" \
+            "that preserves the photo, please use the native menu:\n\n" \
+            "  View → Animation → Add Scene\n\n" \
             "Continue creating a new scene WITHOUT the photo background?",
             mb_yesno
           )

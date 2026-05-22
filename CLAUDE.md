@@ -635,16 +635,29 @@ L'unica API esposta è `Sketchup::Pages#add_matchphoto_page(image_filename,
 camera, page_name)` ma richiede di passare il path della foto a mano —
 e non c'è verso di leggerlo dall'API Ruby.
 
-**Code path nativi diversi**:
+**Code path nativi diversi — divergenza menu-vs-send_action**:
 - `pages.add(name)` (quello che usavamo) → NON copia Match Photo
-- `Sketchup.send_action(21067)` (View → Animation → Add Scene) → NON copia
-- **Window → Scenes inspector "+"** → copia correttamente
+- `Sketchup.send_action(21067)` → NON copia, anche se 21067 è l'ID
+  riportato da `dump-su-menu.ps1` per "View → Animation → Add Scene"
+- **Click manuale sul menù "View → Animation → Add Scene"** → COPIA
+- **Click manuale su Window → Scenes inspector "+"** → COPIA
 
-L'inspector "+" usa una funzione C++ interna che ha accesso al Match Photo
-subsystem. Non corrisponde a nessun `send_action` ID Ruby (testato range
-21065..21077, 10530..10540, 10620..10630, nessuno aggiunge scena
-preservando Match Photo). Probabilmente è una command "privata" registrata
-solo in SU UI nativa.
+Quindi SU ha letteralmente **due binari diversi** per la stessa command:
+quando l'utente clicca il menù a mano, SU esegue il vero handler C++ che
+ha accesso al Match Photo subsystem. Quando si invoca via
+`Sketchup.send_action` con lo stesso ID, SU instrada attraverso un
+handler separato (probabilmente legacy o "scripting-safe") che bypassa
+Match Photo. Comportamento non documentato Trimble ma riproducibile.
+
+Conseguenza: non c'è modo da Ruby di colpire il binario "menù manuale".
+Testato range `send_action` 21065..21077, 10530..10540, 10620..10630 —
+nessuno aggiunge scene preservando Match Photo.
+
+**Ipotesi non ancora testata**: simulare un WM_COMMAND Win32 al main
+window di SU con ID 21067 (via `user32!SendMessage`). Questo dovrebbe
+emulare un click di menù vero invece di passare per il routing
+`send_action`. Se funziona, automazione completa. Se no (probabile: SU
+potrebbe distinguere via stato/sender della command), torniamo qui.
 
 **Workaround scartati**:
 - `add_matchphoto_page` programmatico — serve il path foto, non leggibile
