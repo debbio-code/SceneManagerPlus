@@ -47,6 +47,17 @@ module SceneManagerPlus
         )
 
         register_callbacks(@dialog)
+        # Persiste tutti i cambi RAM-only al close del dialog. Su modelli
+        # con observer terzi pesanti, set_attribute è caro (~5s) → tutti
+        # i save durante editing vivono in RAM (Core::Settings.set non
+        # tocca il disco), e solo qui consolidiamo in 1 batch.
+        @dialog.set_on_closed do
+          begin
+            Core::Settings.flush!
+          rescue => e
+            warn "[SM+] settings flush on close: #{e.class}: #{e.message}"
+          end
+        end
         @dialog.set_file(prepare_index)
         @dialog.show
         @dialog
@@ -66,7 +77,6 @@ module SceneManagerPlus
           # data = { group: 'naming'|'export'|'logo', values: {...} }
           group = data['group']
           vals  = data['values'] || {}
-          puts "[SM+] sm_settings_set: group=#{group.inspect} payload_chars=#{payload.to_s.length} vals_keys=#{vals.keys.inspect}"
           Core::Settings.set(group, vals) if group
           # Settings che influenzano la main dialog (es. banner ordine):
           # forziamo un push_state lì, altrimenti la modifica non si vede

@@ -24,6 +24,11 @@ module SceneManagerPlus
 
       # Scrive raw su SU bypassando Buffer. Usato da Buffer.flush!
       def write_raw(list)
+        # Persistenza lazy degli uid scene referenziati: senza questo,
+        # se gli uid sono ancora transient (apertura file senza interagire),
+        # al riavvio le scene non si ritrovano nelle folder.
+        scene_uids = list.flat_map { |f| Array(f['scene_ids']) }
+        Core::SceneModel.persist_uids_for_ids(scene_uids) if scene_uids.any?
         model.set_attribute(PLUGIN_ID, ATTR_KEY, list.to_json)
         list
       end

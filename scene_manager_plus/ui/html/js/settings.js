@@ -337,9 +337,16 @@
       clearTimeout(namingSaveTimer);
       namingSaveTimer = setTimeout(saveNamingNow, 350);
     }
+    // 'input' → solo preview live; 'change' (blur/Enter) → save.
+    // Save on input scatena set_attribute ogni cifra; su modelli pesanti
+    // (con observer di terzi su attribute change) ogni write costa ~5s.
+    // Spostare il save su blur evita freeze a metà digitazione.
     ['prefix-custom', 'pad', 'separator'].forEach(id => {
       const el = document.getElementById(id);
-      if (el) el.addEventListener('input', () => { onChange(); saveNamingDebounced(); });
+      if (el) {
+        el.addEventListener('input', onChange);
+        el.addEventListener('change', saveNamingNow);
+      }
     });
     ['naming-enabled', 'prefix-mode', 'include-scene-name'].forEach(id => {
       const el = document.getElementById(id);
@@ -366,7 +373,7 @@
     }
     ['export-width', 'export-height', 'output-dir', 'export-line-scale'].forEach(id => {
       const el = document.getElementById(id);
-      if (el) el.addEventListener('input', saveExportDebounced);
+      if (el) el.addEventListener('change', saveExportNow);
     });
 
     // Preview line scale: auto-save indipendente (gruppo 'preview').
@@ -380,7 +387,7 @@
       prevSaveTimer = setTimeout(savePreviewNow, 350);
     }
     const prevLs = document.getElementById('preview-line-scale');
-    if (prevLs) prevLs.addEventListener('input', savePreviewDebounced);
+    if (prevLs) prevLs.addEventListener('change', savePreviewNow);
     ['export-format', 'export-antialias', 'export-transparent'].forEach(id => {
       const el = document.getElementById(id);
       if (el) el.addEventListener('change', saveExportNow);
@@ -401,7 +408,7 @@
     }
     ['logo-path', 'logo-width-pct', 'logo-offset-x', 'logo-offset-y', 'logo-opacity'].forEach(id => {
       const el = document.getElementById(id);
-      if (el) el.addEventListener('input', saveLogoDebounced);
+      if (el) el.addEventListener('change', saveLogoNow);
     });
     ['logo-enabled', 'logo-use-default'].forEach(id => {
       const el = document.getElementById(id);
@@ -434,7 +441,7 @@
     }
     ['label-font-family', 'label-font-size', 'label-offset-x', 'label-offset-y', 'label-opacity'].forEach(id => {
       const el = document.getElementById(id);
-      if (el) el.addEventListener('input', saveLabelDebounced);
+      if (el) el.addEventListener('change', saveLabelNow);
     });
     ['label-enabled', 'label-bold'].forEach(id => {
       const el = document.getElementById(id);
@@ -445,10 +452,8 @@
     // - 'blur'/'change' normalizza il valore (es. 'fff' → '#ffffff').
     const labelColor = document.getElementById('label-color');
     if (labelColor) {
-      labelColor.addEventListener('input', () => {
-        syncColorSwatch();
-        saveLabelDebounced();
-      });
+      // input: solo update swatch live (niente save → no freeze a metà typing)
+      labelColor.addEventListener('input', syncColorSwatch);
       labelColor.addEventListener('change', () => {
         labelColor.value = normalizeHex(labelColor.value);
         syncColorSwatch();
@@ -482,7 +487,7 @@
     }
     ['tb-height', 'tb-font-family', 'tb-date-override'].forEach(id => {
       const el = document.getElementById(id);
-      if (el) el.addEventListener('input', saveTbDebounced);
+      if (el) el.addEventListener('change', saveTbNow);
     });
     ['tb-enabled', 'tb-project-by', 'tb-designer', 'tb-project-phase'].forEach(id => {
       const el = document.getElementById(id);

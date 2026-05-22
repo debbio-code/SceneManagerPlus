@@ -15,6 +15,7 @@ module SceneManagerPlus
 
       # Restituisce array di hash serializzabili in JSON per la UI.
       def list
+        ensure_all_uids(pages)
         pages.map.with_index do |p, i|
           {
             id:          page_id(p),
@@ -26,14 +27,110 @@ module SceneManagerPlus
         end
       end
 
-      # ID stabile della pagina basato su un attributo persistente.
-      # Se manca lo crea (UUID semplice basato su time + rand).
+      # ===========================================================
+      # UID per Sketchup::Page — cache transient + persist lazy
+      # ===========================================================
+      #
+      # Storia: i file con AttributeObserver di plugin terzi (es. Layers
+      # Manager, plugin BIM, ecc.) pagano ~5s per ogni `set_attribute`
+      # sul modello. Scrivere N uid all'apertura del file = 5N s di
+      # freeze, anche batchando in start_operation: l'observer terzo
+      # gira comunque per ogni write.
+      #
+      # Strategia attuale:
+      # 1. `page_id(page)` legge l'attribute persistente. Se assente,
+      #    usa una cache transient in RAM (sessione corrente). NESSUNA
+      #    write avviene all'apertura del file.
+      # 2. `persist_uids_for_ids(ids)` viene chiamato SOLO quando un
+      #    uid deve sopravvivere a chiusura/riapertura del file: prima
+      #    di scrivere `logical_order` (write_order_raw) o `folders`
+      #    (Folders.write_raw). Persiste in batch (1 start_operation).
+      # 3. Le interazioni read-only (visualizzazione lista, polling,
+      #    export, properties dialog, ecc.) NON triggherano persistenza.
+      #
+      # Conseguenza UX: aprire un file su cui non si è mai interagito
+      # col plugin → zero costo extra. Prima azione che modifica
+      # folder/ordine → 1 freeze batch (~5s su file pesanti). Azioni
+      # successive non triggerano altri freeze (uid già persistente).
+      #
+      # Cache leak: voci vecchie restano in RAM finché SU non chiude.
+      # Su utenti che aprono molti modelli in sequenza la cache cresce.
+      # Per N pagine totali nella vita SU è negligibile (stringa breve
+      # per voce).
+      @transient_uids = {}
+
       def page_id(page)
         id = page.get_attribute(PLUGIN_ID, 'uid')
         return id if id && !id.empty?
-        new_id = "p#{Time.now.to_i}-#{rand(1 << 32).to_s(16)}"
-        page.set_attribute(PLUGIN_ID, 'uid', new_id)
-        new_id
+        m = (page.model rescue nil)
+        # Senza un model di riferimento non possiamo dedup la cache
+        # (page.object_id può collidere cross-model). Generiamo
+        # transient one-shot non-cached.
+        return generate_uid unless m
+        k = [m.object_id, page.object_id]
+        @transient_uids[k] ||= generate_uid
+      end
+
+      def generate_uid
+        "p#{Time.now.to_i}-#{rand(1 << 32).to_s(16)}"
+      end
+
+      # Popola la cache transient per tutte le pagine prive di uid
+      # persistente. NIENTE write su disco (vecchio comportamento
+      # rimosso). Idempotente, gratis per le pagine già coperte da
+      # persistent o cache.
+      def ensure_all_uids(pages_iter = nil)
+        m = model
+        return unless m
+        pages_iter ||= m.pages
+        m_oid = m.object_id
+        filled = 0
+        pages_iter.each do |p|
+          persistent = p.get_attribute(PLUGIN_ID, 'uid')
+          next if persistent && !persistent.empty?
+          k = [m_oid, p.object_id]
+          next if @transient_uids[k]
+          @transient_uids[k] = generate_uid
+          filled += 1
+        end
+        puts "[SM+] ensure_all_uids: cached #{filled} transient uid(s) in RAM" if filled > 0
+      end
+
+      # Persistenza lazy: per ogni uid in `uids` cerca la page con
+      # quell'uid (persistente o transient) e ci scrive l'attributo se
+      # mancante. Tutto in 1 start_operation. Da chiamare prima di
+      # scritture su disco che usano uid come chiave di riferimento
+      # (logical_order, folder.scene_ids).
+      def persist_uids_for_ids(uids)
+        return if uids.nil?
+        m = model
+        return unless m
+        wanted = uids.compact.reject { |s| s.respond_to?(:empty?) && s.empty? }
+        return if wanted.empty?
+        wanted_set = {}
+        wanted.each { |u| wanted_set[u] = true }
+        m_oid = m.object_id
+        to_persist = []
+        m.pages.each do |p|
+          persistent = p.get_attribute(PLUGIN_ID, 'uid')
+          next if persistent && !persistent.empty? # già persistito
+          # Determina l'uid corrente (transient se c'è, sennò genera)
+          k = [m_oid, p.object_id]
+          current = @transient_uids[k] ||= generate_uid
+          to_persist << [p, current] if wanted_set[current]
+        end
+        return if to_persist.empty?
+        began = false
+        begin
+          m.start_operation('SM+ Persist page uids', true, false, true)
+          began = true
+          to_persist.each { |p, uid| p.set_attribute(PLUGIN_ID, 'uid', uid) }
+          m.commit_operation
+          puts "[SM+] persist_uids_for_ids: persisted #{to_persist.size} uid(s) in 1 op"
+        rescue => e
+          m.abort_operation if began
+          warn "[SM+] persist_uids_for_ids failed: #{e.class}: #{e.message}"
+        end
       end
 
       def find_by_id(id)
@@ -136,6 +233,10 @@ module SceneManagerPlus
 
       # Raw write su SU (bypass buffer). Usato da Buffer.flush!
       def write_order_raw(ids)
+        # Persiste eventuali uid transient referenziati: senza questo,
+        # al riavvio del file gli ID nel logical_order non matchano
+        # alcuna page (gli uid transient muoiono con la sessione SU).
+        persist_uids_for_ids(ids)
         model.set_attribute(PLUGIN_ID, ORDER_KEY, ids)
       end
 
@@ -197,6 +298,7 @@ module SceneManagerPlus
 
       # Flat list di tutte le scene (root + dentro cartelle) per lookup in UI.
       def list_ordered
+        ensure_all_uids(pages)
         pages.map.with_index do |p, i|
           {
             id:              page_id(p),
@@ -213,6 +315,7 @@ module SceneManagerPlus
       # Albero misto cartelle+scene, in ordine logico per il render UI.
       # In deferred mode, le pagine pending-delete sono nascoste.
       def tree
+        ensure_all_uids(pages)
         folders_by_id = Core::Folders.all.each_with_object({}) { |f, h| h[f['id']] = f }
         page_by_uid   = pages.each_with_object({}) { |p, h| h[page_id(p)] = p }
 

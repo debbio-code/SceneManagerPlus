@@ -87,69 +87,124 @@ module SceneManagerPlus
         'Rahim'
       ].freeze
 
-      # Storage: una entry per leaf via Sketchup.write_default. Ogni leaf usa
-      # come "key" il path piatto "group.field", e il valore è il primitivo
-      # tipato (Boolean/Integer/Float/String). Più robusto del salvataggio
-      # JSON-in-stringa in SU 2019: write_default è ottimizzato per primitivi
-      # e ha comportamenti inaffidabili con stringhe complesse contenenti
-      # virgolette/backslash su alcune versioni.
-      def read_one(group, key, default)
-        model = Sketchup.active_model
-        if model
-          flat = "#{group}.#{key}"
-          v = model.get_attribute(MODEL_CFG_DICT, flat)
-          unless v.nil?
-            case default
-            when TrueClass, FalseClass
-              return !!v if v.is_a?(TrueClass) || v.is_a?(FalseClass)
-              return v.to_i != 0 if v.is_a?(Numeric)
-              return default
-            when Integer
-              return v.to_i if v.respond_to?(:to_i)
-            when Float
-              return v.to_f if v.respond_to?(:to_f)
-            when String
-              return v.to_s
-            end
-            return v
+      # =========================================================
+      # In-memory cache + lazy flush
+      # =========================================================
+      # Storage on-disk: 1 entry per leaf via model.set_attribute, key
+      # piatta "group.field". Tipo robusto (Boolean/Integer/Float/String).
+      # Più affidabile dello stringone JSON in SU 2019.
+      #
+      # Sui modelli con AttributeObserver di plugin terzi una singola
+      # set_attribute può costare ~5 secondi. Per evitare lag durante
+      # l'editing dei settings, manteniamo i cambiamenti in RAM
+      # (`@runtime[model.object_id][group][key] = value`) e li
+      # persistiamo TUTTI in una sola start_operation batch quando
+      # l'utente chiude il Settings dialog o avvia un Export. Vedi
+      # `flush!`.
+      @runtime = {}  # { model_oid => { group => { key => coerced_value } } }
+      @dirty   = {}  # { model_oid => true }
+
+      def runtime_for(model_oid)
+        @runtime[model_oid] ||= {}
+      end
+
+      # Coerce robusta: 1/0 → true/false (SU 2019 può restituire numeric
+      # per Boolean salvati con set_attribute(..., true)).
+      def coerce(value, default)
+        case default
+        when TrueClass, FalseClass
+          case value
+          when TrueClass, FalseClass then value
+          when Numeric               then value.to_i != 0
+          when String                then !%w[false 0 no off ''].include?(value.to_s.downcase)
+          else                            !!value
           end
+        when Integer               then value.to_i
+        when Float                 then value.to_f
+        else                            value.to_s
         end
-        default
       end
 
-      def write_one(group, key, value, default)
-        model = Sketchup.active_model
-        return unless model
-        flat = "#{group}.#{key}"
-        coerced = case default
-                  when TrueClass, FalseClass then value ? true : false
-                  when Integer               then value.to_i
-                  when Float                 then value.to_f
-                  else                            value.to_s
-                  end
-        model.set_attribute(MODEL_CFG_DICT, flat, coerced)
-      end
-
+      # Lettura: runtime override > attribute_dictionary > DEFAULTS.
+      # `attribute_dictionary(..., false)` ritorna nil se mai scritto,
+      # quindi una sola chiamata API per group (anziché N get_attribute).
       def get(group)
         return {} unless DEFAULTS.key?(group)
+        m = Sketchup.active_model
+        m_dict = m ? m.attribute_dictionary(MODEL_CFG_DICT, false) : nil
+        rt = m ? (runtime_for(m.object_id)[group] || {}) : {}
         DEFAULTS[group].each_with_object({}) do |(k, default), h|
-          h[k] = read_one(group, k, default)
+          if rt.key?(k)
+            h[k] = rt[k]
+          else
+            raw = m_dict ? m_dict["#{group}.#{k}"] : nil
+            h[k] = raw.nil? ? default : coerce(raw, default)
+          end
         end
       end
 
+      # Scrittura: AGGIORNA RAM, NON tocca il disco. La persistenza
+      # avviene solo via `flush!` (chiusura dialog / export start).
+      # Risultato: l'editing dei settings ha lag 0 anche su modelli
+      # con observer di terzi che costerebbe 5s/write.
       def set(group, hash)
         unless DEFAULTS.key?(group)
           warn "[SM+] Settings.set: unknown group #{group.inspect}"
           return nil
         end
+        m = Sketchup.active_model
+        return nil unless m
+        rt_group = (runtime_for(m.object_id)[group] ||= {})
+        changed = 0
         (hash || {}).each do |k, v|
           default = DEFAULTS[group][k]
-          next if default.nil? # chiave sconosciuta: skip
-          write_one(group, k, v, default)
+          next if default.nil?
+          coerced = coerce(v, default)
+          next if rt_group[k] == coerced
+          rt_group[k] = coerced
+          changed += 1
         end
-        result = get(group)
-        puts "[SM+] Settings.set group=#{group.inspect} → #{result.inspect}"
-        result
+        @dirty[m.object_id] = true if changed > 0
+        puts "[SM+] Settings.set group=#{group.inspect}: #{changed} key(s) updated in RAM (flush deferred)"
+        nil
+      end
+
+      # Persisti tutti i cambi RAM-only del model in una singola
+      # start_operation. Chiamato da SettingsDialog.set_on_closed e
+      # all'inizio di Exporter.export. Idempotente: no-op se non dirty.
+      def flush!(model = Sketchup.active_model)
+        return unless model
+        return unless @dirty[model.object_id]
+        rt_for_model = @runtime[model.object_id]
+        return unless rt_for_model
+        began = false
+        t0 = Time.now
+        begin
+          model.start_operation('SM+ Flush settings', true, false, true)
+          began = true
+          dict = model.attribute_dictionary(MODEL_CFG_DICT, true)
+          written = 0
+          rt_for_model.each do |group, overrides|
+            next unless DEFAULTS.key?(group)
+            overrides.each do |k, v|
+              default = DEFAULTS[group][k]
+              next if default.nil?
+              flat = "#{group}.#{k}"
+              existing = dict[flat]
+              existing_coerced = existing.nil? ? default : coerce(existing, default)
+              next if existing_coerced == v
+              model.set_attribute(MODEL_CFG_DICT, flat, v)
+              written += 1
+            end
+          end
+          model.commit_operation
+          @dirty.delete(model.object_id)
+          puts "[SM+] Settings.flush!: wrote %d key(s) in %.1fms" %
+               [written, (Time.now - t0) * 1000]
+        rescue => e
+          model.abort_operation if began
+          warn "[SM+] Settings.flush!: failed (#{e.class}: #{e.message})"
+        end
       end
 
       def all

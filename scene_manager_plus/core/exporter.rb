@@ -41,6 +41,13 @@ module SceneManagerPlus
         model = Sketchup.active_model
         return on_done&.call(0, nil, ['No active model'], false) unless model
 
+        # Flush dei settings RAM → disco prima di leggere: se l'utente
+        # ha modificato width/height/ecc. nel Settings dialog senza
+        # chiuderlo, i valori sono in RAM (vedi Core::Settings cache).
+        # Settings.get() li ritorna comunque (RAM > disco), ma flusha
+        # qui garantisce coerenza per export futuri e per il file SKP.
+        Settings.flush!(model)
+
         settings_all  = Settings.all
         export_cfg    = settings_all['export']         || {}
         logo_cfg      = settings_all['logo']           || {}
@@ -104,6 +111,34 @@ module SceneManagerPlus
           end
         else
           puts "[SM+] watermark DISABLED in settings (logo.enabled=false)"
+        end
+
+        # Pre-renderizza il logo come "stamp" BGRA ridimensionato alle
+        # dimensioni finali UNA sola volta per export. Prima veniva
+        # ri-sampled per ogni scena con `color_at_uv` per-pixel.
+        logo_stamp = nil
+        if logo_img
+          pct = (logo_cfg['width_pct'] || 15).to_f
+          pct = 1.0   if pct < 1
+          pct = 100.0 if pct > 100
+          lw = [(wpx * pct / 100.0).round, 1].max
+          lh = [(logo_img.height.to_f * lw / logo_img.width).round, 1].max
+          lbgra = if lw == logo_img.width && lh == logo_img.height
+                    imagerep_to_bgra(logo_img)
+                  else
+                    resample_imagerep_to_bgra(logo_img, lw, lh)
+                  end
+          ox = (logo_cfg['offset_x'] || 20).to_i
+          oy = (logo_cfg['offset_y'] || 20).to_i
+          lx = wpx - lw - ox
+          ly = hpx - lh - oy
+          lx = 0 if lx < 0
+          ly = 0 if ly < 0
+          lop = ((logo_cfg['opacity'] || 100).to_f / 100.0)
+          lop = 0.0 if lop < 0
+          lop = 1.0 if lop > 1
+          logo_stamp = { bgra: lbgra, w: lw, h: lh, x: lx, y: ly, opacity: lop }
+          puts "[SM+] logo stamp prerendered: #{lw}x#{lh} at (#{lx},#{ly}) op=#{lop}"
         end
 
         # Pre-computa metadata per ogni target: filename base (senza ext) e uid.
@@ -295,58 +330,52 @@ module SceneManagerPlus
             write_args[:compression] = 0.9 if fmt != 'png'
             view.write_image(write_args)
 
-            # Costruisci la lista di overlay (logo + filename label) per
-            # comporli in un solo load/blend/save → niente doppia ri-codifica
-            # JPG quando entrambi sono attivi.
-            specs = []
-            if logo_img
-              specs << {
-                img:       logo_img,
-                width_pct: (logo_cfg['width_pct'] || 15).to_f,
-                anchor_x:  :right,
-                anchor_y:  :bottom,
-                offset_x:  (logo_cfg['offset_x'] || 20).to_i,
-                offset_y:  (logo_cfg['offset_y'] || 20).to_i,
-                opacity:   ((logo_cfg['opacity'] || 100).to_f / 100.0)
-              }
-            end
+            # Compone logo + filename label + titleblock in UN solo
+            # load/set_data/save. Prima erano 2 load+2 save quando
+            # overlays e TB erano entrambi attivi (= doppia ri-codifica
+            # JPG per scena).
+            overlays = []
+            overlays << logo_stamp if logo_stamp
+
             if label_pngs && (label_png = label_pngs[uid]) && File.file?(label_png)
               begin
                 label_img = Sketchup::ImageRep.new
                 label_img.load_file(label_png)
-                specs << {
-                  img:      label_img,
-                  # native size: nessuno scale
-                  anchor_x: :left,
-                  anchor_y: :bottom,
-                  offset_x: (label_cfg['offset_x'] || 20).to_i,
-                  offset_y: (label_cfg['offset_y'] || 20).to_i,
-                  opacity:  ((label_cfg['opacity'] || 100).to_f / 100.0)
-                }
+                llw = label_img.width
+                llh = label_img.height
+                llbgra = imagerep_to_bgra(label_img)
+                lox = (label_cfg['offset_x'] || 20).to_i
+                loy = (label_cfg['offset_y'] || 20).to_i
+                llx = lox
+                lly = hpx - llh - loy
+                llx = 0 if llx < 0
+                lly = 0 if lly < 0
+                llop = ((label_cfg['opacity'] || 100).to_f / 100.0)
+                llop = 0.0 if llop < 0
+                llop = 1.0 if llop > 1
+                overlays << { bgra: llbgra, w: llw, h: llh, x: llx, y: lly, opacity: llop }
               rescue => e
                 errors << "Filename label load failed on '#{page.name}': #{e.message}"
               end
             end
 
-            unless specs.empty?
+            tb_bgra_scene = nil
+            tb_h_scene = 0
+            if tb_pngs && (tb_png_path = tb_pngs[uid]) && File.file?(tb_png_path)
               begin
-                apply_overlays(fpath, specs)
+                tb_bgra_scene, tb_h_scene = load_tb_as_bgra(tb_png_path, wpx)
               rescue => e
-                errors << "Overlay failed on '#{page.name}': #{e.message}"
-                warn "[SM+] apply_overlays failed on '#{page.name}': #{e.class}: #{e.message}"
-                warn e.backtrace.first(3).join("\n") if e.backtrace
+                errors << "Title block load failed on '#{page.name}': #{e.message}"
+                warn "[SM+] load_tb_as_bgra failed on '#{page.name}': #{e.class}: #{e.message}"
               end
             end
 
-            # Title block: estende il canvas verso il basso e appende il
-            # cartiglio. Va DOPO apply_overlays così logo+label restano
-            # confinati nell'immagine originale (il cartiglio non li copre).
-            if tb_pngs && (tb_png = tb_pngs[uid]) && File.file?(tb_png)
+            if !overlays.empty? || tb_bgra_scene
               begin
-                append_titleblock(fpath, tb_png)
+                composite_to_file(fpath, overlays, tb_bgra_scene, tb_h_scene)
               rescue => e
-                errors << "Title block failed on '#{page.name}': #{e.message}"
-                warn "[SM+] append_titleblock failed on '#{page.name}': #{e.class}: #{e.message}"
+                errors << "Composite failed on '#{page.name}': #{e.class}: #{e.message}"
+                warn "[SM+] composite_to_file failed on '#{page.name}': #{e.class}: #{e.message}"
                 warn e.backtrace.first(3).join("\n") if e.backtrace
               end
             end
@@ -364,115 +393,141 @@ module SceneManagerPlus
         step.call
       end
 
-      # Compone una lista di overlay (logo, filename label, ecc.) sopra
-      # l'immagine appena scritta. Un solo load + blend + save per gestire
-      # N overlay → su JPG niente doppia ri-codifica.
-      #
-      # Ogni spec è un hash:
-      #   img:       Sketchup::ImageRep da sovrapporre (richiesto)
-      #   width_pct: % della larghezza base a cui scalare l'overlay (opz.;
-      #              se assente → dimensione nativa di img)
-      #   anchor_x:  :left | :right    (default :left)
-      #   anchor_y:  :top  | :bottom   (default :bottom)
-      #   offset_x:  px dal bordo dell'anchor (default 0)
-      #   offset_y:  px dal bordo dell'anchor (default 0)
-      #   opacity:   0.0..1.0          (default 1.0)
-      def apply_overlays(image_path, specs)
-        return if specs.nil? || specs.empty?
-        base = Sketchup::ImageRep.new
-        base.load_file(image_path)
-        bw = base.width
-        bh = base.height
-        puts "[SM+] overlays on #{File.basename(image_path)}: base=#{bw}x#{bh} n=#{specs.size}"
+      # ============================================================
+      # Helpers BGRA — vedi docs/SU2019-LESSONS.md "ImageRep#set_data"
+      # ============================================================
 
-        # Resolve placement (può saltare overlay fuori dalla canvas)
-        resolved = specs.map { |s| resolve_overlay(s, bw, bh) }.compact
-        return if resolved.empty?
+      # Estrae i pixel di un ImageRep come buffer BGRA top-down (formato
+      # accettato da set_data su Windows). Quando bpp=32 e nessun row
+      # padding (caso PNG/JPG di SU 2019 su Windows), `ImageRep#data`
+      # ritorna già i byte nel formato giusto in una sola chiamata C:
+      # ~10-20x più veloce di `colors.each` che alloca 1 Sketchup::Color
+      # per pixel (≈2M oggetti per un 1920x1080). Per 24bpp con padding
+      # (raro, capita su JPG di larghezza non multiple di 4) facciamo
+      # byte-copy row-by-row senza colors.each. La fallback finale è
+      # ridondante in pratica ma protegge da formati inattesi.
+      def imagerep_to_bgra(img)
+        bw = img.width
+        bh = img.height
+        bpp = (img.bits_per_pixel rescue 32)
+        pad = (img.row_padding rescue 0)
+        raw = nil
+        begin
+          raw = img.data
+        rescue
+          raw = nil
+        end
 
-        # Pre-alloca buffer BGRA (DIB top-down, vedi SU2019-LESSONS.md).
+        if raw && bpp == 32 && pad == 0 && raw.bytesize == bw * bh * 4
+          # Già BGRA top-down. Dup così il caller può mutare in place
+          # senza toccare lo stato interno di ImageRep.
+          return raw.dup.force_encoding(Encoding::BINARY)
+        end
+
+        if raw && bpp == 24
+          buf = ("\0" * (bw * bh * 4)).force_encoding(Encoding::BINARY)
+          src_idx = 0
+          dst_idx = 0
+          bh.times do
+            bw.times do
+              buf.setbyte(dst_idx,     raw.getbyte(src_idx))
+              buf.setbyte(dst_idx + 1, raw.getbyte(src_idx + 1))
+              buf.setbyte(dst_idx + 2, raw.getbyte(src_idx + 2))
+              buf.setbyte(dst_idx + 3, 255)
+              src_idx += 3
+              dst_idx += 4
+            end
+            src_idx += pad
+          end
+          return buf
+        end
+
+        # Fallback: path lento originale (colors.each). Non dovrebbe
+        # servire mai su SU 2019 Windows, è un safety net.
         buf = ("\0" * (bw * bh * 4)).force_encoding(Encoding::BINARY)
         i = 0
-        base.colors.each do |c|
+        img.colors.each do |c|
           buf.setbyte(i,     c.blue)
           buf.setbyte(i + 1, c.green)
           buf.setbyte(i + 2, c.red)
-          buf.setbyte(i + 3, 255)
+          alpha = (c.alpha rescue 255)
+          buf.setbyte(i + 3, alpha || 255)
           i += 4
         end
-
-        resolved.each { |ov| blend_into_buffer!(buf, bw, bh, ov) }
-
-        base.set_data(bw, bh, 32, 0, buf)
-        ok = base.save_file(image_path)
-        puts "[SM+] overlays save_file ok=#{ok.inspect} → #{File.basename(image_path)}"
+        buf
       end
 
-      def resolve_overlay(spec, bw, bh)
-        img = spec[:img]
-        return nil unless img
-
-        if spec[:width_pct]
-          pct = spec[:width_pct].to_f
-          pct = 1.0   if pct < 1
-          pct = 100.0 if pct > 100
-          tw  = [(bw * pct / 100.0).round, 1].max
-          scale = tw.to_f / img.width
-          th  = [(img.height * scale).round, 1].max
-        else
-          tw = img.width
-          th = img.height
-        end
-
-        ax = spec[:anchor_x] || :left
-        ay = spec[:anchor_y] || :bottom
-        ox = (spec[:offset_x] || 0).to_i
-        oy = (spec[:offset_y] || 0).to_i
-
-        x0 = (ax == :right)  ? (bw - tw - ox) : ox
-        y0 = (ay == :bottom) ? (bh - th - oy) : oy
-        x0 = 0 if x0 < 0
-        y0 = 0 if y0 < 0
-
-        opacity = (spec[:opacity] || 1.0).to_f
-        opacity = 0.0 if opacity < 0
-        opacity = 1.0 if opacity > 1
-
-        puts "[SM+]   overlay: #{tw}x#{th} at (#{x0},#{y0}) anchor=#{ax}/#{ay} opacity=#{opacity}"
-        { img: img, x: x0, y: y0, w: tw, h: th, opacity: opacity }
-      end
-
-      # Pre-campiona overlay su griglia (tw,th) e blenda nella bbox del buf
-      # (BGRA, top-down). FLIP v: color_at_uv usa origine in basso, noi
-      # indicizziamo top-down quindi v = 1 - (dy+0.5)/th.
-      def blend_into_buffer!(buf, bw, bh, ov)
-        img = ov[:img]; x0 = ov[:x]; y0 = ov[:y]
-        tw  = ov[:w];   th = ov[:h]; opacity = ov[:opacity]
-
-        x1 = [x0 + tw, bw].min
-        y1 = [y0 + th, bh].min
-        x0c = [x0, 0].max
-        y0c = [y0, 0].max
-        return unless x1 > x0c && y1 > y0c
-
-        img_rgba = Array.new(tw * th)
+      # Ri-campiona un ImageRep a (tw, th) restituendo un buffer BGRA.
+      # Usa color_at_uv (lento, ma) — chiamato UNA volta per export sul
+      # logo, non più per scena come faceva il vecchio
+      # blend_into_buffer!.
+      def resample_imagerep_to_bgra(img, tw, th)
+        buf = ("\0" * (tw * th * 4)).force_encoding(Encoding::BINARY)
+        j = 0
         th.times do |dy|
           v = 1.0 - (dy + 0.5) / th.to_f
           tw.times do |dx|
             u = (dx + 0.5) / tw.to_f
             c = img.color_at_uv(u, v, true)
-            img_rgba[dy * tw + dx] = [c.red, c.green, c.blue, c.alpha]
+            buf.setbyte(j,     c.blue)
+            buf.setbyte(j + 1, c.green)
+            buf.setbyte(j + 2, c.red)
+            alpha = (c.alpha rescue 255)
+            buf.setbyte(j + 3, alpha || 255)
+            j += 4
           end
         end
+        buf
+      end
+
+      # Carica un PNG titleblock come buffer BGRA. Se la larghezza è
+      # diversa da target_w, ricampiona (caso difensivo: TB è normalmente
+      # generato a width=wpx, quindi il fast path scatta sempre).
+      def load_tb_as_bgra(tb_png_path, target_w)
+        tb = Sketchup::ImageRep.new
+        tb.load_file(tb_png_path)
+        if tb.width == target_w
+          [imagerep_to_bgra(tb), tb.height]
+        else
+          [resample_imagerep_to_bgra(tb, target_w, tb.height), tb.height]
+        end
+      end
+
+      # Blenda uno stamp BGRA (sw×sh) in buf (BGRA bw×bh, top-down) alla
+      # posizione (x0,y0). Stesso pattern del vecchio blend_into_buffer!,
+      # ma legge i pixel direttamente dal buffer BGRA dello stamp invece
+      # di chiamare color_at_uv per pixel. Fast-path per pixel completamente
+      # opachi: pure byte copy senza math floating point.
+      def blend_stamp!(buf, bw, bh, stamp_bgra, sw, sh, x0, y0, opacity)
+        x1 = [x0 + sw, bw].min
+        y1 = [y0 + sh, bh].min
+        x0c = [x0, 0].max
+        y0c = [y0, 0].max
+        return if x1 <= x0c || y1 <= y0c
+
+        fully_opaque = opacity >= 0.999
 
         (y0c...y1).each do |y|
           dy = y - y0
           base_row = y * bw
+          stamp_row = dy * sw
           (x0c...x1).each do |x|
             dx = x - x0
-            lr, lg, lb, lalpha = img_rgba[dy * tw + dx]
-            la = (lalpha.to_f / 255.0) * opacity
-            next if la <= 0.001
+            si = (stamp_row + dx) * 4
+            la_byte = stamp_bgra.getbyte(si + 3)
+            next if la_byte == 0
             j = (base_row + x) * 4
+            if la_byte == 255 && fully_opaque
+              buf.setbyte(j,     stamp_bgra.getbyte(si))
+              buf.setbyte(j + 1, stamp_bgra.getbyte(si + 1))
+              buf.setbyte(j + 2, stamp_bgra.getbyte(si + 2))
+              next
+            end
+            la = (la_byte / 255.0) * opacity
+            next if la <= 0.001
+            lb = stamp_bgra.getbyte(si)
+            lg = stamp_bgra.getbyte(si + 1)
+            lr = stamp_bgra.getbyte(si + 2)
             bb  = buf.getbyte(j)
             bgc = buf.getbyte(j + 1)
             br  = buf.getbyte(j + 2)
@@ -484,67 +539,41 @@ module SceneManagerPlus
         end
       end
 
-      # Estende il canvas verso il basso e appende il cartiglio PNG.
-      # Carica l'immagine base (bw×bh) e il cartiglio (tw×th); produce
-      # buffer BGRA (bw × (bh + th)) top-down, salva alla stessa path.
-      # Se tw ≠ bw, il cartiglio è ri-campionato a larghezza bw mantenendo
-      # th (PowerShell l'ha già renderizzato a width = wpx, quindi tw==bw
-      # nel caso normale; il branch ri-sample è di sicurezza).
-      def append_titleblock(image_path, tb_png_path)
+      # Compone overlays (logo + label come BGRA stamp pre-renderizzati)
+      # e titleblock (BGRA bw×tb_h, append in basso) in UN SOLO
+      # load → blend → set_data → save_file. Sostituisce il vecchio
+      # combo apply_overlays + append_titleblock che faceva 2 load+2
+      # save (= doppia ri-codifica JPG) quando entrambi erano attivi.
+      #
+      # overlays: array di { bgra:, w:, h:, x:, y:, opacity: }
+      #   x,y sono in coordinate (0,0)=top-left della BASE image, NON
+      #   del canvas finale espanso col TB. Così gli overlays restano
+      #   confinati nell'area immagine (il cartiglio non li copre).
+      # tb_bgra: BGRA top-down a larghezza bw, oppure nil.
+      # tb_h: altezza del cartiglio in px (0 se tb_bgra nil).
+      def composite_to_file(image_path, overlays, tb_bgra, tb_h)
         base = Sketchup::ImageRep.new
         base.load_file(image_path)
         bw = base.width
         bh = base.height
 
-        tb = Sketchup::ImageRep.new
-        tb.load_file(tb_png_path)
-        tw = tb.width
-        th = tb.height
-        resample = (tw != bw)
+        buf = imagerep_to_bgra(base)
+        # Concatena il TB BGRA in coda (top-down → il TB finisce sotto
+        # l'immagine base). Niente alloc separata di buffer finale +
+        # double copy: append diretto allo string buf.
+        buf << tb_bgra if tb_bgra && tb_h > 0
 
-        nh = bh + th
-        buf = ("\0" * (bw * nh * 4)).force_encoding(Encoding::BINARY)
-
-        # Riga superiore: immagine originale (BGRA, top-down)
-        i = 0
-        base.colors.each do |c|
-          buf.setbyte(i,     c.blue)
-          buf.setbyte(i + 1, c.green)
-          buf.setbyte(i + 2, c.red)
-          buf.setbyte(i + 3, 255)
-          i += 4
+        overlays.each do |ov|
+          blend_stamp!(buf, bw, bh,
+                       ov[:bgra], ov[:w], ov[:h],
+                       ov[:x], ov[:y], ov[:opacity])
         end
 
-        # Riga inferiore: cartiglio. Se le larghezze coincidono, copy
-        # diretto (fast path). Altrimenti UV resample.
-        if resample
-          th.times do |dy|
-            v = 1.0 - (dy + 0.5) / th.to_f
-            row_off = ((bh + dy) * bw) * 4
-            bw.times do |dx|
-              u = (dx + 0.5) / bw.to_f
-              c = tb.color_at_uv(u, v, true)
-              j = row_off + dx * 4
-              buf.setbyte(j,     c.blue)
-              buf.setbyte(j + 1, c.green)
-              buf.setbyte(j + 2, c.red)
-              buf.setbyte(j + 3, 255)
-            end
-          end
-        else
-          j = bw * bh * 4
-          tb.colors.each do |c|
-            buf.setbyte(j,     c.blue)
-            buf.setbyte(j + 1, c.green)
-            buf.setbyte(j + 2, c.red)
-            buf.setbyte(j + 3, 255)
-            j += 4
-          end
-        end
-
-        base.set_data(bw, nh, 32, 0, buf)
+        final_h = bh + ((tb_bgra && tb_h > 0) ? tb_h : 0)
+        base.set_data(bw, final_h, 32, 0, buf)
         ok = base.save_file(image_path)
-        puts "[SM+] titleblock append ok=#{ok.inspect} → #{File.basename(image_path)} (#{bw}x#{nh})"
+        puts "[SM+] composite save_file ok=#{ok.inspect} → #{File.basename(image_path)} " \
+             "(#{bw}x#{final_h} overlays=#{overlays.size} tb=#{tb_bgra ? 'y' : 'n'})"
       end
 
       # Lista [page, name_index] dove name_index è la posizione 1-based in

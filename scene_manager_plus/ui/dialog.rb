@@ -38,11 +38,18 @@ module SceneManagerPlus
         return if Core::Buffer.deferred?
         m = Sketchup.active_model
         return unless m
-        # Detect riordino nativo (es. via "Window → Scenes" di SU): l'API
-        # 2019 non riordina via Ruby ma la UI nativa sì. Confrontiamo la
-        # firma dell'ordine pagine e forziamo push_state se cambia, così
-        # il banner divergenza si aggiorna.
-        native_sig = m.pages.map { |p| Core::SceneModel.page_id(p) }.join('|')
+        # CRITICO: questa funzione gira ogni 250ms. NON deve mai chiamare
+        # API che scrivono nel modello (set_attribute, ecc.), perché su
+        # modelli con AttributeObserver di plugin terzi ogni write può
+        # costare secondi → loop di polling che martella + apertura file
+        # bloccata indefinitamente.
+        #
+        # Detect riordino nativo via `p.object_id`: stabile nella sessione
+        # (l'identity Ruby della Page non cambia per riordini interni di
+        # SU) e zero side-effect. NON usiamo `SceneModel.page_id` perché
+        # quello fa lazy-write dell'uid sulle pagine che non l'hanno → da
+        # un polling che gira spesso può scatenare un blocco massivo.
+        native_sig = m.pages.map { |p| p.object_id }.join('|')
         if @last_native_sig && native_sig != @last_native_sig
           @last_native_sig = native_sig
           push_state
@@ -51,7 +58,12 @@ module SceneManagerPlus
         end
         page = m.pages.selected_page
         return unless page
-        uid = Core::SceneModel.page_id(page)
+        # Read-only: se uid non c'è ancora, page.get_attribute torna nil
+        # → trattiamo come "no sync da nativo" (uid verrà assegnato la
+        # prima volta che l'utente interagisce col plugin, in un context
+        # non-polling).
+        uid = page.get_attribute(PLUGIN_ID, 'uid')
+        return if uid.nil? || uid.empty?
         return if uid == @last_active_uid
         @last_active_uid = uid
         @dialog.execute_script("window.SM && SM.setActiveFromNative(#{uid.to_json});")

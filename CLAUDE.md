@@ -878,6 +878,124 @@ Nessuno strettamente bloccante. Possibili miglioramenti futuri:
   emulare un click di menù vero per clonare scene Match Photo. Esito
   incerto. Vedi sezione "Match Photo" più sopra.
 
+## Performance su modelli con AttributeObserver di plugin terzi (2026-05)
+
+Su alcuni file dell'utente certi plugin terzi (Layers Manager, plugin BIM,
+ecc.) registrano un AttributeObserver che reagisce a ogni
+`model.set_attribute`/`page.set_attribute`. Quel callback gira `O(modello)`
+e in pratica costa **~5 secondi per ogni write singolo**. Non possiamo
+fixare l'altro plugin, ma dobbiamo evitare di scatenargli writes inutili.
+
+Regole emerse, da rispettare in ogni feature futura:
+
+### 1. Il polling NON deve mai scrivere
+
+`Dialog#poll_active_scene` gira ogni 250ms. Anche una sola
+`set_attribute` lì = blocco massivo. Implementazione corrente:
+- Reorder-detect via `p.object_id` (stabile in sessione, zero side-effect),
+  NON via `SceneModel.page_id` che fa lazy-write dell'uid.
+- Lettura uid corrente via `page.get_attribute(PLUGIN_ID, 'uid')` diretto:
+  se nil → skip (l'uid verrà persistito altrove se serve).
+
+### 2. UID di pagine: cache transient in RAM + persist lazy
+
+`SceneModel.page_id(page)`:
+1. Legge l'attribute persistente. Se presente → return.
+2. Altrimenti consulta `@transient_uids[[m.object_id, page.object_id]]`.
+3. Se assente in cache → genera e cachea. **Nessuna scrittura su disco**.
+
+Il transient è stabile per la sessione SU corrente. Quando l'uid deve
+sopravvivere a chiusura/riapertura del file, viene persistito
+esplicitamente via `SceneModel.persist_uids_for_ids(ids)` che fa una
+sola `start_operation(disable_ui=true, transparent=true)` batch.
+
+Call site che persistono (esegue persistuids automaticamente):
+- `SceneModel.write_order_raw(ids)` — prima di scrivere logical_order.
+- `Folders.write_raw(list)` — prima di scrivere folders+scene_ids.
+
+Side-effect UX: la prima volta che l'utente crea una folder o riordina
+scene su un file "vergine", c'è un freeze (~5s su modelli pesanti) per
+il batch persist. Successivi reorder/folder edit: zero freeze.
+
+Per file che già avevano uid persistiti dalla precedente versione del
+plugin: backward compat OK, `ensure_all_uids` non scrive nulla.
+
+NON chiamare `page_id` in loop senza pre-`ensure_all_uids` se il loop
+sta solo leggendo: meglio popolare la cache transient in batch (ora è
+zero-cost) e poi leggere.
+
+### 3. Settings: RAM-only durante editing, flush on close
+
+`Core::Settings` mantiene `@runtime[model.object_id][group][key] = value`.
+- `Settings.set(group, hash)` aggiorna SOLO la RAM. Niente disk write.
+- `Settings.get(group)` merge: runtime override > attribute_dictionary >
+  DEFAULTS. Una sola chiamata `attribute_dictionary(..., false)` per group,
+  niente get_attribute per ogni leaf.
+- `Settings.flush!(model)` consolidate-write in 1 `start_operation` batch.
+  Chiamato in:
+  - `SettingsDialog.set_on_closed` (chiusura dialog Settings).
+  - `Exporter.export` all'inizio (garantisce SKP coerente prima di esportare).
+
+UX: l'editing dei settings ha **lag 0** anche su file con observer terzo
+a 5s/write. Un solo freeze al close del Settings dialog. Tutti i lettori
+(Export, Properties, ecc.) vedono i valori RAM aggiornati via `Settings.get`
+senza bisogno di flush intermedi.
+
+Lato JS (`ui/html/js/settings.js`): tutti gli input testuali/numerici
+salvano su evento `change` (blur/Enter), NON `input`. Così se l'utente
+digitava `"3000"` non scattavano 4 save intermedi, ma uno solo al tab-out.
+Checkbox/select restano su `change` come prima (eventi discreti).
+
+### 4. Per qualsiasi `model.set_attribute` non-trivial: start_operation
+
+Pattern obbligatorio per write fuori dal critical path utente
+(es. background, batch, lazy-persist):
+
+```ruby
+model.start_operation('SM+ <descrizione>', true, false, true)
+# disable_ui=true → SU non rinfresca inspector tra write
+# next_transparent=false
+# transparent=true → niente entry nell'undo stack
+begin
+  # ... writes ...
+  model.commit_operation
+rescue => e
+  model.abort_operation
+  raise
+end
+```
+
+Anche se il singolo write è inevitabilmente lento per l'observer terzo,
+`disable_ui=true` evita i refresh sincroni di SU sull'undo stack e gli
+inspector. `transparent=true` evita di sporcare l'undo dell'utente con
+operazioni del plugin che non devono essere undoable (es. assegnazione
+uid lazy, save settings).
+
+## Composite export ottimizzato (2026-05)
+
+`Core::Exporter` non usa più `apply_overlays + append_titleblock` (due
+load/save separati = doppia ricompressione JPG). Adesso `composite_to_file`
+fa tutto in un singolo load → set_data → save_file. Helpers chiave:
+
+- **`imagerep_to_bgra(img)`**: estrae i pixel come buffer BGRA top-down
+  via `ImageRep#data` (1 C-level call) invece di `colors.each` (1 oggetto
+  `Sketchup::Color` per pixel). Fast path per 32bpp / no padding (PNG da
+  SU). Su 24bpp fa byte-copy row-by-row senza allocazioni Color. Fallback
+  finale via `colors.each` come safety net.
+- **Logo pre-rasterizzato 1 volta per export**: prima del loop scene, il
+  logo viene ricampionato a `tw × th` finali in BGRA, e il blend per-scena
+  è solo index-math sul buffer. Prima `color_at_uv` veniva chiamato per
+  pixel × ogni scena.
+- **`blend_stamp!`**: fast-path per pixel completamente opachi (la=255,
+  opacity=1.0) → 3 byte copy senza math floating point.
+- **Singolo load/save per logo+label+titleblock**: il buffer base è
+  un concat di `imagerep_to_bgra(base) + tb_bgra` (top-down). Gli
+  overlay vengono blendati clippati nella zona base (`bh`), poi un solo
+  `set_data + save_file` finale. Niente più doppia ricompressione JPG.
+
+Misure indicative su modelli reali: 3-8x più veloce in funzione delle
+feature attive (più sono attive più si guadagna dal merge).
+
 ## Note per future sessioni
 
 - Lavoro condiviso tra postazioni → utente continuerà da un'altra macchina.
