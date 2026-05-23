@@ -280,6 +280,12 @@ confronta con `@last_active_uid`, se diverso esegue
 `dlg.execute_script("SM.setActiveFromNative(uid)")`. In defer mode il polling
 è no-op.
 
+**Uid letto via `Core::SceneModel.page_id(page)`** (non `page.get_attribute`
+diretto): `page_id` restituisce l'uid transient se non ancora persistito,
+garantendo che il marker giallo funzioni anche su scene mai riordinate/cartellate
+(che non hanno ancora uid su disco). `page_id` è read-only (no write su SU):
+usa solo la cache `@transient_uids` in RAM — sicuro nel polling.
+
 Polling attaccato in `Dialog.show` e fermato in `set_on_closed`.
 
 (`Pages#add_frame_change_observer` NON funziona per i tab clicks — vedi
@@ -613,10 +619,28 @@ right-click sulla lettera.
 
 **Trappola "Color is for edges, not faces"**: il dropdown "Color" del Style
 panel SU si riferisce al colore delle **linee/spigoli** (RenderingOption
-`EdgeColorMode`, valori 0=All same / 1=By material / 2=By axis). Esiste
-anche `FaceColorMode` per le facce, ma il controllo nativo SU lo chiama
-"Color" e si applica agli edges — già confuso una volta in dev, lasciato
-come `EdgeColorMode`.
+`EdgeColorMode`). Esiste anche `FaceColorMode` per le facce, ma il controllo
+nativo SU lo chiama "Color" e si applica agli edges — già confuso una volta
+in dev, lasciato come `EdgeColorMode`.
+
+**Valori reali di `EdgeColorMode` (verificati empiricamente):**
+`0 = By material`, `1 = All same`, `2 = By axis`. **Controintuitivo**: 0 non
+è "All same" come si aspetterebbe — nel Mini Style Manager le opzioni HTML
+hanno `value="1"` per "All same" e `value="0"` per "By material".
+
+**`TransparencySort`**: solo due valori reali in SU 2019: `0 = Faster`,
+`2 = Nicer`. Il valore `1` ("Medium") non corrisponde a niente di nativo e
+non produce effetti visibili — non esporre nella UI.
+
+**X-Ray**: la chiave RenderingOptions per il modo X-Ray è `ModelTransparency`
+(bool). Il nome `XRayAll` non esiste in SU 2019 — trovato per diff delle RO
+prima/dopo toggle nativo.
+
+**`use_style` + `use_rendering_options` = "Style and Fog" nativo**:
+la UI nativa SU espone 7 checkbox (non 8). "Style and Fog" corrisponde a
+ENTRAMBI i flag Ruby `use_style?` e `use_rendering_options?` — sempre settati
+insieme. Nel plugin: un solo checkbox "Style and Fog" scrive entrambi. Il
+flag `use_rendering_options` da solo non ha effetto visibile in SU 2019.
 
 **Model axes: niente API Ruby in SU 2019**. Non esiste rendering option né
 metodo `View#display_axes` né provider in `model.options` per leggere/settare
@@ -892,10 +916,11 @@ Regole emerse, da rispettare in ogni feature futura:
 
 `Dialog#poll_active_scene` gira ogni 250ms. Anche una sola
 `set_attribute` lì = blocco massivo. Implementazione corrente:
-- Reorder-detect via `p.object_id` (stabile in sessione, zero side-effect),
-  NON via `SceneModel.page_id` che fa lazy-write dell'uid.
-- Lettura uid corrente via `page.get_attribute(PLUGIN_ID, 'uid')` diretto:
-  se nil → skip (l'uid verrà persistito altrove se serve).
+- Reorder-detect via `p.object_id` (stabile in sessione, zero side-effect).
+- Lettura uid corrente via `Core::SceneModel.page_id(page)`: read-only,
+  usa la cache `@transient_uids` in RAM se l'uid non è ancora persistito.
+  **Non usare `page.get_attribute` diretto**: funzionerebbe solo per uid
+  già persistiti, lasciando il marker giallo immobile su scene "vergini".
 
 ### 2. UID di pagine: cache transient in RAM + persist lazy
 

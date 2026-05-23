@@ -58,12 +58,13 @@ module SceneManagerPlus
         end
         page = m.pages.selected_page
         return unless page
-        # Read-only: se uid non c'è ancora, page.get_attribute torna nil
-        # → trattiamo come "no sync da nativo" (uid verrà assegnato la
-        # prima volta che l'utente interagisce col plugin, in un context
-        # non-polling).
-        uid = page.get_attribute(PLUGIN_ID, 'uid')
-        return if uid.nil? || uid.empty?
+        # Usiamo page_id (non get_attribute diretto) così funziona anche
+        # per scene con uid solo transient (non ancora persistiti su disco).
+        # page_id è read-only: legge get_attribute e, se nil, restituisce
+        # il transient uid dalla cache RAM (stessa identità usata dal JS
+        # tramite push_state → ui_payload). Nessuna write su SU.
+        uid = Core::SceneModel.page_id(page)
+        return unless uid
         return if uid == @last_active_uid
         @last_active_uid = uid
         @dialog.execute_script("window.SM && SM.setActiveFromNative(#{uid.to_json});")

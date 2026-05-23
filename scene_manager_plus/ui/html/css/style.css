@@ -175,6 +175,12 @@ body {
   background: #d4a017;
   color: #1a1a1a;
 }
+/* Scena attiva che non memorizza tutte le proprietà (alcune spunte OFF).
+   Marker rosso per segnalare lo stato incompleto. */
+.scene-row.active-warning .grip {
+  background: #c0392b;
+  color: #fff;
+}
 /* Badge lettera dello stile assegnato alla scena (A,B,C... alfabetico
    sui model.styles). In Fase A passivo; le Fasi B/C aggiungono interazioni. */
 .scene-row .row-style-letter {

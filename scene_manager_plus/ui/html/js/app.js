@@ -21,6 +21,38 @@ window.SM = (function () {
     return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
   }
 
+  // Nomi leggibili per le flag di memorizzazione scena — allineati alle
+  // label native SU. use_style e use_rendering_options condividono lo stesso
+  // nome ("Style and Fog") perché in SU 2019 la UI nativa li gestisce con
+  // un unico checkbox.
+  var FLAG_LABELS = {
+    'use_camera':            'Camera Location',
+    'use_hidden':            'Hidden Geometry',
+    'use_hidden_layers':     'Visible Layers',
+    'use_style':             'Style and Fog',
+    'use_rendering_options': 'Style and Fog',
+    'use_shadow_info':       'Shadow Settings',
+    'use_axes':              'Axes Location',
+    'use_section_planes':    'Active Section Planes',
+  };
+
+  // Costruisce il title del grip per la scena attiva.
+  // allFlags=true → giallo, false → rosso con lista di cosa manca.
+  // Deduplicazione: use_style e use_rendering_options hanno stesso label
+  // → appaiono come un unico "Style and Fog" nel tooltip.
+  function buildGripTitle(scene, allFlags) {
+    if (!scene) return '';
+    if (allFlags) return 'Active scene · All properties recorded';
+    var missing = state.flag_keys.filter(function (k) { return !scene.flags[k]; });
+    var seen = {};
+    var lines = [];
+    missing.forEach(function (k) {
+      var label = FLAG_LABELS[k] || k;
+      if (!seen[label]) { seen[label] = true; lines.push('– ' + label); }
+    });
+    return 'Active scene · Some properties not recorded:\n' + lines.join('\n');
+  }
+
   // Lettera associata al nome stile (lookup in state.styles).
   // Restituisce '?' se lo stile non è mappato o lo state non è ancora arrivato.
   function letterForStyle(styleName) {
@@ -159,7 +191,13 @@ window.SM = (function () {
     row.dataset.parent = parent;
     if (parent !== 'root') row.classList.add('in-folder');
     if (selection.indexOf(scene.id) !== -1) row.classList.add('selected');
-    if (scene.id === activeId) row.classList.add('active');
+    var isActive = (scene.id === activeId);
+    var allFlags = true;
+    if (isActive) {
+      allFlags = state.flag_keys.every(function (k) { return scene.flags[k] !== false; });
+      row.classList.add(allFlags ? 'active' : 'active-warning');
+    }
+    var gripTitle = isActive ? buildGripTitle(scene, allFlags) : '';
     var pendingDot = scene.pending ? '<span class="pending-dot" title="Pending edits"></span>' : '';
     var previewUrl = state.previews && state.previews[scene.id];
     var thumbHtml;
@@ -183,7 +221,7 @@ window.SM = (function () {
       }
     }
     row.innerHTML =
-      '<span class="grip">&#x2630;</span>' +
+      '<span class="grip" title="' + escapeAttr(gripTitle) + '">&#x2630;</span>' +
       '<span class="row-style-letter" title="' + escapeAttr(letterTitle) + '">' + letter + '</span>' +
       '<input type="checkbox" class="export-cb" title="Include in batch export (ignored when exporting only selected scenes)"' +
         (included ? ' checked' : '') + '>' +
@@ -887,11 +925,22 @@ window.SM = (function () {
     if (!listEl) return;
     if (prevId) {
       var prev = listEl.querySelector('.scene-row[data-id="' + prevId + '"]');
-      if (prev) prev.classList.remove('active');
+      if (prev) {
+        prev.classList.remove('active');
+        prev.classList.remove('active-warning');
+        var pg = prev.querySelector('.grip');
+        if (pg) pg.title = '';
+      }
     }
     if (nextId) {
       var next = listEl.querySelector('.scene-row[data-id="' + nextId + '"]');
-      if (next) next.classList.add('active');
+      if (next) {
+        var sc = sceneByIdMap[nextId];
+        var allFlags = !sc || state.flag_keys.every(function (k) { return sc.flags[k] !== false; });
+        next.classList.add(allFlags ? 'active' : 'active-warning');
+        var ng = next.querySelector('.grip');
+        if (ng) ng.title = buildGripTitle(sc, allFlags);
+      }
     }
   }
 

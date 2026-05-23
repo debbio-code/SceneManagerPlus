@@ -250,3 +250,69 @@ body {
   font-size: 10px;
   border-top: 1px solid #000;
 }
+.footer-link {
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: #555;
+  text-underline-offset: 2px;
+}
+.footer-link:hover { color: #bbb; }
+
+/* Overlay lista scene che usano lo stile */
+.scenes-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.55);
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.scenes-overlay.hidden { display: none; }
+.scenes-overlay-box {
+  background: #2b2b2b;
+  border: 1px solid #3a3a3a;
+  border-radius: 4px;
+  width: 240px;
+  max-height: 280px;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 4px 18px rgba(0,0,0,0.65);
+}
+.scenes-overlay-hdr {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 7px 12px;
+  background: #3a3a3a;
+  border-bottom: 1px solid #1e1e1e;
+  border-radius: 4px 4px 0 0;
+  font-size: 10px;
+  font-weight: bold;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #aaa;
+}
+.overlay-close {
+  background: none;
+  border: none;
+  color: #888;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 1px 4px;
+}
+.overlay-close:hover { color: #ddd; }
+.scenes-overlay-list {
+  list-style: none;
+  margin: 0;
+  padding: 6px 0;
+  overflow-y: auto;
+  flex: 1;
+}
+.scenes-overlay-list li {
+  padding: 4px 14px;
+  font-size: 12px;
+  color: #ccc;
+}
+.scenes-overlay-list li:hover { background: #363636; }

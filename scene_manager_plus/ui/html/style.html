@@ -21,8 +21,8 @@
       <label class="row">
         <span class="lbl">Color</span>
         <select id="ctrl-EdgeColorMode" data-key="EdgeColorMode">
-          <option value="0">All same</option>
-          <option value="1">By material</option>
+          <option value="1">All same</option>
+          <option value="0">By material</option>
           <option value="2">By axis</option>
         </select>
       </label>
@@ -30,7 +30,6 @@
         <span class="lbl">Transparency quality</span>
         <select id="ctrl-TransparencySort" data-key="TransparencySort">
           <option value="0">Faster</option>
-          <option value="1">Medium</option>
           <option value="2">Nicer</option>
         </select>
       </label>
@@ -61,6 +60,10 @@
     <section class="group">
       <h3>Display</h3>
       <label class="row">
+        <span class="lbl">X-ray</span>
+        <input type="checkbox" id="ctrl-ModelTransparency" data-key="ModelTransparency">
+      </label>
+      <label class="row">
         <span class="lbl">Hidden geometry</span>
         <input type="checkbox" id="ctrl-DrawHidden" data-key="DrawHidden">
       </label>
@@ -79,8 +82,19 @@
     </section>
 
     <footer class="ftr">
-      <span id="footer-text">—</span>
+      <span id="footer-text" class="footer-link" title="Click to see all scenes using this style">—</span>
     </footer>
+  </div>
+
+  <!-- Overlay: lista scene che usano questo stile -->
+  <div id="scenes-overlay" class="scenes-overlay hidden">
+    <div class="scenes-overlay-box">
+      <div class="scenes-overlay-hdr">
+        <span>Scenes using this style</span>
+        <button id="scenes-overlay-close" class="overlay-close">✕</button>
+      </div>
+      <ul id="scenes-overlay-list" class="scenes-overlay-list"></ul>
+    </div>
   </div>
 
   <!-- Color picker popup (HSV square + hue slider + presets).

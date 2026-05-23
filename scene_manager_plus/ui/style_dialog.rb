@@ -29,7 +29,7 @@ module SceneManagerPlus
 
       RO_KEYS = %w[
         EdgeColorMode TransparencySort BackgroundColor DrawHorizon SkyColor
-        DrawHidden DisplaySectionPlanes DisplaySectionCuts
+        ModelTransparency DrawHidden DisplaySectionPlanes DisplaySectionCuts
       ].freeze
 
       # Model Axes display: SU 2019 NON espone state né setter via Ruby API
@@ -160,12 +160,14 @@ module SceneManagerPlus
         return unless @dialog && @dialog.visible?
         m = Sketchup.active_model
         return unless m
+        using = scenes_using_style(@style_name)
         state = {
-          style_name:  @style_name,
-          nickname:    Core::Styles.get_nickname(@style_name),
-          scene_id:    @scene_id,
-          scenes_count: scenes_using_style(@style_name).size,
-          values:      current_values
+          style_name:   @style_name,
+          nickname:     Core::Styles.get_nickname(@style_name),
+          scene_id:     @scene_id,
+          scenes_count: using.size,
+          scenes_list:  using.map { |p| p.name },
+          values:       current_values
         }
         @dialog.execute_script("window.SMS && SMS.setState(#{state.to_json});")
       rescue => e
@@ -278,7 +280,7 @@ module SceneManagerPlus
       # Coerce JS values verso il tipo atteso da RenderingOptions per ogni chiave.
       # Boolean → bool, Color → Sketchup::Color da hex, Integer → int.
       COLOR_KEYS = %w[BackgroundColor SkyColor].freeze
-      BOOL_KEYS  = %w[DrawHorizon DrawHidden DisplaySectionPlanes DisplaySectionCuts].freeze
+      BOOL_KEYS  = %w[DrawHorizon ModelTransparency DrawHidden DisplaySectionPlanes DisplaySectionCuts].freeze
       INT_KEYS   = %w[EdgeColorMode TransparencySort].freeze
 
       def coerce_for_ro(key, v)

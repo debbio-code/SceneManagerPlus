@@ -18,15 +18,29 @@
                     .replace(/"/g, '&quot;');
   }
 
+  // Mapping UI: label native SU + fusione use_style+use_rendering_options
+  // in un unico "Style and Fog" (come nella UI nativa SU — 7 voci, non 8).
+  var FLAG_UI = [
+    { label: 'Camera Location',       keys: ['use_camera'] },
+    { label: 'Hidden Geometry',       keys: ['use_hidden'] },
+    { label: 'Visible Layers',        keys: ['use_hidden_layers'] },
+    { label: 'Active Section Planes', keys: ['use_section_planes'] },
+    { label: 'Style and Fog',         keys: ['use_style', 'use_rendering_options'] },
+    { label: 'Shadow Settings',       keys: ['use_shadow_info'] },
+    { label: 'Axes Location',         keys: ['use_axes'] },
+  ];
+
   function renderFlags(flagKeys, flags) {
     const el = $('#prop-flags');
-    el.innerHTML = flagKeys.map(k => {
-      const checked = flags && flags[k] ? 'checked' : '';
-      const label = k.replace(/^use_/, '').replace(/_/g, ' ');
-      return '<label><input type="checkbox" data-flag="' + k + '" ' + checked + '>' +
-             '<span>' + escapeHtml(label) + '</span></label>';
+    // Filtra agli item che hanno almeno una key presente in flagKeys (defensive)
+    const items = FLAG_UI.filter(item => item.keys.some(k => flagKeys.indexOf(k) !== -1));
+    el.innerHTML = items.map(item => {
+      // Checked se TUTTE le keys dell'item sono true (coerenza con SU nativo)
+      const checked = item.keys.every(k => flags && flags[k]) ? 'checked' : '';
+      const fsAttr = escapeHtml(JSON.stringify(item.keys));
+      return '<label><input type="checkbox" data-flags="' + fsAttr + '" ' + checked + '>' +
+             '<span>' + escapeHtml(item.label) + '</span></label>';
     }).join('');
-    // listener live su ogni checkbox
     el.querySelectorAll('input[type=checkbox]').forEach(cb => {
       cb.addEventListener('change', commit);
     });
@@ -35,7 +49,11 @@
   function readForm() {
     const flags = {};
     document.querySelectorAll('#prop-flags input[type=checkbox]').forEach(cb => {
-      flags[cb.dataset.flag] = cb.checked;
+      // data-flags è un JSON array: per item merged (es. Style and Fog)
+      // propaga il valore a tutte le keys corrispondenti.
+      var keys;
+      try { keys = JSON.parse(cb.dataset.flags || '[]'); } catch (e) { keys = []; }
+      keys.forEach(k => { flags[k] = cb.checked; });
     });
     return {
       id:          SMP.state && SMP.state.scene ? SMP.state.scene.id : null,
