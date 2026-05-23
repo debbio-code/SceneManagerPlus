@@ -394,26 +394,24 @@ module SceneManagerPlus
 
       def push_state
         return unless @dialog && @dialog.visible?
-        model      = Sketchup.active_model
-        scenes_raw = Core::SceneModel.list_ordered
-        tree       = Core::SceneModel.tree
-        active_pg  = model && model.pages.selected_page
-        active_id  = active_pg ? Core::SceneModel.page_id(active_pg) : nil
+        ui_cfg = Core::Settings.get('ui')
+        payload = Core::SceneModel.ui_payload(
+          show_order_banner: ui_cfg['show_order_banner']
+        )
+        scenes_raw = payload[:scenes]
+        tree       = payload[:tree]
         state = {
           scenes:    scenes_raw,
           tree:      tree,
-          active_id: active_id,
-          folders:   Core::Folders.all,
+          active_id: payload[:active_id],
+          folders:   payload[:folders],
           flag_keys: Core::SceneModel::FLAG_KEYS,
           styles:    Core::SceneModel.styles_map,
           deferred:  Core::Buffer.deferred?,
           pending:   Core::Buffer.pending_count,
           previews:  Core::Previews.url_map,
-          model_info: {
-            title:        (model ? model.title.to_s : ''),
-            pages_count:  (model ? model.pages.count : 0)
-          },
-          native_order_divergent: (Core::Settings.get('ui')['show_order_banner'] && Core::SceneModel.native_order_divergent?)
+          model_info: payload[:model_info],
+          native_order_divergent: payload[:native_order_divergent]
         }
         puts "[SM+] push_state: model=#{state[:model_info][:title].inspect} " \
              "native_pages=#{state[:model_info][:pages_count]} " \
