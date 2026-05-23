@@ -1021,6 +1021,44 @@ fa tutto in un singolo load → set_data → save_file. Helpers chiave:
 Misure indicative su modelli reali: 3-8x più veloce in funzione delle
 feature attive (più sono attive più si guadagna dal merge).
 
+## Trappola Edit tool → smart quotes nei file JS (2026-05)
+
+Il tool Edit dell'assistente, quando il `new_string` contiene caratteri
+non-ASCII (es. `→`, `—`, `↔`), a volte normalizza gli apostrofi ASCII
+(`'`, U+0027) in smart quotes Unicode (`'`/`'`, U+2018/U+2019).
+
+**JavaScript non riconosce smart quotes come delimitatori di stringa**.
+Una sola riga corrotta del tipo:
+```js
+'To affect only one scene'  // ASCII OK
+'To affect only one scene'  // U+2018/U+2019 → SyntaxError
+```
+manda in `SyntaxError` l'intera IIFE → `window.SMS` non viene mai
+definito → niente nel mini Style Manager funziona (no setState,
+nessun listener agganciato, footer resta a "—").
+
+**Sintomo**: una finestra HtmlDialog si apre ma è completamente
+"morta" — non aggiorna i campi, click non funzionano, ma non c'è
+errore visibile (CEF console non è esposta in SU 2019).
+
+**Diagnosi rapida** (PowerShell):
+```powershell
+$f = "path\to\file.js"
+$c = [System.IO.File]::ReadAllText($f)
+([regex]::Matches($c, "[‘’“”]")).Count
+```
+
+**Fix bulk**:
+```powershell
+$c = $c -replace [char]0x2018, "'"
+$c = $c -replace [char]0x2019, "'"
+[System.IO.File]::WriteAllText($f, $c, [System.Text.UTF8Encoding]::new($false))
+```
+
+Quando devi editare un file JS con caratteri Unicode (frecce, em-dash,
+ecc.), verifica sempre dopo l'edit con il check sopra. Pattern alternativo:
+fai l'edit con `Write` invece di `Edit` quando puoi.
+
 ## Note per future sessioni
 
 - Lavoro condiviso tra postazioni → utente continuerà da un'altra macchina.

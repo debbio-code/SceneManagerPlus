@@ -151,6 +151,19 @@ module SceneManagerPlus
           Dialog.push_state if defined?(Dialog)
         end
 
+        # Mostra la lista delle scene che usano lo stile corrente in un messagebox.
+        # Usato dal footer della finestra stile (overlay CSS problematico in CEF SU 2019).
+        dlg.add_action_callback('sm_style_show_scenes') do |_ctx|
+          using = scenes_using_style(@style_name)
+          display = Core::Styles.display_name(@style_name) rescue @style_name
+          if using.empty?
+            ::UI.messagebox("No scenes use style '#{display}'.")
+          else
+            names = using.map.with_index(1) { |p, i| "  #{i}. #{p.name}" }.join("\n")
+            ::UI.messagebox("Scenes using style '#{display}' (#{using.size}):\n\n#{names}")
+          end
+        end
+
         dlg.add_action_callback('sm_style_log') do |_ctx, msg|
           puts "[SM+ Style UI] #{msg}"
         end

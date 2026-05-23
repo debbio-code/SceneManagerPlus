@@ -233,43 +233,43 @@ window.SMS = (function () {
     state = newState || state;
     if (!state.values) state.values = {};
     if (!state.scenes_list) state.scenes_list = [];
-    $(‘style-name’).textContent = state.style_name || ‘—‘;
-    // Nickname input: NON sovrascrivere se l’utente sta editando.
-    var nickEl = $(‘style-nickname’);
+    $('style-name').textContent = state.style_name || '—';
+    // Nickname input: NON sovrascrivere se l'utente sta editando.
+    var nickEl = $('style-nickname');
     if (nickEl && document.activeElement !== nickEl) {
-      nickEl.value = state.nickname || ‘’;
+      nickEl.value = state.nickname || '';
     }
-    $(‘scope-note’).textContent =
-      ‘Applies to all scenes using this style (‘ + (state.scenes_count || 0) + ‘). ‘ +
-      ‘To affect only one scene, duplicate the style in SU’s Window → Styles first.’;
-    $(‘footer-text’).textContent = state.scenes_count + ‘ scene(s) use this style’;
+    $('scope-note').textContent =
+      'Applies to all scenes using this style (' + (state.scenes_count || 0) + '). ' +
+      'To affect only one scene, duplicate via SketchUp Window → Styles, then reassign.';
+    $('footer-text').textContent = state.scenes_count + ' scene(s) use this style';
     populate(state.values);
   }
 
   function showScenesOverlay() {
-    var overlay = $(‘scenes-overlay’);
-    var list    = $(‘scenes-overlay-list’);
+    var overlay = $('scenes-overlay');
+    var list    = $('scenes-overlay-list');
     if (!overlay || !list) return;
-    list.innerHTML = ‘’;
+    list.innerHTML = '';
     var names = state.scenes_list || [];
     if (names.length === 0) {
-      var empty = document.createElement(‘li’);
-      empty.textContent = ‘(no scenes)’;
-      empty.style.color = ‘#666’;
+      var empty = document.createElement('li');
+      empty.textContent = '(no scenes)';
+      empty.style.color = '#666';
       list.appendChild(empty);
     } else {
       names.forEach(function (name) {
-        var li = document.createElement(‘li’);
+        var li = document.createElement('li');
         li.textContent = name;
         list.appendChild(li);
       });
     }
-    overlay.classList.remove(‘hidden’);
+    overlay.classList.remove('hidden');
   }
 
   function hideScenesOverlay() {
-    var overlay = $(‘scenes-overlay’);
-    if (overlay) overlay.classList.add(‘hidden’);
+    var overlay = $('scenes-overlay');
+    if (overlay) overlay.classList.add('hidden');
   }
 
   // Commit del nickname: invia a Ruby. Vuoto = clear nickname.
@@ -382,10 +382,12 @@ window.SMS = (function () {
         var c = {}; c[k] = hex; sendChanges(c);
       }
     });
-    // Footer cliccabile → apre overlay lista scene
+    // Footer cliccabile → chiede a Ruby di mostrare la lista (messagebox nativo)
     var footerEl = $('footer-text');
     if (footerEl) {
-      footerEl.addEventListener('click', showScenesOverlay);
+      footerEl.addEventListener('click', function () {
+        call('sm_style_show_scenes');
+      });
     }
     var closeBtn = $('scenes-overlay-close');
     if (closeBtn) {
