@@ -369,6 +369,7 @@ window.SM = (function () {
     var input = document.createElement('input');
     input.type = 'text';
     input.className = 'rename-input';
+    input.spellcheck = false;
     input.value = current;
     nameEl.appendChild(input);
     input.focus();

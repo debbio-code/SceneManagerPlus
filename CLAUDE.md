@@ -374,6 +374,19 @@ offset_x/y, opacity).
   immediatamente). Outside click o Esc chiudono. Funziona al 100% in
   CEF SU 2019 perché usa solo standard DOM/CSS senza el `<input
   type="color">`.
+- **Spellcheck italiano**: non riusciti a forzarlo. Tentato (2026-05) con
+  `spellcheck="true" lang="it"` su input rename inline + Properties name/desc
+  e `<html lang="it">` + `<meta http-equiv="Content-Language" content="it">`:
+  CEF di SU 2019 ignora — il dizionario resta inglese (parole italiane
+  sottolineate come errori). Causa probabile: la lista lingue per i
+  dizionari Hunspell di CEF è una command-line flag (`--accept-lang=it`) che
+  Trimble non espone all'API Ruby, e non c'è verso di forzare il download
+  del dizionario IT dall'interno del plugin. **Scelta**: spellcheck
+  disabilitato (`spellcheck="false"`) sul rename inline scena e sui campi
+  Name/Description del Properties dialog. Se in futuro si vuole riprovare:
+  esplorare se SU 2019 espone una pref CEF nascosta via `write_default`, o
+  se è possibile pre-installare manualmente il dizionario `it-IT.bdic` nella
+  cache CEF di SketchUp.
 
 ## Settings: persistenza per-file (model attributes)
 
