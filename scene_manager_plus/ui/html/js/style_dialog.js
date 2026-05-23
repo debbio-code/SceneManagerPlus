@@ -382,11 +382,11 @@ window.SMS = (function () {
         var c = {}; c[k] = hex; sendChanges(c);
       }
     });
-    // Footer cliccabile → chiede a Ruby di mostrare la lista (messagebox nativo)
+    // Footer cliccabile → overlay HTML interno (no messagebox, no suono)
     var footerEl = $('footer-text');
     if (footerEl) {
       footerEl.addEventListener('click', function () {
-        call('sm_style_show_scenes');
+        showScenesOverlay();
       });
     }
     var closeBtn = $('scenes-overlay-close');
