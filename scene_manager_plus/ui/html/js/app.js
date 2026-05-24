@@ -239,6 +239,12 @@ window.SM = (function () {
       var txt = readableTextColor(letterColor) || '#cfd8e3';
       letterStyle = ' style="background:' + letterColor + ';color:' + txt + ';border-color:' + letterColor + '"';
     }
+    // Colore per-scena: solo lo swatch a destra del nome viene colorato.
+    // Vuoto = pattern a quadretti (CSS), pieno = inline background hex.
+    var sceneColor = scene.color || null;
+    var sceneSwatchStyle = sceneColor
+      ? ' style="background:' + sceneColor + ';background-image:none"'
+      : '';
     row.innerHTML =
       '<span class="grip" title="' + escapeAttr(gripTitle) + '">&#x2630;</span>' +
       '<span class="row-style-letter" title="' + escapeAttr(letterTitle) + '"' + letterStyle + '>' + letter + '</span>' +
@@ -247,7 +253,8 @@ window.SM = (function () {
       '<span class="idx">' + idx + '</span>' +
       thumbHtml +
       pendingDot +
-      '<span class="name"></span>';
+      '<span class="name"></span>' +
+      '<span class="row-scene-color" title="Scene color — click to pick, right-click to clear"' + sceneSwatchStyle + '></span>';
     row.querySelector('.name').textContent = scene.name;
     row.addEventListener('mousedown', function (e) { onRowClick(e, scene.id); });
     row.addEventListener('contextmenu', function (e) {
@@ -863,6 +870,43 @@ window.SM = (function () {
       var row = e.target.closest('.scene-row');
       if (!row || !row.dataset || !row.dataset.id) return;
       showStylePickerMenu(e.clientX, e.clientY, row.dataset.id);
+    }, true);
+
+    // Scene color swatch: click sx → popup picker (live apply via Ruby).
+    //                     right-click → clear.
+    // mousedown stoppato così non triggera selezione/drag della row.
+    listEl.addEventListener('mousedown', function (e) {
+      if (!e.target.classList || !e.target.classList.contains('row-scene-color')) return;
+      e.stopPropagation();
+      e.preventDefault();
+    }, true);
+    listEl.addEventListener('click', function (e) {
+      if (!e.target.classList || !e.target.classList.contains('row-scene-color')) return;
+      e.stopPropagation();
+      var row = e.target.closest('.scene-row');
+      if (!row || !row.dataset || !row.dataset.id) return;
+      var id = row.dataset.id;
+      var sc = sceneById(id);
+      var current = (sc && sc.color) || '#4ea1ff';
+      if (window.SMColorPopup) {
+        // commitOnEnd: il colore scena non ha effetto sul viewport (solo
+        // sullo swatch della row), quindi evitiamo le N write a SU durante
+        // il drag — un solo set_attribute alla chiusura del popup.
+        SMColorPopup.show(e.target, current, function (hex) {
+          SMBridge.setSceneColor(id, hex);
+        }, { allowNone: true, commitOnEnd: true });
+      } else {
+        var c = window.prompt('Scene color (hex, e.g. #4ea1ff):', current);
+        if (c !== null) SMBridge.setSceneColor(id, c.trim());
+      }
+    });
+    listEl.addEventListener('contextmenu', function (e) {
+      if (!e.target.classList || !e.target.classList.contains('row-scene-color')) return;
+      e.preventDefault();
+      e.stopPropagation();
+      var row = e.target.closest('.scene-row');
+      if (!row || !row.dataset || !row.dataset.id) return;
+      SMBridge.setSceneColor(row.dataset.id, '');
     }, true);
 
     // Export-include checkbox: blocca selezione/drag, invia toggle a Ruby.

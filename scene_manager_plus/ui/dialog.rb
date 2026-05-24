@@ -279,6 +279,12 @@ module SceneManagerPlus
           push_state
         end
 
+        dlg.add_action_callback('sm_scene_set_color') do |_ctx, payload|
+          data = parse(payload)
+          Core::SceneModel.set_scene_color(data['id'], data['color'])
+          push_state
+        end
+
         dlg.add_action_callback('sm_delete') do |_ctx, payload|
           data = parse(payload)
           Core::SceneModel.delete_pages(data['ids'])

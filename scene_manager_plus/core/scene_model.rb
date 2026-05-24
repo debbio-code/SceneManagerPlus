@@ -413,7 +413,8 @@ module SceneManagerPlus
             description:     p.description.to_s,
             flags:           flags_hash(p),
             export_included: export_included?(p),
-            style_name:      page_style_name(p)
+            style_name:      page_style_name(p),
+            color:           get_scene_color(page_id(p))
           }
         end
       end
@@ -451,6 +452,39 @@ module SceneManagerPlus
       # attribute → persiste nel .skp. Indipendente dai FLAG_KEYS nativi SU.
       EXPORT_INCLUDED_KEY = 'export_included'.freeze
 
+      # Colore per-scena: mostrato come swatch a destra del nome e applicato
+      # come background della row (sostituisce la selezione azzurra quando
+      # impostato). Storage: dict 'SMP_scene_colors' su Sketchup.active_model,
+      # key = uid scena, value = '#rrggbb'. Pattern allineato a Core::Styles
+      # (get/set_color): un solo write per cambio = un solo hit
+      # AttributeObserver, e nessuna scrittura per-page sotto polling.
+      SCENE_COLORS_DICT = 'SMP_scene_colors'.freeze
+
+      def get_scene_color(uid)
+        m = model
+        return nil unless m && uid
+        v = m.get_attribute(SCENE_COLORS_DICT, uid.to_s, nil)
+        return nil if v.nil?
+        s = v.to_s.strip
+        return nil if s.empty?
+        s =~ /^#?[0-9a-fA-F]{6}$/ ? (s.start_with?('#') ? s.downcase : "##{s.downcase}") : nil
+      end
+
+      def set_scene_color(uid, hex)
+        m = model
+        return false unless m && uid
+        key = uid.to_s
+        s   = hex.to_s.strip
+        if s.empty?
+          m.set_attribute(SCENE_COLORS_DICT, key, '')
+          return true
+        end
+        s = s.sub(/^#/, '')
+        return false unless s =~ /^[0-9a-fA-F]{6}$/
+        m.set_attribute(SCENE_COLORS_DICT, key, "##{s.downcase}")
+        true
+      end
+
       def export_included?(page)
         v = page.get_attribute(PLUGIN_ID, EXPORT_INCLUDED_KEY, true)
         v != false
@@ -484,6 +518,7 @@ module SceneManagerPlus
           flags:           flags_hash(page),
           export_included: export_included?(page),
           style_name:      page_style_name(page),
+          color:           get_scene_color(uid),
           pending:         false
         }
         # Overlay buffer edits

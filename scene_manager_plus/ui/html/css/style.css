@@ -211,6 +211,24 @@ body {
   cursor: pointer;
   flex-shrink: 0;
 }
+/* Swatch colore per-scena: vive a destra del nome. Vuoto = pattern a quadretti
+   per indicare "no color". Click sx = picker, dx = clear. */
+.scene-row .row-scene-color {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  margin-left: 6px;
+  border: 1px solid #1e1e1e;
+  border-radius: 2px;
+  cursor: pointer;
+  flex-shrink: 0;
+  background-image:
+    linear-gradient(45deg, #555 25%, transparent 25%, transparent 75%, #555 75%),
+    linear-gradient(45deg, #555 25%, #333 25%, #333 75%, #555 75%);
+  background-size: 8px 8px;
+  background-position: 0 0, 4px 4px;
+}
+.scene-row .row-scene-color:hover { border-color: #4ea1ff; }
 .scene-row.dragging { opacity: 0.4; }
 
 .scene-row .thumb {

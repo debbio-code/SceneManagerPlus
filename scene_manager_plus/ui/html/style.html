@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <title>Style</title>
   <link rel="stylesheet" href="css/style_dialog.css">
+  <link rel="stylesheet" href="css/color_popup.css">
 </head>
 <body>
   <div id="app">
@@ -115,10 +116,13 @@
     <div class="cp-bot">
       <span id="cp-preview" class="cp-preview"></span>
       <input type="text" id="cp-hex" class="cp-hex" maxlength="7" placeholder="#aabbcc" spellcheck="false">
+      <button id="cp-none" class="cp-none-btn" title="No color" style="display:none">None</button>
     </div>
+    <div id="cp-recent" class="cp-recent"></div>
     <div id="cp-presets" class="cp-presets"></div>
   </div>
 
+  <script src="js/color_popup.js"></script>
   <script src="js/style_dialog.js"></script>
 </body>
 </html>

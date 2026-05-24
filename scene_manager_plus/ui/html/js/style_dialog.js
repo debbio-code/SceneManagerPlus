@@ -22,10 +22,11 @@ window.SMS = (function () {
     return /^#[0-9a-f]{6}$/.test(s) ? s : null;
   }
 
-  // ═════════════════════════════════════════════════════════════════════
-  // ColorPopup — picker HSV custom (CEF SU 2019 non supporta <input type="color">)
-  // ═════════════════════════════════════════════════════════════════════
-  var ColorPopup = (function () {
+  // ColorPopup è ora il modulo condiviso color_popup.js (window.SMColorPopup):
+  // include "Recenti" e bottone "None". Lasciamo qui la vecchia IIFE privata
+  // come dead-code in caso si voglia rollback rapido, ma usiamo lo shared.
+  var ColorPopup = window.SMColorPopup;
+  var _ColorPopupLegacy = (function () {
     var popup, sbEl, sbMarker, hueEl, hueMarker, hexEl, previewEl, presetsEl;
     var hsv = { h: 0, s: 0, v: 0 };
     var onApply = null;

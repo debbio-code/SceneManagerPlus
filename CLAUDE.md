@@ -1125,6 +1125,65 @@ hex calcola luminanza e sceglie testo `#1a1a1a` (scuro) o `#ffffff` (chiaro).
 **Picker**: inline color sul `.ctx-letter` applicato **solo** se lo stile
 NON è `.current` (per non sovrascrivere il giallo che segnala lo stile attivo).
 
+## Color picker condiviso (`SMColorPopup`) + per-scene color
+
+`ui/html/js/color_popup.js` + `ui/html/css/color_popup.css` espongono
+`window.SMColorPopup`, un picker HSV unificato usato sia da `app.js` (main
+window) sia da `style_dialog.js` (Mini Style Manager). Markup `#sm-color-popup`
++ `#cp-*` deve essere presente nell'HTML del dialog che lo usa (vedi
+`index.html` e `style.html`).
+
+**API**: `SMColorPopup.show(triggerEl, currentHex, onApply, opts)` con:
+- `opts.allowNone = true` → mostra bottone **None** (commit string vuota).
+- `opts.commitOnEnd = true` → NON chiama `onApply` durante drag/typing; lo
+  chiama una sola volta alla `hide()` del popup con il colore finale.
+
+**Modalità `commitOnEnd`**: introdotta per il colore per-scena. Senza, ogni
+movimento nel SB square / hue slider triggera un write `set_attribute` su
+`Sketchup.active_model`, che su modelli con AttributeObserver di plugin terzi
+costa ~5s/write → picker inutilizzabile. Regola da estendere ad ogni futuro
+picker dove il colore NON ha effetto live nel viewport (es. cosmetico,
+tag/etichetta). Per i picker dove il colore SI vede live nel viewport
+(Background/Sky color del Mini Style Manager), live mode è quello giusto.
+
+**Recenti**: gli ultimi 5 colori applicati sono salvati su `localStorage`
+chiave `sm_color_popup_recent`, fallback in-memory se CEF non lo supporta.
+Push automatico in `hide()` se è stato applicato un colore valido. Sono
+condivisi tra TUTTI i picker (main window + Mini Style Manager), perché
+vivono nello stesso modulo `SMColorPopup`. CEF di SU 2019 supporta
+localStorage (verificato).
+
+**Enter/Esc nel campo hex** chiudono il popup (= commit in `commitOnEnd`,
+no-op altrimenti perché il colore è già stato applicato live).
+
+**Style dialog**: `style_dialog.js` aveva una IIFE privata `ColorPopup`
+identica; ora aliassata a `window.SMColorPopup` (il legacy `_ColorPopupLegacy`
+è dead-code lasciato come fallback rapido, mai inizializzato). Switching ha
+portato anche la riga "Recenti" e l'Enter-commit nel Style Manager.
+
+**Per-scene color** (`Core::SceneModel`):
+- Storage in dict `'SMP_scene_colors'` su `Sketchup.active_model`, key = uid
+  scena, value = `'#rrggbb'`. Separato da `SMP_style_colors` (stesso pattern
+  ma per scene invece che per stili). API `get_scene_color(uid)` /
+  `set_scene_color(uid, hex)`. Empty/nil = clear.
+- Esposto in `scene_hash` come `color` (overlay buffer NON applica color edits:
+  niente staging defer per il colore, è write diretto immediato — è
+  un'operazione cosmetica e usare il commit-on-end del picker basta a
+  contenere i write).
+- Callback Ruby: `sm_scene_set_color { id, color }`.
+- Bridge JS: `SMBridge.setSceneColor(id, hex)`.
+
+**UX**: solo lo swatch a destra del nome scena prende il colore (la row NON
+viene tintata). Vuoto = pattern a quadretti CSS, pieno = `background` inline.
+Click sx swatch → popup `allowNone:true, commitOnEnd:true`. Click dx swatch
+→ `setSceneColor(id, '')` immediato (clear shortcut).
+
+**Trappola**: il popup HTML markup deve essere presente nel dialog che lo
+usa. Se aggiungi un nuovo dialog che vuole usare `SMColorPopup`, copia il
+blocco `<div id="sm-color-popup">...</div>` da `index.html` e includi
+`color_popup.css` + `color_popup.js`. Il markup è duplicato tra `index.html`
+e `style.html` (in CEF non si possono includere fragment HTML).
+
 ## Note per future sessioni
 
 - Lavoro condiviso tra postazioni → utente continuerà da un'altra macchina.
