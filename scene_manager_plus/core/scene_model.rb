@@ -158,7 +158,8 @@ module SceneManagerPlus
         # Ordiniamo per display_name (nickname o nativo) così la lettera
         # rispecchia ciò che l'utente vede nel plugin. Stabile a parità di
         # nome (rare).
-        nick_dict = m.attribute_dictionary(Core::Styles::NICKNAMES_DICT, false) rescue nil
+        nick_dict  = m.attribute_dictionary(Core::Styles::NICKNAMES_DICT, false) rescue nil
+        color_dict = m.attribute_dictionary(Core::Styles::COLORS_DICT, false)    rescue nil
         pairs = m.styles.map do |s|
           name = s.name.to_s
           nick = nick_dict ? nick_dict[name].to_s : ''
@@ -168,7 +169,9 @@ module SceneManagerPlus
         pairs.each_with_index.map do |(name, disp), i|
           nick = nick_dict ? nick_dict[name].to_s : ''
           nick = nil if nick.empty?
-          { name: name, display_name: disp, nick: nick, letter: letter_for_index(i) }
+          color = color_dict ? color_dict[name].to_s : ''
+          color = nil if color.empty?
+          { name: name, display_name: disp, nick: nick, color: color, letter: letter_for_index(i) }
         end
       rescue => e
         warn "[SM+] styles_map: #{e.class}: #{e.message}"
@@ -576,14 +579,18 @@ module SceneManagerPlus
       end
 
       # Update scene da viewport corrente (come bottone "Update" nativo).
-      def update_from_view(id)
+      # only_keys: nil       → comportamento standard (tutti i flag use_*? attivi
+      #                        sulla pagina vengono catturati).
+      # only_keys: [keys...] → modalità "parziale": cattura solo le property
+      #                        elencate (sottoinsieme di FLAG_KEYS). Ignora lo
+      #                        stato corrente dei use_*? sulla pagina.
+      def update_from_view(id, only_keys: nil)
         p = find_by_id(id)
         unless p
           warn "[SM+] update_from_view: page not found id=#{id.inspect}"
           return false
         end
         # Page#update accetta una bitmask combinata di costanti PAGE_USE_*.
-        # Usiamo i flag attualmente settati sulla pagina (getter con "?").
         # Le costanti PAGE_USE_* variano tra versioni di SketchUp. Faccio un
         # lookup difensivo: prendo il valore se la costante esiste, altrimenti 0.
         # Mappatura verificata su SU 2019 19.3.253 (tools/dump-page-use.rb):
@@ -595,46 +602,60 @@ module SceneManagerPlus
         #   use_hidden_layers?  → PAGE_USE_LAYER_VISIBILITY (32)
         #   use_hidden?         → PAGE_USE_HIDDEN (16)
         #   use_section_planes? → PAGE_USE_SECTION_PLANES (64)
-        # In più: se use_style? e c'è una modifica pending allo stile attivo
-        # (styles.active_style_changed), mostriamo un dialog Yes/No/Cancel
-        # equivalente al "Warning - Scenes and Styles" nativo SU.
         sc = lambda do |*names|
           names.each do |n|
             return Object.const_get(n) if Object.const_defined?(n)
           end
           0
         end
+
+        if only_keys.nil?
+          keys = []
+          keys << 'use_camera'             if p.use_camera?
+          keys << 'use_axes'               if p.use_axes?
+          keys << 'use_rendering_options'  if p.use_rendering_options?
+          keys << 'use_style'              if p.use_style?
+          keys << 'use_shadow_info'        if p.use_shadow_info?
+          keys << 'use_hidden_layers'      if p.use_hidden_layers?
+          keys << 'use_hidden'             if p.use_hidden?
+          keys << 'use_section_planes'     if p.use_section_planes?
+        else
+          keys = only_keys.map(&:to_s)
+        end
+
         mask = 0
-        mask |= sc.call('PAGE_USE_CAMERA')                                  if p.use_camera?
+        mask |= sc.call('PAGE_USE_CAMERA')                                  if keys.include?('use_camera')
         # Axes: tenta costante dedicata, se assente piggyback su CAMERA.
-        mask |= sc.call('PAGE_USE_AXES', 'PAGE_USE_CAMERA')                 if p.use_axes?
-        mask |= sc.call('PAGE_USE_RENDERING_OPTIONS')                       if p.use_rendering_options?
+        mask |= sc.call('PAGE_USE_AXES', 'PAGE_USE_CAMERA')                 if keys.include?('use_axes')
+        mask |= sc.call('PAGE_USE_RENDERING_OPTIONS')                       if keys.include?('use_rendering_options')
         # Style: tenta costanti dedicate (PAGE_USE_STYLE su SU recenti,
         # PAGE_USE_SKETCHCS su 2019). Se nessuna esiste, piggyback su
         # RENDERING_OPTIONS. Lo script tools/dump-page-use.rb permette di
         # verificare quali costanti esistono realmente nella versione SU.
-        mask |= sc.call('PAGE_USE_STYLE', 'PAGE_USE_SKETCHCS', 'PAGE_USE_RENDERING_OPTIONS') if p.use_style?
-        mask |= sc.call('PAGE_USE_SHADOWINFO')                              if p.use_shadow_info?
-        mask |= sc.call('PAGE_USE_LAYER_VISIBILITY', 'PAGE_USE_HIDDEN_LAYERS') if p.use_hidden_layers?
-        mask |= sc.call('PAGE_USE_HIDDEN_GEOMETRY', 'PAGE_USE_HIDDEN')       if p.use_hidden?
-        mask |= sc.call('PAGE_USE_ACTIVE_SECTION_PLANES', 'PAGE_USE_SECTION_PLANES') if p.use_section_planes?
+        mask |= sc.call('PAGE_USE_STYLE', 'PAGE_USE_SKETCHCS', 'PAGE_USE_RENDERING_OPTIONS') if keys.include?('use_style')
+        mask |= sc.call('PAGE_USE_SHADOWINFO')                              if keys.include?('use_shadow_info')
+        mask |= sc.call('PAGE_USE_LAYER_VISIBILITY', 'PAGE_USE_HIDDEN_LAYERS') if keys.include?('use_hidden_layers')
+        mask |= sc.call('PAGE_USE_HIDDEN_GEOMETRY', 'PAGE_USE_HIDDEN')       if keys.include?('use_hidden')
+        mask |= sc.call('PAGE_USE_ACTIVE_SECTION_PLANES', 'PAGE_USE_SECTION_PLANES') if keys.include?('use_section_planes')
         if mask == 0
-          all_const = sc.call('PAGE_USE_ALL')
-          puts "[SM+] update_from_view: no flags resolved on '#{p.name}', fallback PAGE_USE_ALL=#{all_const}"
-          mask = all_const
+          if only_keys.nil?
+            all_const = sc.call('PAGE_USE_ALL')
+            puts "[SM+] update_from_view: no flags resolved on '#{p.name}', fallback PAGE_USE_ALL=#{all_const}"
+            mask = all_const
+          else
+            puts "[SM+] update_from_view: partial mode with empty/unknown keys=#{only_keys.inspect}, nothing to do"
+            return false
+          end
         end
 
         # === Style "dirty" handling ===
-        # Page#update con PAGE_USE_SKETCHCS attivato lega la scena allo stile
-        # corrente, MA non sposta le modifiche pending dello stile dalla "in-
-        # memory dirty copy" allo stile salvato. Il dialog nativo SU "Update
-        # Scene" intercetta questo caso con un dialog "Warning - Scenes and
-        # Styles" (Save as new / Update selected / Don't save). Replichiamo
-        # la stessa scelta — solo se: lo style bit è nel mask, esistono i
-        # metodi API necessari, e c'è effettivamente una modifica pending.
+        # In modalità standard scatta se la pagina ha use_style?; in modalità
+        # parziale scatta se l'utente ha esplicitamente chiesto di aggiornare
+        # 'use_style' (intent diretto, non gated dallo state della pagina).
+        wants_style = keys.include?('use_style')
         style_bit = sc.call('PAGE_USE_STYLE', 'PAGE_USE_SKETCHCS')
         styles    = model.styles
-        if p.use_style? && style_bit != 0 \
+        if wants_style && style_bit != 0 \
            && styles.respond_to?(:active_style_changed) \
            && styles.active_style_changed
           style_name = (styles.active_style.name rescue 'current')

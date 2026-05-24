@@ -152,6 +152,67 @@
       setStatus('Captured viewport');
     });
 
+    // Right-click → menu di scelta singola property da aggiornare. Solo le
+    // property attualmente checkate in "Properties to save" sono offerte:
+    // coerente con l'intento "salva ciò che la scena dichiara di tracciare".
+    $('#btn-update-view').addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      const id = SMP.state && SMP.state.scene && SMP.state.scene.id;
+      if (!id) return;
+      const flags = SMP.state.scene.flags || {};
+      const items = FLAG_UI.filter(item => item.keys.every(k => flags[k]));
+      if (items.length === 0) {
+        setStatus('No properties enabled');
+        return;
+      }
+      showPartialMenu(e.clientX, e.clientY, items, (keys) => {
+        call('sm_props_update_from_view', { id: id, flags: keys });
+        setStatus('Captured ' + keys.length + ' property');
+      });
+    });
+
     call('sm_props_ready');
   });
+
+  function showPartialMenu(x, y, items, onPick) {
+    hidePartialMenu();
+    const menu = document.createElement('div');
+    menu.className = 'context-menu';
+    menu.id = 'smp-ctx-menu';
+    const header = document.createElement('div');
+    header.className = 'ctx-header';
+    header.textContent = 'Update only…';
+    menu.appendChild(header);
+    items.forEach(item => {
+      const row = document.createElement('div');
+      row.className = 'ctx-item';
+      row.textContent = item.label;
+      row.addEventListener('click', () => {
+        hidePartialMenu();
+        onPick(item.keys);
+      });
+      menu.appendChild(row);
+    });
+    document.body.appendChild(menu);
+    const mw = menu.offsetWidth, mh = menu.offsetHeight;
+    const vw = window.innerWidth, vh = window.innerHeight;
+    if (x + mw > vw) x = Math.max(0, vw - mw - 2);
+    if (y + mh > vh) y = Math.max(0, vh - mh - 2);
+    menu.style.left = x + 'px';
+    menu.style.top  = y + 'px';
+    setTimeout(() => {
+      document.addEventListener('mousedown', onDocMouseDownClose, true);
+      window.addEventListener('blur', hidePartialMenu);
+    }, 0);
+  }
+  function hidePartialMenu() {
+    const m = document.getElementById('smp-ctx-menu');
+    if (m && m.parentNode) m.parentNode.removeChild(m);
+    document.removeEventListener('mousedown', onDocMouseDownClose, true);
+    window.removeEventListener('blur', hidePartialMenu);
+  }
+  function onDocMouseDownClose(e) {
+    const m = document.getElementById('smp-ctx-menu');
+    if (m && !m.contains(e.target)) hidePartialMenu();
+  }
 })();

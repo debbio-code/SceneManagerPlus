@@ -151,6 +151,19 @@ module SceneManagerPlus
           Dialog.push_state if defined?(Dialog)
         end
 
+        # Set/clear del colore del badge associato allo stile. Stringa vuota
+        # o null = nessun colore (badge usa lo style default CSS).
+        dlg.add_action_callback('sm_style_set_color') do |_ctx, payload|
+          data = parse(payload)
+          hex  = data['color'].to_s
+          ok = Core::Styles.set_color(@style_name, hex)
+          unless ok
+            ::UI.messagebox("Invalid color value: #{hex.inspect}\nExpected #rrggbb hex string.")
+          end
+          push_state
+          Dialog.push_state if defined?(Dialog)
+        end
+
         # Mostra la lista delle scene che usano lo stile corrente in un messagebox.
         # Usato dal footer della finestra stile (overlay CSS problematico in CEF SU 2019).
         dlg.add_action_callback('sm_style_show_scenes') do |_ctx|
@@ -177,6 +190,7 @@ module SceneManagerPlus
         state = {
           style_name:   @style_name,
           nickname:     Core::Styles.get_nickname(@style_name),
+          badge_color:  Core::Styles.get_color(@style_name),
           scene_id:     @scene_id,
           scenes_count: using.size,
           scenes_list:  using.map { |p| p.name },

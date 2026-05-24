@@ -76,7 +76,8 @@ module SceneManagerPlus
           data = parse(payload)
           id   = data['id'] || @scene_id
           if id
-            Core::SceneModel.update_from_view(id)
+            only = data['flags'].is_a?(Array) && !data['flags'].empty? ? data['flags'] : nil
+            Core::SceneModel.update_from_view(id, only_keys: only)
             Dialog.push_state
             push_state
           end

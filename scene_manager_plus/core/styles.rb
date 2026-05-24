@@ -19,6 +19,7 @@ module SceneManagerPlus
 
       SLOT_PREFIX     = 'SM+ Slot '.freeze
       NICKNAMES_DICT  = 'SMP_style_nicks'.freeze
+      COLORS_DICT     = 'SMP_style_colors'.freeze
       MAX_SLOT_INDEX  = 25 # vedi tools/generate-slot-styles.rb
 
       def model
@@ -243,6 +244,49 @@ module SceneManagerPlus
         d.delete_key(style_name.to_s) if d.respond_to?(:delete_key)
       end
 
+      # ── Badge color API ──────────────────────────────────────────────
+      # Colore associato a uno stile, mostrato come background del letter
+      # badge nella main window. Salvato come hex '#rrggbb' in un dict
+      # dedicato (separato dai nickname). Stringa vuota / nil = nessun
+      # colore (badge usa lo style default CSS).
+
+      def get_color(style_name)
+        m = model
+        return nil unless m && style_name
+        v = m.get_attribute(COLORS_DICT, style_name.to_s, nil)
+        return nil if v.nil?
+        s = v.to_s.strip
+        return nil if s.empty?
+        s =~ /^#?[0-9a-fA-F]{6}$/ ? (s.start_with?('#') ? s.downcase : "##{s.downcase}") : nil
+      end
+
+      def set_color(style_name, hex)
+        m = model
+        return false unless m && style_name
+        key = style_name.to_s
+        s   = hex.to_s.strip
+        if s.empty?
+          m.set_attribute(COLORS_DICT, key, '')
+          return true
+        end
+        s = s.sub(/^#/, '')
+        return false unless s =~ /^[0-9a-fA-F]{6}$/
+        m.set_attribute(COLORS_DICT, key, "##{s.downcase}")
+        true
+      end
+
+      def clear_color(style_name)
+        set_color(style_name, '')
+      end
+
+      def remove_color_attr(style_name)
+        m = model
+        return unless m && style_name
+        d = m.attribute_dictionary(COLORS_DICT, false)
+        return unless d
+        d.delete_key(style_name.to_s) if d.respond_to?(:delete_key)
+      end
+
       # True se `name` è già usato come display_name (nickname o nativo) da
       # uno stile diverso da `except_native`. Case-sensitive, trim'ata.
       def display_name_taken?(name, except_native: nil)
@@ -307,7 +351,10 @@ module SceneManagerPlus
         # dal nickname dict dopo.
         to_remove = unused_styles.map { |h| h[:name] }
         m.styles.purge_unused
-        to_remove.each { |n| remove_nickname_attr(n) }
+        to_remove.each do |n|
+          remove_nickname_attr(n)
+          remove_color_attr(n)
+        end
         to_remove
       end
     end

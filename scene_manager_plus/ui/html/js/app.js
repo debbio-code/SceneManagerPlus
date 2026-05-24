@@ -59,6 +59,19 @@ window.SM = (function () {
     if (!styleName || !state.styles) return '?';
     return styleByNameMap[styleName] ? styleByNameMap[styleName].letter : '?';
   }
+  function colorForStyle(styleName) {
+    if (!styleName || !state.styles) return null;
+    var e = styleByNameMap[styleName];
+    return e && e.color ? e.color : null;
+  }
+  // Calcola colore testo leggibile (nero/bianco) dato un bg hex.
+  function readableTextColor(hex) {
+    var s = String(hex || '').replace('#', '');
+    if (!/^[0-9a-f]{6}$/i.test(s)) return null;
+    var r = parseInt(s.substr(0,2),16), g = parseInt(s.substr(2,2),16), b = parseInt(s.substr(4,2),16);
+    var lum = 0.299*r + 0.587*g + 0.114*b;
+    return lum > 140 ? '#1a1a1a' : '#ffffff';
+  }
 
   function setState(newState) {
     state = newState || state;
@@ -220,9 +233,15 @@ window.SM = (function () {
         letterTitle = 'Style: ' + scene.style_name;
       }
     }
+    var letterStyle = '';
+    var letterColor = colorForStyle(scene.style_name);
+    if (letterColor) {
+      var txt = readableTextColor(letterColor) || '#cfd8e3';
+      letterStyle = ' style="background:' + letterColor + ';color:' + txt + ';border-color:' + letterColor + '"';
+    }
     row.innerHTML =
       '<span class="grip" title="' + escapeAttr(gripTitle) + '">&#x2630;</span>' +
-      '<span class="row-style-letter" title="' + escapeAttr(letterTitle) + '">' + letter + '</span>' +
+      '<span class="row-style-letter" title="' + escapeAttr(letterTitle) + '"' + letterStyle + '>' + letter + '</span>' +
       '<input type="checkbox" class="export-cb" title="Include in batch export (ignored when exporting only selected scenes)"' +
         (included ? ' checked' : '') + '>' +
       '<span class="idx">' + idx + '</span>' +
@@ -303,7 +322,14 @@ window.SM = (function () {
       var item = document.createElement('div');
       item.className = 'ctx-item style-pick';
       if (s.name === currentName) item.classList.add('current');
-      var letterSpan = '<span class="ctx-letter">' + s.letter + '</span>';
+      // Applica il colore custom solo se NON è lo stile correntemente attivo
+      // per la scena (l'item .current ha già il giallo come segnale visivo).
+      var letterStyleAttr = '';
+      if (s.color && s.name !== currentName) {
+        var txt = readableTextColor(s.color) || '#cfd8e3';
+        letterStyleAttr = ' style="background:' + s.color + ';color:' + txt + ';border-color:' + s.color + '"';
+      }
+      var letterSpan = '<span class="ctx-letter"' + letterStyleAttr + '>' + s.letter + '</span>';
       item.innerHTML = letterSpan + '<span class="ctx-name"></span>';
       // Display: nickname se presente, altrimenti nome nativo.
       var label = s.display_name || s.name;
@@ -317,6 +343,53 @@ window.SM = (function () {
         }
       });
       menu.appendChild(item);
+    });
+    document.body.appendChild(menu);
+    var mw = menu.offsetWidth, mh = menu.offsetHeight;
+    var vw = window.innerWidth, vh = window.innerHeight;
+    if (x + mw > vw) x = Math.max(0, vw - mw - 2);
+    if (y + mh > vh) y = Math.max(0, vh - mh - 2);
+    menu.style.left = x + 'px';
+    menu.style.top  = y + 'px';
+    setTimeout(function () {
+      document.addEventListener('mousedown', onDocMouseDownCloseMenu, true);
+      window.addEventListener('blur', hideContextMenu);
+    }, 0);
+  }
+
+  // Mapping identico a properties.js: stesso ordine, stessa fusione
+  // use_style+use_rendering_options in 'Style and Fog'.
+  var UPDATE_FLAG_UI = [
+    { label: 'Camera Location',       keys: ['use_camera'] },
+    { label: 'Hidden Geometry',       keys: ['use_hidden'] },
+    { label: 'Visible Layers',        keys: ['use_hidden_layers'] },
+    { label: 'Active Section Planes', keys: ['use_section_planes'] },
+    { label: 'Style and Fog',         keys: ['use_style', 'use_rendering_options'] },
+    { label: 'Shadow Settings',       keys: ['use_shadow_info'] },
+    { label: 'Axes Location',         keys: ['use_axes'] }
+  ];
+  function item_all_flags_on(keys, scene) {
+    return keys.every(function (k) { return scene && scene.flags && scene.flags[k]; });
+  }
+
+  function showUpdatePartialMenu(x, y, items, onPick) {
+    hideContextMenu();
+    var menu = document.createElement('div');
+    menu.className = 'context-menu';
+    menu.id = 'sm-ctx-menu';
+    var header = document.createElement('div');
+    header.className = 'ctx-header';
+    header.textContent = 'Update only…';
+    menu.appendChild(header);
+    items.forEach(function (item) {
+      var row = document.createElement('div');
+      row.className = 'ctx-item';
+      row.textContent = item.label;
+      row.addEventListener('click', function () {
+        hideContextMenu();
+        onPick(item.keys);
+      });
+      menu.appendChild(row);
     });
     document.body.appendChild(menu);
     var mw = menu.offsetWidth, mh = menu.offsetHeight;
@@ -654,6 +727,27 @@ window.SM = (function () {
       // dialog per singola pagina; con N scene selezionate l'utente potrebbe
       // vedere il dialog più volte se più scene usano lo stesso stile dirty.
       selection.forEach(function (id) { SMBridge.updateFromView(id); });
+    });
+    // Right-click → menu di scelta singola property da aggiornare. Il menu
+    // mostra la UNIONE delle property checkate nelle scene selezionate;
+    // l'update viene applicato solo alle scene che hanno quella property
+    // attiva (resta coerente con "Properties to save" della singola scena).
+    $('btn-update').addEventListener('contextmenu', function (e) {
+      e.preventDefault();
+      if (selection.length === 0) return;
+      var scenes = selection.map(sceneById).filter(Boolean);
+      if (scenes.length === 0) return;
+      var items = UPDATE_FLAG_UI.filter(function (item) {
+        return scenes.some(function (s) {
+          return item.keys.every(function (k) { return s.flags && s.flags[k]; });
+        });
+      });
+      if (items.length === 0) return;
+      showUpdatePartialMenu(e.clientX, e.clientY, items, function (keys) {
+        scenes.forEach(function (s) {
+          if (item_all_flags_on(keys, s)) SMBridge.updateFromView(s.id, keys);
+        });
+      });
     });
     $('btn-delete').addEventListener('click', function () {
       if (selection.length === 0) return;

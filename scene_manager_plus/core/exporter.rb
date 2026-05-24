@@ -610,10 +610,11 @@ module SceneManagerPlus
       #  - se `explicit_dir` non vuoto e directory esistente → usa quella
       #  - altrimenti, usa la regola "Immagini" accanto al .skp:
       #    A) Immagini non esiste → la crea, esporta lì
-      #    B) Immagini esiste e contiene file → crea Superate/NN (NN=successivo
-      #       a quelli esistenti, padded 2 cifre), sposta i file di Immagini in
-      #       Superate/NN, esporta in Immagini ora svuotata
-      #    C) Immagini esiste ma vuota → esporta lì
+      #    B) Immagini esiste e contiene file (oltre alla sotto-cartella
+      #       Superate) → crea Immagini/Superate/NN (NN successivo a quelli
+      #       esistenti, padded 2 cifre), sposta tutti i file di Immagini lì
+      #       (skippando Superate stesso), esporta in Immagini ora svuotata
+      #    C) Immagini esiste ma vuota (o contiene solo Superate) → esporta lì
       #  - se il modello non ha un path (untitled) → ritorna [nil, [], err]
       # Ritorna [out_dir|nil, notes[], err|nil].
       def resolve_output_dir(explicit_dir, model_path)
@@ -640,16 +641,20 @@ module SceneManagerPlus
           return [img_dir, notes, nil]
         end
 
-        existing = Dir.entries(img_dir).reject { |n| n == '.' || n == '..' }
+        # Lista contenuto di Immagini escludendo "." ".." e la sotto-cartella
+        # Superate stessa (che ospita gli archivi precedenti).
+        existing = Dir.entries(img_dir).reject do |n|
+          n == '.' || n == '..' || n == 'Superate'
+        end
         return [img_dir, notes, nil] if existing.empty? # Case C
 
-        # Case B: archive
-        superate_dir = File.join(skp_dir, 'Superate')
+        # Case B: archive — Superate vive DENTRO Immagini/
+        superate_dir = File.join(img_dir, 'Superate')
         unless File.directory?(superate_dir)
           begin
             Dir.mkdir(superate_dir)
           rescue => e
-            return [nil, [], "Could not create 'Superate': #{e.message}"]
+            return [nil, [], "Could not create 'Immagini/Superate': #{e.message}"]
           end
         end
 
@@ -663,7 +668,7 @@ module SceneManagerPlus
         begin
           Dir.mkdir(archive_dir)
         rescue => e
-          return [nil, [], "Could not create 'Superate/#{archive_label}': #{e.message}"]
+          return [nil, [], "Could not create 'Immagini/Superate/#{archive_label}': #{e.message}"]
         end
 
         moved = 0
@@ -679,7 +684,7 @@ module SceneManagerPlus
             notes << "Could not archive '#{name}': #{e.message}"
           end
         end
-        notes << "Archived #{moved} file(s) → Superate/#{archive_label}/"
+        notes << "Archived #{moved} file(s) → Immagini/Superate/#{archive_label}/"
         notes << "(#{failed} failed)" if failed > 0
         [img_dir, notes, nil]
       end

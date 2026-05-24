@@ -19,13 +19,13 @@ module SceneManagerPlus
           'include_scene_name' => true
         },
         'export' => {
-          'width'     => 1920,
-          'height'    => 1080,
-          'format'    => 'png',
+          'width'     => 3000,
+          'height'    => 1500,
+          'format'    => 'jpg',
           'antialias' => true,
           'transparent' => false,
           'output_dir' => '',
-          'line_scale_multiplier' => 2.0
+          'line_scale_multiplier' => 1.5
         },
         'preview' => {
           # Moltiplicatore independente di EdgeWidth/ProfileWidth applicato
@@ -36,7 +36,7 @@ module SceneManagerPlus
         },
         'logo' => {
           'enabled'      => false,
-          'use_default'  => true,
+          'use_default'  => false,
           'path'         => '',
           'width_pct'    => 15,
           'offset_x'     => 20,
@@ -54,13 +54,12 @@ module SceneManagerPlus
           'opacity'     => 100
         },
         'ui' => {
-          'show_order_banner'       => true,
+          'show_order_banner'       => false,
           # Workaround bug SU 2019: alla riapertura del file le Scene Tabs
           # possono restare visibili nel viewport anche se nel menu sono off.
           # Se true, all'apertura del dialog SM+ inviamo due send_action di
-          # toggle (on→off) per ri-sincronizzare. Default false: chi vuole
-          # le tabs ON non vuole vederle nascoste da noi.
-          'hide_scene_tabs_on_open' => false
+          # toggle (on→off) per ri-sincronizzare.
+          'hide_scene_tabs_on_open' => true
         },
         'titleblock' => {
           # Cartiglio sotto l'immagine (canvas extension). Coesiste con
@@ -68,16 +67,17 @@ module SceneManagerPlus
           # Cliente = naming.prefix_custom (riuso). Tavola = stesso {nnn}
           # del naming pattern. Dati aziendali + logo: bundlati in
           # assets/titleblock/{company.txt, logo.jpg}.
-          'enabled'        => false,
+          'enabled'        => true,
           'height_px'      => 160,
           'font_family'    => 'Century Gothic',
           # Dropdown a tre voci, gestite UI-side. Default identici.
           'project_by'     => 'Arch. Nicola Debiasi',
-          'designer'       => 'Arch. Nicola Debiasi',
+          # '' = "Nessuno" nella dropdown UI (value="" della option).
+          'designer'       => '',
           # Formato libero (es. "20/05/2026"). Vuoto = data del momento di export.
           'date_override'  => '',
           # Fase del progetto: 'Preliminare' | 'Definitivo' | 'Esecutivo'
-          'project_phase'  => 'Definitivo'
+          'project_phase'  => 'Preliminare'
         }
       }.freeze
 

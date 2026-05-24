@@ -239,6 +239,7 @@ window.SMS = (function () {
     if (nickEl && document.activeElement !== nickEl) {
       nickEl.value = state.nickname || '';
     }
+    setBadgeColor(state.badge_color || '');
     $('scope-note').textContent =
       'Applies to all scenes using this style (' + (state.scenes_count || 0) + '). ' +
       'To affect only one scene, duplicate via SketchUp Window → Styles, then reassign.';
@@ -270,6 +271,30 @@ window.SMS = (function () {
   function hideScenesOverlay() {
     var overlay = $('scenes-overlay');
     if (overlay) overlay.classList.add('hidden');
+  }
+
+  // Aggiorna swatch + input del Badge color senza scatenare commit.
+  function setBadgeColor(hex) {
+    var sw = $('sw-BadgeColor');
+    var el = $('ctrl-BadgeColor');
+    if (!sw || !el) return;
+    var h = normalizeHex(hex);
+    if (document.activeElement !== el) el.value = h || '';
+    if (h) {
+      sw.style.background = h;
+      sw.classList.remove('swatch-empty');
+    } else {
+      sw.style.background = '';
+      sw.classList.add('swatch-empty');
+    }
+  }
+
+  function commitBadgeColor(hex) {
+    var s = (hex == null ? '' : String(hex)).trim();
+    var prev = state.badge_color || '';
+    if (s !== '' && !normalizeHex(s)) return; // invalid → no-op
+    if ((normalizeHex(s) || '') === prev) return;
+    call('sm_style_set_color', { color: s });
   }
 
   // Commit del nickname: invia a Ruby. Vuoto = clear nickname.
@@ -411,6 +436,42 @@ window.SMS = (function () {
         }
       });
       nickEl.addEventListener('blur', commitNickname);
+    }
+    // Badge color: swatch apre il popup HSV; hex input + bottone clear.
+    var bSw = $('sw-BadgeColor');
+    var bEl = $('ctrl-BadgeColor');
+    var bClr = $('btn-clear-badgecolor');
+    if (bSw && bEl) {
+      bSw.addEventListener('click', function () {
+        var current = normalizeHex(state.badge_color) || '#cccccc';
+        ColorPopup.show(bSw, current, function (hex) {
+          bEl.value = hex;
+          bSw.style.background = hex;
+          bSw.classList.remove('swatch-empty');
+          commitBadgeColor(hex);
+        });
+      });
+      bEl.addEventListener('input', function () {
+        var h = normalizeHex(bEl.value);
+        if (h) { bSw.style.background = h; bSw.classList.remove('swatch-empty'); }
+      });
+      function commitFromInput() {
+        var v = bEl.value.trim();
+        if (v === '') { commitBadgeColor(''); return; }
+        var h = normalizeHex(v);
+        if (!h) { setBadgeColor(state.badge_color || ''); return; }
+        bEl.value = h;
+        commitBadgeColor(h);
+      }
+      bEl.addEventListener('change', commitFromInput);
+      bEl.addEventListener('blur', commitFromInput);
+      bEl.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') { e.preventDefault(); bEl.blur(); }
+        else if (e.key === 'Escape') { setBadgeColor(state.badge_color || ''); bEl.blur(); }
+      });
+    }
+    if (bClr) {
+      bClr.addEventListener('click', function () { commitBadgeColor(''); });
     }
     listenersBound = true;
   }

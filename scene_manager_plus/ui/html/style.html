@@ -12,6 +12,14 @@
         <span class="hdr-label">Nickname:</span>
         <input type="text" id="style-nickname" class="hdr-nick-input" placeholder="(none — uses native name)" autocomplete="off" spellcheck="false">
       </div>
+      <div class="hdr-title hdr-badgecolor">
+        <span class="hdr-label">Badge color:</span>
+        <span class="color-control">
+          <span id="sw-BadgeColor" class="swatch swatch-clickable" title="Click to pick a color"></span>
+          <input type="text" id="ctrl-BadgeColor" class="hex" maxlength="7" placeholder="(none)" autocomplete="off" spellcheck="false">
+          <button id="btn-clear-badgecolor" class="badge-clear-btn" title="Clear color">✕</button>
+        </span>
+      </div>
       <div id="style-native" class="hdr-native">Native: <span id="style-name">—</span></div>
       <div id="scope-note" class="hdr-scope">Applies to all scenes using this style</div>
     </header>

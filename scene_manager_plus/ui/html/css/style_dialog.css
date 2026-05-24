@@ -126,6 +126,28 @@ body {
 }
 .swatch-clickable { cursor: pointer; }
 .swatch-clickable:hover { border-color: #4ea1ff; }
+/* Stato "nessun colore" del swatch: pattern a quadretti per indicare vuoto */
+.swatch.swatch-empty {
+  background:
+    linear-gradient(45deg, #555 25%, transparent 25%, transparent 75%, #555 75%) 0 0 / 8px 8px,
+    linear-gradient(45deg, #555 25%, #2b2b2b 25%, #2b2b2b 75%, #555 75%) 4px 4px / 8px 8px;
+}
+
+.hdr-badgecolor { margin-top: 6px; }
+.hdr-badgecolor .hex { width: 78px; flex: 0 0 auto; }
+.badge-clear-btn {
+  background: #2b2b2b;
+  color: #888;
+  border: 1px solid #1e1e1e;
+  border-radius: 2px;
+  width: 22px;
+  height: 22px;
+  cursor: pointer;
+  padding: 0;
+  font-size: 11px;
+  line-height: 1;
+}
+.badge-clear-btn:hover { background: #4a2b2b; color: #fff; border-color: #6a3838; }
 
 /* Custom color picker popup (CEF SU 2019 non supporta <input type="color">) */
 .sm-color-popup {

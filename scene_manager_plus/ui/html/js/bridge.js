@@ -25,7 +25,11 @@ window.SMBridge = (function () {
                      },
     selectPage:      function (id)    { call('sm_select_page', { id: id }); },
     updatePage:      function (data)  { call('sm_update_page', data); },
-    updateFromView:  function (id)    { call('sm_update_from_view', { id: id }); },
+    updateFromView:  function (id, flags) {
+                       var payload = { id: id };
+                       if (flags && flags.length) payload.flags = flags;
+                       call('sm_update_from_view', payload);
+                     },
     assignStyle:     function (id, name) { call('sm_assign_style', { id: id, style_name: name }); },
     openStyle:       function (id, name) { call('sm_open_style', { id: id, style_name: name }); },
     newStyle:        function (id)       { call('sm_style_new', { id: id }); },

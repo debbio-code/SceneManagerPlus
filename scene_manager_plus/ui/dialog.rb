@@ -236,7 +236,8 @@ module SceneManagerPlus
 
         dlg.add_action_callback('sm_update_from_view') do |_ctx, payload|
           data = parse(payload)
-          Core::SceneModel.update_from_view(data['id'])
+          only = data['flags'].is_a?(Array) && !data['flags'].empty? ? data['flags'] : nil
+          Core::SceneModel.update_from_view(data['id'], only_keys: only)
           push_state
         end
 

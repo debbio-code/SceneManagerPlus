@@ -311,15 +311,22 @@ Vedi `core/settings.rb` per i defaults.
 Pattern naming: `{prefix}{sep}{nnn}{sep}{scene_name}` con `prefix_mode` =
 `skp_name` | `custom` | `none`.
 
-## Export — smart output dir: `Immagini` / `Superate/NN`
+## Export — smart output dir: `Immagini` / `Immagini/Superate/NN`
 
 Quando `export.output_dir` è vuoto:
 - **Caso A**: `Immagini/` non esiste accanto al `.skp` → la crea, esporta lì
-- **Caso B**: `Immagini/` esiste e ha file → crea `Superate/NN/` con NN
-  successivo (zero-padded 2 cifre), SPOSTA i file di `Immagini` lì, poi
-  esporta in `Immagini` ora svuotata
-- **Caso C**: `Immagini/` esiste vuota → esporta lì
+- **Caso B**: `Immagini/` esiste e ha file (oltre alla sotto-cartella
+  `Superate`) → crea `Immagini/Superate/NN/` con NN successivo
+  (zero-padded 2 cifre), SPOSTA i file di `Immagini` lì (skippando la
+  cartella `Superate` stessa), poi esporta in `Immagini` ora svuotata
+- **Caso C**: `Immagini/` esiste vuota (o contiene solo `Superate/`) →
+  esporta lì
 - Se il `.skp` non è salvato → fallback al picker manuale
+
+`Superate` vive **dentro** `Immagini/` (non al fianco del `.skp`) così la
+root del progetto resta pulita. Conseguenza: la scansione di Immagini per
+decidere Caso B vs C **deve escludere** la entry `Superate`, altrimenti
+dopo il primo archivio scatterebbe sempre Caso B.
 
 Le note di archivio entrano negli `errors` mostrati nel messagebox finale.
 
@@ -1071,6 +1078,52 @@ $c = $c -replace [char]0x2019, "'"
 Quando devi editare un file JS con caratteri Unicode (frecce, em-dash,
 ecc.), verifica sempre dopo l'edit con il check sopra. Pattern alternativo:
 fai l'edit con `Write` invece di `Edit` quando puoi.
+
+## Update from view parziale (tasto destro)
+
+Right-click su `btn-update` (toolbar) e su `btn-update-view` (Properties dialog)
+mostra un menu "Update only…" con le property attive per la scena selezionata.
+Click su una voce aggiorna **solo quella property** invece di tutte.
+
+**API Ruby**: `SceneModel.update_from_view(id, only_keys: nil)`:
+- `only_keys: nil` → comportamento standard (gated su `p.use_*?`).
+- `only_keys: ['use_camera', ...]` → bitmask costruita solo da quelle chiavi,
+  ignora lo stato corrente della pagina. La lista può contenere qualsiasi
+  sottoinsieme di `FLAG_KEYS`.
+
+**Dirty-style guard**: in modalità parziale scatta se `'use_style'` è in
+`only_keys` (intent esplicito), non se `p.use_style?`. Stesso dialog
+YES/NO/CANCEL.
+
+**Bridge**: `SMBridge.updateFromView(id, flags)` — `flags` array opzionale
+propagato nel payload `{ id, flags }` e letto come `data['flags']` in Ruby.
+
+**Menu JS**: `UPDATE_FLAG_UI` in `app.js` (stesso ordine di `FLAG_UI` in
+`properties.js`); `showUpdatePartialMenu` ricicla `hideContextMenu` /
+`onDocMouseDownCloseMenu` già esistenti. In Properties usa helper locali
+(`showPartialMenu` / `hidePartialMenu`) per non interferire col main dialog.
+
+## Badge color per-stile
+
+Colore associato a uno stile, mostrato come background del letter badge
+nella main window e nel picker right-click.
+
+**Storage**: dict `'SMP_style_colors'` su `Sketchup.active_model` (separato
+da `SMP_style_nicks`). API: `Core::Styles.get_color / set_color / clear_color /
+remove_color_attr`. `purge_unused_styles` pulisce anche colori orfani.
+
+**Push**: `styles_map` include `:color`; `StyleDialog.push_state` include
+`badge_color`; callback `sm_style_set_color { color: '#rrggbb'|'' }`.
+
+**UI Style Manager**: riga "Badge color" sotto il Nickname nell'header —
+swatch + hex input + bottone ✕. Swatch apre lo stesso `ColorPopup` HSV di
+Background/Sky. Swatch "vuoto" = pattern CSS a quadretti (`.swatch-empty`).
+
+**Contrasto automatico** (`readableTextColor` in `app.js`): dato un colore
+hex calcola luminanza e sceglie testo `#1a1a1a` (scuro) o `#ffffff` (chiaro).
+
+**Picker**: inline color sul `.ctx-letter` applicato **solo** se lo stile
+NON è `.current` (per non sovrascrivere il giallo che segnala lo stile attivo).
 
 ## Note per future sessioni
 
