@@ -379,6 +379,18 @@ window.SM = (function () {
     return keys.every(function (k) { return scene && scene.flags && scene.flags[k]; });
   }
 
+  var _flashUpdateTimer = null;
+  function flashUpdateOk() {
+    var btn = $('btn-update');
+    if (!btn) return;
+    btn.classList.add('flash-ok');
+    if (_flashUpdateTimer) clearTimeout(_flashUpdateTimer);
+    _flashUpdateTimer = setTimeout(function () {
+      btn.classList.remove('flash-ok');
+      _flashUpdateTimer = null;
+    }, 2850);
+  }
+
   function showUpdatePartialMenu(x, y, items, onPick) {
     hideContextMenu();
     var menu = document.createElement('div');
@@ -734,6 +746,7 @@ window.SM = (function () {
       // dialog per singola pagina; con N scene selezionate l'utente potrebbe
       // vedere il dialog più volte se più scene usano lo stesso stile dirty.
       selection.forEach(function (id) { SMBridge.updateFromView(id); });
+      flashUpdateOk();
     });
     // Right-click → menu di scelta singola property da aggiornare. Il menu
     // mostra la UNIONE delle property checkate nelle scene selezionate;
@@ -754,6 +767,7 @@ window.SM = (function () {
         scenes.forEach(function (s) {
           if (item_all_flags_on(keys, s)) SMBridge.updateFromView(s.id, keys);
         });
+        flashUpdateOk();
       });
     });
     $('btn-delete').addEventListener('click', function () {

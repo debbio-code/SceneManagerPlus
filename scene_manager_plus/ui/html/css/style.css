@@ -109,6 +109,9 @@ body {
 .toolbar button:disabled { opacity: 0.4; cursor: default; }
 .toolbar .spacer { flex: 1; }
 
+#btn-update { transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease; }
+#btn-update.flash-ok { background: #aaff00; border-color: #7fcc00; color: #1a1a1a; }
+
 #btn-defer.active {
   background: #b8782e;
   border-color: #8a4e1a;
