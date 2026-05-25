@@ -1184,6 +1184,27 @@ blocco `<div id="sm-color-popup">...</div>` da `index.html` e includi
 `color_popup.css` + `color_popup.js`. Il markup è duplicato tra `index.html`
 e `style.html` (in CEF non si possono includere fragment HTML).
 
+## Shortcut globali → `UI::Command`, non keydown JS
+
+CEF HtmlDialog `STYLE_UTILITY` in SU 2019 **non riceve keydown** in modo
+affidabile, neanche col focus dentro al dialog: l'OS instrada quasi sempre
+i tasti a SketchUp. Quindi un listener `document.addEventListener('keydown')`
+nel JS può servire SOLO per shortcut interni che funzionano dopo un click
+nel dialog (tipo Arrow/PageUp/PageDown già esistenti) — **non per shortcut
+globali**.
+
+Per shortcut "veri" (utente preme tasto col viewport in focus): registrare
+una `UI::Command` con menu item visibile, e lasciare che l'utente assegni
+lo shortcut da **Window → Preferences → Shortcuts** (SU 2019 espone lì
+solo i comandi che hanno una voce di menu — se rimuovi `menu_text` o non
+fai `add_item`, la voce sparisce anche dal dialog Shortcuts).
+
+Esempio in `main.rb` (Plugins → "Scene Manager+: Jump to active scene"):
+riassegnare `model.pages.selected_page = model.pages.selected_page`
+ri-applica camera/stile/layers (= clic sul nome scena).
+
+`cmd.set_shortcut("J")` non è stato testato; per ora si assegna a mano.
+
 ## Note per future sessioni
 
 - Lavoro condiviso tra postazioni → utente continuerà da un'altra macchina.
