@@ -599,8 +599,16 @@ module SceneManagerPlus
           end
           if attrs['flags'].is_a?(Hash)
             attrs['flags'].each do |k, v|
+              next unless FLAG_KEYS.include?(k)
               setter = "#{k}="
-              p.send(setter, v) if FLAG_KEYS.include?(k) && p.respond_to?(setter)
+              next unless p.respond_to?(setter)
+              v_bool  = v ? true : false
+              current = p.send("#{k}?") ? true : false
+              # Scrivere flag già allineati corrompe le scene Match Photo
+              # (writes spuri svegliano il subsystem C++; al successivo
+              # pages.selected_page = page → BugSplat). Idem benefit lato
+              # modelli con AttributeObserver di plugin terzi.
+              p.send(setter, v_bool) if current != v_bool
             end
           end
           model.commit_operation
@@ -928,6 +936,18 @@ module SceneManagerPlus
         target_style = m.styles.find { |s| s.name.to_s == style_name.to_s }
         unless target_style
           warn "[SM+] assign_style: style '#{style_name}' not found in model"
+          return false
+        end
+        # Match Photo guard: page.update(STYLE|RO) su una scena MP corrompe
+        # lo stile interno MP (background foto) → BugSplat. Anche se non
+        # crashasse, sovrascrivere lo stile MP con uno normale toglie la
+        # foto di sfondo. Blocchiamo con messagebox esplicativo.
+        if matchphoto?(p)
+          ::UI.messagebox(
+            "Scene '#{p.name}' is a Match Photo scene.\n\n" \
+            "Reassigning a regular style would remove the photo background " \
+            "and can crash SketchUp. Operation cancelled."
+          )
           return false
         end
         # Costanti PAGE_USE_* — lookup difensivo come in update_from_view

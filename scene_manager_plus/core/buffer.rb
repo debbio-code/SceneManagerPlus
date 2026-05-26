@@ -197,8 +197,14 @@ module SceneManagerPlus
             end
             if attrs['flags'].is_a?(Hash)
               attrs['flags'].each do |k, v|
+                next unless SceneModel::FLAG_KEYS.include?(k)
                 setter = "#{k}="
-                page.send(setter, v) if SceneModel::FLAG_KEYS.include?(k) && page.respond_to?(setter)
+                next unless page.respond_to?(setter)
+                v_bool  = v ? true : false
+                current = page.send("#{k}?") ? true : false
+                # Vedi SceneModel.update_page: writes spuri sui flag già
+                # allineati crashano le scene Match Photo.
+                page.send(setter, v_bool) if current != v_bool
               end
             end
             applied_edits += 1

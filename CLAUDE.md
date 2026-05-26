@@ -737,6 +737,63 @@ Documentazione di partenza: `tools/dump-matchphoto-api.rb` (cosa l'API
 Ruby espone su Match Photo) e `tools/dump-matchphoto-attrs.rb` (cosa
 salva negli attribute_dictionaries — niente di utile).
 
+### Crash pattern: write spuri sui flag `use_*` su scene MP (2026-05)
+
+Scoperto debuggando interazione con plugin terzo `3dg_photomatch`: scrivere
+TUTTI i flag `page.use_xxx = v` (anche su quelli già allineati al valore
+corrente) dentro una singola `start_operation` su una scena Match Photo
+→ il subsystem MP C++ marca lo state interno come dirty → al successivo
+`pages.selected_page = page` (anche un semplice click in SM+) il restore
+re-entra sopra uno state non più consistente → BugSplat.
+
+Riprodotto deterministicamente: scrivere un singolo flag (`p.use_axes = true`)
+non crasha; iterare e scrivere tutti gli 8 con `p.send(setter, v)` senza
+controllo se sono cambiati → crash al re-attivare la scena.
+
+**Fix applicato** in `SceneModel.update_page` e `Buffer.flush!`: scrivere
+un flag solo se `current != v`. Beneficio collaterale anche sui modelli con
+AttributeObserver di plugin terzi (meno write = meno freeze a 5s).
+
+**Regola generale per il futuro**: ogni volta che si scrivono attributi/flag
+su `Sketchup::Page` in loop, fare il diff `current_value != new_value` prima
+del setter. Non è solo questione di performance — è questione di stabilità.
+
+### Crash pattern: `page.update(STYLE|RO)` su scena MP
+
+`SceneModel.assign_style` (e di riflesso "+ New style…") su scena MP
+crashava SU. Causa: `page.update` con bit STYLE+RO sovrascrive lo stile
+MP interno (background foto) → corruzione → splat. Anche se non crashasse,
+sostituire lo stile MP con uno normale toglie la foto di sfondo, che è
+l'opposto del comportamento atteso.
+
+**Fix applicato**: guard in `SceneModel.assign_style` che usa `matchphoto?(p)`
+e mostra messagebox + abort. Aggiunta anche guard early in `sm_style_new`
+(`ui/dialog.rb`): senza, `allocate_new_slot_from_viewport` avrebbe già
+allocato uno slot del pool (con le RO MP catturate) prima del rifiuto di
+`assign_style` → slot orfano nel pool e RO inquinate.
+
+### Letter badge "?" = scena MP (sintomo diagnostico)
+
+Se nel main dialog di SM+ il letter badge di una scena mostra `?`, significa
+che `page.style.name` non matcha nessuno stile in `model.styles`. Su scene
+Match Photo questo è normale: lo stile MP interno non è enumerato in
+`model.styles`. È un marker utile per identificare scene MP create da
+plugin terzi anche prima della heuristic `camera.aspect_ratio != 0`.
+
+### `add_matchphoto_page` lascia lo selected_style dirty
+
+`Sketchup::Pages#add_matchphoto_page` configura `model.rendering_options`
+per il background image MP, ma NON committa lo stile risultante. Il Match
+Photo nativo dopo aver creato la scena chiama internamente
+`styles.update_selected_style`. Plugin terzi che usano solo
+`add_matchphoto_page` (es. `3dg_photomatch` nella sua versione originale)
+lasciano lo stile precedente "dirty" — se l'utente clicca "Update" nello
+Style panel inquina lo stile uscente con le RO Match Photo. Disastro.
+
+**Per chi scrive plugin che usano `add_matchphoto_page`**: chiamare
+`model.styles.update_selected_style` subito dopo, come fa il nativo.
+Applicato nella nostra copia patchata di `3dg_photomatch.rb`.
+
 ## Style pool + nickname per-modello (Fase 1A — "+ New style…")
 
 **Problema risolto**: SU 2019 Ruby API non permette di:

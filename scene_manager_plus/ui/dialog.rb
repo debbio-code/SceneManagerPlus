@@ -258,6 +258,18 @@ module SceneManagerPlus
         dlg.add_action_callback('sm_style_new') do |_ctx, payload|
           data = parse(payload)
           scene_id = data['id']
+          # Match Photo guard: evita di allocare uno slot (che catturerebbe
+          # le RO MP, inclusa la foto di sfondo) per poi non poterlo
+          # assegnare. assign_style rifiuta comunque le MP scene, ma senza
+          # questo guard lo slot resterebbe orfano nel pool.
+          scene_page = scene_id ? Core::SceneModel.find_by_id(scene_id) : nil
+          if scene_page && Core::SceneModel.matchphoto?(scene_page)
+            ::UI.messagebox(
+              "Scene '#{scene_page.name}' is a Match Photo scene.\n\n" \
+              "Cannot assign a custom style to a Match Photo scene."
+            )
+            next
+          end
           result = Core::Styles.prompt_nickname_loop(
             title: 'Scene Manager+ — Nuovo stile',
             label: 'Nickname (vuoto = usa nome nativo "Slot NN"):'
