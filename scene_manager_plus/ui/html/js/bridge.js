@@ -33,6 +33,7 @@ window.SMBridge = (function () {
     assignStyle:     function (id, name) { call('sm_assign_style', { id: id, style_name: name }); },
     setSceneColor:   function (id, hex)  { call('sm_scene_set_color', { id: id, color: hex || '' }); },
     openStyle:       function (id, name) { call('sm_open_style', { id: id, style_name: name }); },
+    openNativeStylesPanel: function (id) { call('sm_open_native_styles_panel', { id: id }); },
     newStyle:        function (id)       { call('sm_style_new', { id: id }); },
     deleteScenes:    function (ids)   { call('sm_delete', { ids: ids }); },
     newSceneFromView:function ()      { call('sm_new_scene_from_view'); },

@@ -414,7 +414,8 @@ module SceneManagerPlus
             flags:           flags_hash(p),
             export_included: export_included?(p),
             style_name:      page_style_name(p),
-            color:           get_scene_color(page_id(p))
+            color:           get_scene_color(page_id(p)),
+            is_matchphoto:   matchphoto?(p)
           }
         end
       end
@@ -519,6 +520,7 @@ module SceneManagerPlus
           export_included: export_included?(page),
           style_name:      page_style_name(page),
           color:           get_scene_color(uid),
+          is_matchphoto:   matchphoto?(page),
           pending:         false
         }
         # Overlay buffer edits
@@ -598,12 +600,23 @@ module SceneManagerPlus
             p.description = attrs['description'].to_s
           end
           if attrs['flags'].is_a?(Hash)
+            mp = matchphoto?(p)
             attrs['flags'].each do |k, v|
               next unless FLAG_KEYS.include?(k)
               setter = "#{k}="
               next unless p.respond_to?(setter)
               v_bool  = v ? true : false
               current = p.send("#{k}?") ? true : false
+              # MP guard: enabling use_style/use_rendering_options ("Style
+              # and Fog") on a Match Photo scene puts MP into a state that
+              # crashes SU on the next pages.selected_page = page. MP scene
+              # owns its internal style (background photo) — toggling those
+              # flags means "use the saved style", which on MP means trying
+              # to override the MP style → corruption.
+              if mp && v_bool && %w[use_style use_rendering_options].include?(k)
+                warn "[SM+] update_page: skipping #{k}=true on Match Photo scene '#{p.name}' (would crash on activation)"
+                next
+              end
               # Scrivere flag già allineati corrompe le scene Match Photo
               # (writes spuri svegliano il subsystem C++; al successivo
               # pages.selected_page = page → BugSplat). Idem benefit lato
@@ -983,6 +996,10 @@ module SceneManagerPlus
       def select_page(id)
         p = find_by_id(id)
         return false unless p
+        # Skip se è già la pagina attiva: riassegnare la stessa pagina su
+        # scena Match Photo con use_style=true può scatenare un restore-cycle
+        # interno del subsystem MP → BugSplat. No-op semantico in ogni caso.
+        return true if model.pages.selected_page == p
         model.pages.selected_page = p
         true
       end

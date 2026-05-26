@@ -672,6 +672,22 @@ Override ID via `Sketchup.write_default('SceneManagerPlus', 'axes_cmd_id', N)`.
 
 ## Match Photo: limite invalicabile dell'API Ruby SU 2019
 
+> ⚠️ **Sibling repo accoppiato**: `3dg_photomatch` vive in
+> `C:\Claude\Sketchup Plugins\3dg_photomatch\` (remote
+> https://github.com/debbio-code/3dg_photomatch). Le guard MP descritte
+> qui sotto esistono **per le scene create da quel plugin**. Modifiche
+> a una delle due parti vanno verificate sull'altra:
+>
+> - Se cambia `3dg_photomatch.rb` (es. flag impostati alla creazione MP,
+>   chiamata `update_selected_style`, comportamento `add_matchphoto_page`),
+>   le guard di SM+ qui sotto potrebbero richiedere aggiornamento.
+> - Se cambia un guard di SM+ (es. block in `assign_style`, `update_page`,
+>   Properties checkbox "Style and Fog ↗"), assicurarsi che il
+>   comportamento atteso da 3dg_photomatch sia ancora coperto.
+> - Il `CLAUDE.md` di 3dg_photomatch contiene la stessa storia da
+>   prospettiva opposta — leggi entrambi se devi toccare il dominio MP.
+
+
 **Sintomo**: creare una nuova scena dal plugin partendo da una scena Match
 Photo fa sparire la foto di sfondo nella nuova scena.
 

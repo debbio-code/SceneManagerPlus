@@ -252,6 +252,23 @@ module SceneManagerPlus
           StyleDialog.show_for(data['id'], data['style_name'])
         end
 
+        # Right-click sul badge stile di una scena Match Photo: apriamo
+        # l'inspector Styles nativo, stesso principio di "Style and Fog
+        # → Scenes panel" in Properties dialog. Il picker normale è
+        # comunque bloccato per MP (assign_style e + New style rifiutano),
+        # quindi questa è la via "che funziona" per l'utente.
+        dlg.add_action_callback('sm_open_native_styles_panel') do |_ctx, payload|
+          data = parse(payload)
+          id = data['id']
+          if id
+            p = Core::SceneModel.find_by_id(id)
+            if p && Sketchup.active_model.pages.selected_page != p
+              Sketchup.active_model.pages.selected_page = p
+            end
+          end
+          ::UI.show_inspector('Styles')
+        end
+
         # "Nuovo stile" da picker right-click. Alloca lo slot successivo
         # dal pool, prompt per nickname (skippabile, retry su duplicato),
         # poi assegna lo stile alla scena di contesto.

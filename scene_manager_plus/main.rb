@@ -57,6 +57,54 @@ module SceneManagerPlus
     jump_cmd.menu_text = 'Jump to active scene'
     ::UI.menu('Plugins').add_item(jump_cmd)
 
+    # "Save all properties on active scene": setta a true tutti gli 8 flag
+    # use_* della scena attualmente attiva (= equivalente a ticcare tutti i
+    # checkbox "Properties to save" nel pannello Window → Scenes nativo).
+    # Pensato per chi vuole rimuovere il pannello nativo dal workflow.
+    # Su scene Match Photo skippa use_style e use_rendering_options: il combo
+    # crasha SU all'attivazione successiva (vedi sezione Match Photo in
+    # CLAUDE.md). Su scene normali setta tutti 8.
+    # Esposto come UI::Command → assegnabile shortcut via Window → Preferences
+    # → Shortcuts.
+    save_all_cmd = ::UI::Command.new("#{PLUGIN_NAME}: Save all properties on active scene") do
+      m = Sketchup.active_model
+      page = m && m.pages && m.pages.selected_page
+      if page.nil?
+        ::UI.beep
+        next
+      end
+      mp = SceneManagerPlus::Core::SceneModel.matchphoto?(page)
+      keys = SceneManagerPlus::Core::SceneModel::FLAG_KEYS.dup
+      if mp
+        keys -= %w[use_style use_rendering_options]
+      end
+      m.start_operation('SM+ Save all properties', true)
+      begin
+        keys.each do |k|
+          setter = "#{k}="
+          next unless page.respond_to?(setter)
+          current = page.send("#{k}?") ? true : false
+          page.send(setter, true) if current != true
+        end
+        m.commit_operation
+      rescue => e
+        m.abort_operation
+        warn "[SM+] save_all_cmd: #{e.class}: #{e.message}"
+      end
+      if mp
+        Sketchup.status_text = "Saved all properties (6/8, Match Photo: Style/Fog skipped)"
+      else
+        Sketchup.status_text = "Saved all 8 properties on '#{page.name}'"
+      end
+      # Refresh state nelle dialog SM+ aperte
+      SceneManagerPlus::UI::Dialog.push_state rescue nil
+    end
+    save_all_cmd.tooltip = 'Enable all "Properties to save" on the active scene'
+    save_all_cmd.status_bar_text =
+      'Tick all Properties to save on the currently-active scene (skips Style/Fog on Match Photo)'
+    save_all_cmd.menu_text = 'Save all properties on active scene'
+    ::UI.menu('Plugins').add_item(save_all_cmd)
+
     # Auto-riapertura come i pannelli nativi: se la finestra era aperta
     # all'ultima chiusura di SU, la ri-mostriamo. Salvato in Dialog#show e
     # Dialog#set_on_closed via write_default('SceneManagerPlus', 'main_dialog_open').

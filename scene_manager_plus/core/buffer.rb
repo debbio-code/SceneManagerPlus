@@ -196,12 +196,20 @@ module SceneManagerPlus
               page.description = attrs['description'].to_s
             end
             if attrs['flags'].is_a?(Hash)
+              mp = SceneModel.matchphoto?(page)
               attrs['flags'].each do |k, v|
                 next unless SceneModel::FLAG_KEYS.include?(k)
                 setter = "#{k}="
                 next unless page.respond_to?(setter)
                 v_bool  = v ? true : false
                 current = page.send("#{k}?") ? true : false
+                # MP guard: vedi SceneModel.update_page. use_style /
+                # use_rendering_options = true su scena MP crasha
+                # all'attivazione successiva.
+                if mp && v_bool && %w[use_style use_rendering_options].include?(k)
+                  warn "[SM+] Buffer.flush!: skipping #{k}=true on MP scene '#{page.name}'"
+                  next
+                end
                 # Vedi SceneModel.update_page: writes spuri sui flag già
                 # allineati crashano le scene Match Photo.
                 page.send(setter, v_bool) if current != v_bool

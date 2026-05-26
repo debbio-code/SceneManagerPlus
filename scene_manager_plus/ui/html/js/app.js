@@ -874,8 +874,11 @@ window.SM = (function () {
       var row = e.target.closest('.scene-row');
       if (!row || !row.dataset || !row.dataset.id) return;
       var sc = sceneById(row.dataset.id);
-      if (!sc || !sc.style_name) return;
-      SMBridge.openStyle(row.dataset.id, sc.style_name);
+      if (!sc) return;
+      // style_name può essere vuoto su scene Match Photo (stile interno MP
+      // non esposto coerentemente). Apriamo lo stesso: lato Ruby
+      // StyleDialog.show_for risolve dal page.style dopo l'attivazione.
+      SMBridge.openStyle(row.dataset.id, sc.style_name || '');
     });
     listEl.addEventListener('contextmenu', function (e) {
       if (!e.target.classList || !e.target.classList.contains('row-style-letter')) return;
@@ -883,6 +886,15 @@ window.SM = (function () {
       e.stopPropagation();
       var row = e.target.closest('.scene-row');
       if (!row || !row.dataset || !row.dataset.id) return;
+      var sc = sceneById(row.dataset.id);
+      // MP scenes: tutte le voci del picker sono comunque bloccate (assign,
+      // + New style…) perché la modifica via Ruby corrompe lo state MP.
+      // Apriamo l'inspector Styles nativo, stesso principio di "Style and Fog
+      // → Scenes panel" in Properties dialog.
+      if (sc && sc.is_matchphoto) {
+        SMBridge.openNativeStylesPanel(row.dataset.id);
+        return;
+      }
       showStylePickerMenu(e.clientX, e.clientY, row.dataset.id);
     }, true);
 
@@ -1022,6 +1034,27 @@ window.SM = (function () {
 
     if (SMBridge && SMBridge.log) SMBridge.log('JS build=' + window.__SM_BUILD__);
     SMBridge.ready();
+
+    // Refresh dello state quando la finestra principale riprende focus: copre
+    // il caso "utente cambia flag via inspector Scenes nativo (es. Style and
+    // Fog) e torna su SM+" — senza questo il grip (giallo/rosso) resta sullo
+    // state vecchio. Pattern identico a quello della Properties dialog.
+    //
+    // Debounce 500ms: focus + visibilitychange spesso firano ravvicinati
+    // sulla stessa interazione utente. push_state è read-only ma su modelli
+    // pesanti con tante scene/stili costa comunque qualche ms — evitiamo
+    // doppioni inutili.
+    var lastRefresh = 0;
+    function debouncedRefresh() {
+      var now = Date.now();
+      if (now - lastRefresh < 500) return;
+      lastRefresh = now;
+      SMBridge.refresh();
+    }
+    window.addEventListener('focus', debouncedRefresh);
+    document.addEventListener('visibilitychange', function () {
+      if (!document.hidden) debouncedRefresh();
+    });
   }
 
   function safeInit() {

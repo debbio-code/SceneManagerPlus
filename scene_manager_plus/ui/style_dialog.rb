@@ -69,20 +69,36 @@ module SceneManagerPlus
 
       def show_for(scene_id, style_name)
         @scene_id   = scene_id
-        @style_name = style_name
         # Attiva la scena di contesto così il viewport mostra lo stile in edit
         # e l'utente vede live le modifiche. Skip se defer mode (per coerenza
         # con il resto: in defer non tocchiamo la pagina nel viewport).
+        page = nil
         unless Core::Buffer.deferred?
           m = Sketchup.active_model
           if m && scene_id
-            p = Core::SceneModel.find_by_id(scene_id)
-            m.pages.selected_page = p if p
+            page = Core::SceneModel.find_by_id(scene_id)
+            # Skip se è già la pagina attiva: riassegnare la stessa MP scene
+            # (con use_style=true) può scatenare un restore-cycle interno
+            # del subsystem Match Photo → BugSplat.
+            if page && m.pages.selected_page != page
+              m.pages.selected_page = page
+            end
           end
         end
+        # Su scene Match Photo style_name arriva vuoto (lo stile MP interno
+        # non è enumerato in model.styles). Risolviamo da page.style dopo
+        # l'attivazione: SU rende selected_style = stile MP automaticamente
+        # all'attivazione, quindi update_selected_style colpirà lo stile
+        # giusto anche senza select_style! esplicito.
+        if (style_name.nil? || style_name.to_s.empty?) && page && page.respond_to?(:style)
+          style_name = (page.style.name.to_s rescue '')
+        end
+        @style_name = style_name
         # Assicura che lo stile target sia attivo, così update_selected_style
-        # committerà le modifiche al posto giusto.
-        select_style!(style_name)
+        # committerà le modifiche al posto giusto. No-op se non trovato in
+        # model.styles (caso MP): l'attivazione della pagina sopra ha già
+        # messo lo selected_style giusto.
+        select_style!(style_name) if style_name && !style_name.empty?
 
         if @dialog && @dialog.visible?
           @dialog.bring_to_front

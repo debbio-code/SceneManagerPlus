@@ -30,19 +30,43 @@
     { label: 'Axes Location',         keys: ['use_axes'] },
   ];
 
-  function renderFlags(flagKeys, flags) {
+  function renderFlags(flagKeys, flags, isMatchPhoto) {
     const el = $('#prop-flags');
     // Filtra agli item che hanno almeno una key presente in flagKeys (defensive)
     const items = FLAG_UI.filter(item => item.keys.some(k => flagKeys.indexOf(k) !== -1));
-    el.innerHTML = items.map(item => {
+    el.innerHTML = items.map((item, idx) => {
       // Checked se TUTTE le keys dell'item sono true (coerenza con SU nativo)
       const checked = item.keys.every(k => flags && flags[k]) ? 'checked' : '';
       const fsAttr = escapeHtml(JSON.stringify(item.keys));
-      return '<label><input type="checkbox" data-flags="' + fsAttr + '" ' + checked + '>' +
+      // MP "Style and Fog" (use_style + use_rendering_options): scrivere questi
+      // flag via Ruby setter su scena MP corrompe lo state interno → crash.
+      // L'inspector Scenes nativo invece scrive via un pathway C++ "pulito" che
+      // non corrompe nulla. Quindi: checkbox cliccabile, ma il click apre
+      // l'inspector nativo invece di togglare via Ruby.
+      const isStyleFog = item.keys.indexOf('use_style') !== -1;
+      const isMPStyleFog = isMatchPhoto && isStyleFog;
+      const title = isMPStyleFog
+        ? ' title="Match Photo scene: click to open the native Scenes panel (the only safe way to set Style and Fog on MP scenes)."'
+        : '';
+      const labelClass = isMPStyleFog ? ' class="flag-mp-fog"' : '';
+      const dataMp = isMPStyleFog ? ' data-mp-fog="1"' : '';
+      return '<label' + labelClass + title + dataMp + '><input type="checkbox" data-flags="' + fsAttr + '" ' + checked + '>' +
              '<span>' + escapeHtml(item.label) + '</span></label>';
     }).join('');
     el.querySelectorAll('input[type=checkbox]').forEach(cb => {
-      cb.addEventListener('change', commit);
+      const label = cb.closest('label');
+      if (label && label.dataset && label.dataset.mpFog === '1') {
+        // Intercetta il click PRIMA che il checkbox cambi state (in capturing),
+        // previene il toggle, e apre l'inspector Scenes nativo via Ruby.
+        const handler = (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          call('sm_props_open_scenes_panel', { id: SMP.state && SMP.state.scene ? SMP.state.scene.id : null });
+        };
+        label.addEventListener('click', handler, true);
+      } else {
+        cb.addEventListener('change', commit);
+      }
     });
   }
 
@@ -109,7 +133,7 @@
     const descEl = $('#prop-desc');
     if (document.activeElement !== nameEl) nameEl.value = s.name || '';
     if (document.activeElement !== descEl) descEl.value = s.description || '';
-    renderFlags(state.flag_keys || [], s.flags || {});
+    renderFlags(state.flag_keys || [], s.flags || {}, !!s.is_matchphoto);
     $('#btn-update-view').disabled = false;
     renderPreview(state.preview_url);
     SMP.applying = false;
@@ -150,6 +174,23 @@
       if (!id) return;
       call('sm_props_update_from_view', { id: id });
       setStatus('Captured viewport');
+    });
+
+    // Refresh state quando la finestra Properties riprende focus: copre il caso
+    // "utente apre l'inspector nativo (es. via 'Style and Fog ↗'), toggla un
+    // flag lì, torna su Properties di SM+" — senza questo refresh il checkbox
+    // mostrerebbe lo state vecchio. Debounce 500ms per evitare doppioni
+    // focus+visibilitychange.
+    var lastPropsRefresh = 0;
+    function debouncedPropsRefresh() {
+      var now = Date.now();
+      if (now - lastPropsRefresh < 500) return;
+      lastPropsRefresh = now;
+      call('sm_props_ready');
+    }
+    window.addEventListener('focus', debouncedPropsRefresh);
+    document.addEventListener('visibilitychange', function () {
+      if (!document.hidden) debouncedPropsRefresh();
     });
 
     // Right-click → menu di scelta singola property da aggiornare. Solo le
