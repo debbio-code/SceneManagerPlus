@@ -83,7 +83,7 @@ module SceneManagerPlus
 
       TITLEBLOCK_PEOPLE = [
         'Arch. Nicola Debiasi',
-        'Guido Bazzotti',
+        'Guido',
         'Rahim'
       ].freeze
 
