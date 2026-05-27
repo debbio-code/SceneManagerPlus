@@ -12,6 +12,7 @@
       <div class="hdr-title">
         <span class="hdr-label">Nickname:</span>
         <input type="text" id="style-nickname" class="hdr-nick-input" placeholder="(none — uses native name)" autocomplete="off" spellcheck="false">
+        <button id="btn-open-native" class="hdr-icon-btn" title="Open native SketchUp Styles panel (Window → Styles)">⧉</button>
       </div>
       <div class="hdr-title hdr-badgecolor">
         <span class="hdr-label">Badge color:</span>
@@ -42,7 +43,19 @@
           <option value="2">Nicer</option>
         </select>
       </label>
+      <label class="row">
+        <span class="lbl">Profiles</span>
+        <input type="checkbox" id="ctrl-DrawSilhouettes" data-key="DrawSilhouettes">
+      </label>
+      <div class="row">
+        <span class="lbl">Profile width</span>
+        <span class="num-control">
+          <input type="number" id="ctrl-ProfileWidth" data-key="ProfileWidth" class="num" min="1" max="20" step="1">
+          <button id="btn-profiles-default" class="toggle-btn" title="Turn Profiles ON and set width = 1">→ 1</button>
+        </span>
+      </div>
     </section>
+
 
     <section class="group">
       <h3>Background</h3>

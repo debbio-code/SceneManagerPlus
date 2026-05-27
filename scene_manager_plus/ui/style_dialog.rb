@@ -30,6 +30,7 @@ module SceneManagerPlus
       RO_KEYS = %w[
         EdgeColorMode TransparencySort BackgroundColor DrawHorizon SkyColor
         ModelTransparency DrawHidden DisplaySectionPlanes DisplaySectionCuts
+        DrawSilhouettes ProfileWidth
       ].freeze
 
       # Model Axes display: SU 2019 NON espone state né setter via Ruby API
@@ -146,6 +147,26 @@ module SceneManagerPlus
           toggle_axes!
         end
 
+        # Apre il pannello Styles nativo (Window → Styles). API Trimble
+        # cross-platform, niente command ID Windows da indovinare. Stesso
+        # entry-point usato nel main dialog per il click destro sul badge
+        # stile delle scene Match Photo.
+        dlg.add_action_callback('sm_style_open_native') do |_ctx|
+          begin
+            ::UI.show_inspector('Styles')
+          rescue => e
+            warn "[SM+] open native Styles: #{e.class}: #{e.message}"
+          end
+        end
+
+        # "Profiles → 1": accende DrawSilhouettes e setta ProfileWidth = 1
+        # in un'unica operazione atomica, poi committa lo stile.
+        dlg.add_action_callback('sm_style_set_profiles_default') do |_ctx|
+          apply_changes('DrawSilhouettes' => true, 'ProfileWidth' => 1)
+          push_state
+          Dialog.push_state if defined?(Dialog)
+        end
+
         # Rinomina (nickname) lo stile correntemente in edit. Vuoto = clear.
         # Il nickname vive solo come attributo di modello (vedi Core::Styles).
         # Se conflict (display_name già usato da altro stile), set_nickname
@@ -246,24 +267,39 @@ module SceneManagerPlus
         vals = {}
         RO_KEYS.each do |k|
           v = read_ro(ro, k)
-          vals[k] = serialize_value(v)
+          vals[k] = serialize_value(v, k)
         end
         vals
       end
 
       def read_ro(ro, key)
+        # ProfileWidth: alias non-ufficiale in SU 2019. La chiave RenderingOption
+        # canonica per la larghezza dei profili è SilhouetteWidth (DrawSilhouettes
+        # ON). Leggiamo SilhouetteWidth con fallback, così la UI mostra il valore
+        # reale anche se prima era stato scritto solo ProfileWidth.
+        if key == 'ProfileWidth'
+          v = (ro['SilhouetteWidth'] rescue nil)
+          return v unless v.nil?
+        end
         ro[key]
       rescue
         nil
       end
 
-      def serialize_value(v)
+      def serialize_value(v, key = nil)
         if v.is_a?(Sketchup::Color)
           format('#%02x%02x%02x', v.red, v.green, v.blue)
         elsif v == true || v == false
           v
         elsif v.is_a?(Integer)
           v
+        elsif v.is_a?(Float)
+          if FLOAT01_KEYS.include?(key)
+            # 0..1 → 0..100 con due decimali per la UI
+            (v * 100.0).round(2)
+          else
+            v
+          end
         elsif v.nil?
           nil
         else
@@ -300,6 +336,17 @@ module SceneManagerPlus
             next if coerced.nil? && !v.nil?
             begin
               ro[k] = coerced
+              # ProfileWidth è alias non-ufficiale: la chiave canonica in
+              # SU 2019 è SilhouetteWidth. Scrivendo solo ProfileWidth il
+              # viewport non riflette il cambio. Scriviamo entrambe — quella
+              # ignorata fa no-op silenzioso.
+              if k == 'ProfileWidth'
+                begin
+                  ro['SilhouetteWidth'] = coerced
+                rescue => e2
+                  warn "[SM+] apply_changes: cannot set SilhouetteWidth=#{coerced.inspect}: #{e2.class}: #{e2.message}"
+                end
+              end
             rescue => e
               warn "[SM+] apply_changes: cannot set #{k}=#{coerced.inspect}: #{e.class}: #{e.message}"
             end
@@ -323,8 +370,9 @@ module SceneManagerPlus
       # Coerce JS values verso il tipo atteso da RenderingOptions per ogni chiave.
       # Boolean → bool, Color → Sketchup::Color da hex, Integer → int.
       COLOR_KEYS = %w[BackgroundColor SkyColor].freeze
-      BOOL_KEYS  = %w[DrawHorizon ModelTransparency DrawHidden DisplaySectionPlanes DisplaySectionCuts].freeze
-      INT_KEYS   = %w[EdgeColorMode TransparencySort].freeze
+      BOOL_KEYS  = %w[DrawHorizon ModelTransparency DrawHidden DisplaySectionPlanes DisplaySectionCuts DrawSilhouettes].freeze
+      INT_KEYS   = %w[EdgeColorMode TransparencySort ProfileWidth].freeze
+      FLOAT01_KEYS = %w[].freeze  # Fog spostata in PropertiesDialog (è per-scena, non per-stile)
 
       def coerce_for_ro(key, v)
         if COLOR_KEYS.include?(key)
@@ -333,6 +381,11 @@ module SceneManagerPlus
           !!v
         elsif INT_KEYS.include?(key)
           v.to_i
+        elsif FLOAT01_KEYS.include?(key)
+          f = v.to_f / 100.0
+          f = 0.0 if f < 0.0
+          f = 1.0 if f > 1.0
+          f
         else
           v
         end

@@ -76,6 +76,22 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Bottone icona nell'header (Open native Scenes panel) — stesso stile
+   di .hdr-icon-btn nel mini style manager. */
+.hdr-icon-btn {
+  background: #2b2b2b;
+  border: 1px solid #1e1e1e;
+  color: #aaa;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  cursor: pointer;
+  border-radius: 2px;
+  font-size: 14px;
+  line-height: 1;
+  flex: 0 0 auto;
+}
+.hdr-icon-btn:hover { background: #3a3a3a; color: #fff; border-color: #4ea1ff; }
 
 .body {
   flex: 1;
@@ -199,4 +215,179 @@ fieldset legend {
   font-size: 11px;
   font-style: italic;
 }
+
+/* === Fog section ============================================ */
+#fog-fieldset { padding-top: 10px; }
+.fog-note {
+  background: #2b3a4a;
+  border: 1px solid #1e2a36;
+  color: #cfd8e3;
+  font-size: 11px;
+  padding: 6px 8px;
+  border-radius: 2px;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: space-between;
+}
+.fog-note button {
+  background: #2e6fb8;
+  border: 1px solid #1a4e8a;
+  color: #fff;
+  padding: 3px 8px;
+  border-radius: 2px;
+  cursor: pointer;
+  font-size: 11px;
+}
+.fog-note button:hover { background: #3a85d6; }
+.fog-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #ddd;
+  cursor: pointer;
+  font-size: 12px;
+  margin-bottom: 10px;
+}
+.fog-controls.fog-disabled { opacity: 0.4; pointer-events: none; }
+.fog-axis-title {
+  color: #aaa;
+  font-size: 11px;
+  font-weight: bold;
+  margin-bottom: 2px;
+}
+.fog-num-unit {
+  color: #888;
+  font-size: 11px;
+  font-family: Consolas, "Courier New", monospace;
+  min-width: 22px;
+}
+
+/* Dual-handle slider: track + fill + due thumb posizionati con left:% */
+.fog-slider-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+  padding: 0 4px;
+}
+.fog-axis-lbl {
+  color: #888;
+  font-size: 12px;
+  flex: 0 0 auto;
+  min-width: 8px;
+  text-align: center;
+}
+.fog-axis-lbl-r { font-size: 16px; }
+.fog-dual {
+  position: relative;
+  flex: 1 1 auto;
+  height: 36px; /* spazio per i thumb e per la label sotto */
+}
+.fog-track {
+  position: absolute;
+  top: 14px;
+  left: 0;
+  right: 0;
+  height: 6px;
+  background: #1a1a1a;
+  border: 1px solid #1e1e1e;
+  border-radius: 3px;
+}
+.fog-fill {
+  position: absolute;
+  top: 14px;
+  height: 6px;
+  background: linear-gradient(to right, rgba(78,161,255,0), rgba(78,161,255,0.85));
+  border-radius: 3px;
+  pointer-events: none;
+}
+.fog-thumb {
+  position: absolute;
+  top: 11px;
+  width: 14px;
+  height: 14px;
+  margin-left: -7px; /* centra il thumb sulla posizione */
+  background: #4ea1ff;
+  border: 1px solid #1e1e1e;
+  border-radius: 50%;
+  cursor: grab;
+  z-index: 2;
+}
+.fog-thumb:active { cursor: grabbing; background: #6ab4ff; }
+.fog-thumb-end { background: #ffb84e; }
+.fog-thumb-end:active { background: #ffcd7a; }
+.fog-thumb:focus { outline: 1px solid #4ea1ff; outline-offset: 2px; }
+.fog-thumb .fog-thumb-lbl {
+  position: absolute;
+  top: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  color: #aaa;
+  font-size: 10px;
+  font-family: Consolas, "Courier New", monospace;
+  pointer-events: none;
+  white-space: nowrap;
+}
+.fog-nums {
+  display: flex;
+  gap: 14px;
+  justify-content: flex-start;
+}
+.fog-num-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.fog-num-lbl {
+  color: #aaa;
+  font-size: 11px;
+  font-family: Consolas, "Courier New", monospace;
+  min-width: 50px;
+}
+.fog-num {
+  background: #232323;
+  border: 1px solid #1e1e1e;
+  color: #ddd;
+  padding: 3px 5px;
+  border-radius: 2px;
+  font-size: 12px;
+  font-family: Consolas, "Courier New", monospace;
+  width: 70px;
+  text-align: right;
+  /* Nascondi le freccette native del number input (CEF SU 2019 le rende
+     microscopiche e click-spesso-non-registrato). Sostituiamo con
+     bottoni custom +/- più grandi e con auto-repeat. */
+  -webkit-appearance: textfield;
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+.fog-num::-webkit-inner-spin-button,
+.fog-num::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.fog-num:focus { outline: none; border-color: #4ea1ff; }
+.fog-num:disabled { color: #666; }
+
+/* Bottoni +/- grossi per gli input fog (sostituiscono le freccette native) */
+.fog-step-btn {
+  background: #3a3a3a;
+  border: 1px solid #1e1e1e;
+  color: #ddd;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  cursor: pointer;
+  border-radius: 2px;
+  font-size: 16px;
+  line-height: 1;
+  font-weight: bold;
+  user-select: none;
+  flex: 0 0 auto;
+}
+.fog-step-btn:hover { background: #4a4a4a; border-color: #4ea1ff; }
+.fog-step-btn:active { background: #2b5a86; color: #fff; }
+.fog-step-btn:disabled { opacity: 0.4; cursor: default; }
 

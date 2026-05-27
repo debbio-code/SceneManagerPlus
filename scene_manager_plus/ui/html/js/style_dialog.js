@@ -319,7 +319,41 @@ window.SMS = (function () {
     setBool('DrawHidden', vals.DrawHidden);
     setBool('DisplaySectionPlanes', vals.DisplaySectionPlanes);
     setBool('DisplaySectionCuts', vals.DisplaySectionCuts);
+    setBool('DrawSilhouettes', vals.DrawSilhouettes);
+    setNum('ProfileWidth', vals.ProfileWidth);
+    // Feedback visivo bottone "→ 1": evidenziato quando Profiles è ON e
+    // ProfileWidth = 1 (= stato target che il bottone applicherebbe).
+    var bpd = $('btn-profiles-default');
+    if (bpd) {
+      var alreadyAtTarget = (vals.DrawSilhouettes === true) &&
+                            (Number(vals.ProfileWidth) === 1);
+      bpd.classList.toggle('is-active', alreadyAtTarget);
+      bpd.title = alreadyAtTarget
+        ? 'Already at target (Profiles ON, width = 1)'
+        : 'Turn Profiles ON and set width = 1';
+    }
     if (!listenersBound) bindListeners();
+  }
+
+  function setNum(key, val) {
+    var el = $('ctrl-' + key);
+    var sl = $('slider-' + key);
+    if (!el) return;
+    if (val == null) {
+      el.disabled = true; el.value = '';
+      if (sl) { sl.disabled = true; sl.value = '0'; }
+      return;
+    }
+    el.disabled = false;
+    if (document.activeElement !== el) el.value = String(val);
+    if (sl) {
+      sl.disabled = false;
+      if (document.activeElement !== sl) {
+        // Slider è step intero; clampato al suo range. Non sovrascrivere
+        // se l'utente sta draggando proprio quello slider.
+        sl.value = String(Math.round(Number(val)));
+      }
+    }
   }
 
   function setIntSelect(key, val) {
@@ -363,13 +397,84 @@ window.SMS = (function () {
       btnAxes.addEventListener('click', function () { call('sm_style_toggle_axes'); });
     }
     // Checkbox bool
-    ['DrawHorizon', 'ModelTransparency', 'DrawHidden', 'DisplaySectionPlanes', 'DisplaySectionCuts'].forEach(function (k) {
+    ['DrawHorizon', 'ModelTransparency', 'DrawHidden', 'DisplaySectionPlanes', 'DisplaySectionCuts', 'DrawSilhouettes'].forEach(function (k) {
       var el = $('ctrl-' + k);
       if (!el) return;
       el.addEventListener('change', function () {
         var c = {}; c[k] = !!el.checked; sendChanges(c);
       });
     });
+    // Input numerici (Profile width). Commit su change/blur, non su input:
+    // evita un write per ogni keystroke/spinner-tick.
+    ['ProfileWidth'].forEach(function (k) {
+      var el = $('ctrl-' + k);
+      var sl = $('slider-' + k);
+      if (!el) return;
+      function commit() {
+        var raw = el.value;
+        if (raw === '' || raw == null) {
+          // ripristina valore corrente: non vogliamo scrivere NaN
+          var cur = state.values && state.values[k];
+          el.value = (cur == null ? '' : String(cur));
+          if (sl && cur != null) sl.value = String(Math.round(Number(cur)));
+          return;
+        }
+        var n = parseFloat(raw);
+        if (isNaN(n)) {
+          var cur2 = state.values && state.values[k];
+          el.value = (cur2 == null ? '' : String(cur2));
+          if (sl && cur2 != null) sl.value = String(Math.round(Number(cur2)));
+          return;
+        }
+        if (sl) sl.value = String(Math.round(n));
+        var c = {}; c[k] = n; sendChanges(c);
+      }
+      el.addEventListener('change', commit);
+      el.addEventListener('blur', commit);
+      el.addEventListener('input', function () {
+        // Live-sync visivo dello slider mentre l'utente digita nel numero.
+        // Niente commit a Ruby qui.
+        var n = parseFloat(el.value);
+        if (!isNaN(n) && sl) sl.value = String(Math.round(n));
+      });
+      el.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') { e.preventDefault(); el.blur(); }
+        else if (e.key === 'Escape') {
+          var cur = state.values && state.values[k];
+          el.value = (cur == null ? '' : String(cur));
+          if (sl && cur != null) sl.value = String(Math.round(Number(cur)));
+          el.blur();
+        }
+      });
+
+      // Slider (solo per fog): durante drag aggiorna soltanto il numero
+      // accanto. Commit a Ruby solo al rilascio del mouse (event 'change'),
+      // per non spammare write_attribute su modelli con observer terzo.
+      if (sl) {
+        sl.addEventListener('input', function () {
+          // Live: sincronizza il numero accanto, nessun commit Ruby.
+          el.value = sl.value;
+        });
+        sl.addEventListener('change', function () {
+          var n = parseFloat(sl.value);
+          if (isNaN(n)) return;
+          el.value = String(n);
+          var c = {}; c[k] = n; sendChanges(c);
+        });
+      }
+    });
+    // Bottone "Open native Styles panel" nell'header
+    var btnNative = $('btn-open-native');
+    if (btnNative) {
+      btnNative.addEventListener('click', function () { call('sm_style_open_native'); });
+    }
+    // Bottone "Profiles → 1": atomico DrawSilhouettes=true + ProfileWidth=1
+    var btnProfilesDefault = $('btn-profiles-default');
+    if (btnProfilesDefault) {
+      btnProfilesDefault.addEventListener('click', function () {
+        call('sm_style_set_profiles_default');
+      });
+    }
     // Hex color: text input + swatch clickabile che apre il popup HSV custom.
     // (Niente più <input type="color">, broken in CEF SU 2019.)
     ['BackgroundColor', 'SkyColor'].forEach(function (k) {

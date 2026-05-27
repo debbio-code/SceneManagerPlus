@@ -10,6 +10,7 @@
     <header class="header">
       <span class="label">Scene</span>
       <span id="scene-title" class="title">—</span>
+      <button id="btn-open-scenes-native" class="hdr-icon-btn" title="Open native SketchUp Scenes panel (Window → Scenes)">⧉</button>
     </header>
 
     <main class="body">
@@ -26,6 +27,51 @@
       <fieldset>
         <legend>Properties to save</legend>
         <div id="prop-flags"></div>
+      </fieldset>
+
+      <fieldset id="fog-fieldset">
+        <legend>Fog</legend>
+        <div class="fog-note" id="fog-activate-note" style="display:none">
+          Fog is read/edited from the active scene's rendering options.
+          <button id="btn-fog-activate" type="button">Activate this scene</button>
+        </div>
+        <label class="fog-toggle">
+          <input type="checkbox" id="fog-display">
+          <span>Display Fog</span>
+        </label>
+        <div class="fog-controls" id="fog-controls">
+          <div class="fog-axis-title">Distance</div>
+          <div class="fog-slider-wrap">
+            <span class="fog-axis-lbl fog-axis-lbl-l">0</span>
+            <div id="fog-dual" class="fog-dual">
+              <div class="fog-track"></div>
+              <div id="fog-fill" class="fog-fill"></div>
+              <div id="fog-thumb-start" class="fog-thumb fog-thumb-start" tabindex="0">
+                <span class="fog-thumb-lbl">0%</span>
+              </div>
+              <div id="fog-thumb-end" class="fog-thumb fog-thumb-end" tabindex="0">
+                <span class="fog-thumb-lbl">100%</span>
+              </div>
+            </div>
+            <span class="fog-axis-lbl fog-axis-lbl-r">∞</span>
+          </div>
+          <div class="fog-nums">
+            <span class="fog-num-row">
+              <span class="fog-num-lbl" title="Distance from camera where fog density is 0% (fog begins)">0% at</span>
+              <button type="button" class="fog-step-btn" data-step="start" data-dir="-1" title="Decrease (hold for repeat, Shift = ×10, Ctrl = ÷10)">−</button>
+              <input type="number" id="fog-num-start" class="fog-num">
+              <button type="button" class="fog-step-btn" data-step="start" data-dir="+1" title="Increase (hold for repeat, Shift = ×10, Ctrl = ÷10)">+</button>
+              <span class="fog-num-unit" id="fog-unit-start">in</span>
+            </span>
+            <span class="fog-num-row">
+              <span class="fog-num-lbl" title="Distance from camera where fog density is 100% (fully opaque)">100% at</span>
+              <button type="button" class="fog-step-btn" data-step="end" data-dir="-1" title="Decrease (hold for repeat, Shift = ×10, Ctrl = ÷10)">−</button>
+              <input type="number" id="fog-num-end" class="fog-num">
+              <button type="button" class="fog-step-btn" data-step="end" data-dir="+1" title="Increase (hold for repeat, Shift = ×10, Ctrl = ÷10)">+</button>
+              <span class="fog-num-unit" id="fog-unit-end">in</span>
+            </span>
+          </div>
+        </div>
       </fieldset>
 
       <div class="preview-wrap">

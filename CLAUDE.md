@@ -1278,6 +1278,166 @@ ri-applica camera/stile/layers (= clic sul nome scena).
 
 `cmd.set_shortcut("J")` non è stato testato; per ora si assegna a mano.
 
+## Mini Style Manager — extra buttons + Fog spostata fuori (2026-05)
+
+Tre estensioni allo Style dialog (`ui/style_dialog.rb` + `ui/html/style.*`):
+
+1. **Bottone "⧉" header → apre Window → Styles nativo**. Usa
+   `::UI.show_inspector('Styles')` — API Trimble cross-platform, niente
+   command ID Windows da indovinare via `dump-su-menu.ps1`. Stesso pattern
+   già usato in `dialog.rb` per il right-click su badge stile di scene MP
+   e in `properties_dialog.rb` per "Style and Fog ↗". **Regola futura**:
+   per qualsiasi necessità di aprire un pannello nativo SU dal plugin,
+   provare PRIMA `UI.show_inspector('<NomePanel>')`, e solo se non esiste
+   quel panel (raro) ricadere su `Sketchup.send_action` con numeric ID.
+
+2. **Bottone "→ 1" in sezione Edges**: setta atomicamente
+   `DrawSilhouettes=true` + `ProfileWidth=1` in un'unica `start_operation`.
+   Stato feedback visivo: classe CSS `.is-active` (sfondo blu) quando lo
+   stile è già nel target.
+
+3. **`ProfileWidth` è alias non-ufficiale di `SilhouetteWidth`** in SU 2019.
+   La chiave canonica RenderingOption per la larghezza dei profili è
+   `SilhouetteWidth`; `ProfileWidth` viene accettata in scrittura senza
+   errore ma è ignorata silenziosamente dal viewport. L'exporter del
+   plugin la usava da sempre (vedi `Core::Exporter`, `Core::Previews`)
+   senza che ce ne accorgessimo perché il line scale multiplier comunque
+   "sembrava" funzionare via altri side-effect. **Fix in
+   `StyleDialog.apply_changes`**: quando si scrive ProfileWidth, scriviamo
+   anche SilhouetteWidth nella stessa operazione. **In lettura** (`read_ro`)
+   preferiamo SilhouetteWidth con fallback su ProfileWidth.
+
+   **Regola futura**: ogni volta che si tocca la profile width (export,
+   preview, qualsiasi flusso), scrivere ENTRAMBE le chiavi. Se serve mai
+   solo leggere lo stato, leggere SilhouetteWidth.
+
+**Fog rimossa dallo Style Manager**: inizialmente messa lì (perché vive
+in `rendering_options`), poi spostata nel Properties dialog (= per-scena)
+perché concettualmente la fog è una proprietà di scena anche se
+tecnicamente cattura via `use_rendering_options`. Vedi sezione "Fog
+control nel Properties dialog" sotto.
+
+## Fog control nel Properties dialog (2026-05)
+
+Nuova sezione "Fog" nel Properties dialog (`ui/properties_dialog.rb` +
+`ui/html/properties.*`) che replica `Window → Fog` nativo con un'interfaccia
+più precisa.
+
+### Semantica del dual-handle slider (gotcha forte)
+
+Le label **"0%" e "100%" sotto i thumb sono FISSE — si riferiscono alla
+DENSITÀ della nebbia**, non alla posizione del thumb sull'asse.
+
+- L'asse rappresenta DISTANZA dalla camera (in unità modello, da 0 a "∞").
+- Thumb "0%" (blu) = punto dove la nebbia INIZIA (densità 0%, ancora
+  trasparente).
+- Thumb "100%" (arancione) = punto dove la nebbia è OPACA (densità 100%).
+- Tra i due thumb la densità interpola linearmente.
+
+**Errore facile** ed effettivamente commesso durante lo sviluppo:
+interpretare "0%" e "100%" come posizione percentuale sull'asse. Il nativo
+non funziona così — lo sliderr stesso scorre tra 0 e una distanza max,
+e i thumb sono valori di distanza, le label "0%" e "100%" sono nomi-densità
+fissi.
+
+### Unità di `FogStartDist` / `FogEndDist`
+
+Sono float in **inches** (unità interna SU), NON 0..1 normalizzati come
+si potrebbe pensare leggendo la doc Trimble. Empiricamente: su un modello
+con bbox diagonal ~83000 inches, valori tipici per fog sono nell'ordine
+di centinaia o migliaia di inches.
+
+UI Properties converte:
+- inches ↔ unità modello via `INCHES_PER_UNIT[length_unit]` dove
+  `length_unit = model.options['UnitsOptions']['LengthUnit']` (0=in,
+  1=ft, 2=mm, 3=cm, 4=m).
+- Range slider dinamico: `fog_max_user_units = bbox.diagonal_user * 2`
+  (clamp min 1.0). Così su modelli da 100m o da 10mm lo slider ha sempre
+  proporzioni utili.
+
+Label dell'unità (es. "m", "mm") accanto a ogni input numerico, presa da
+`user_unit_label`.
+
+### Pattern apply (replica nativo Window → Fog)
+
+`PropertiesDialog.fog_apply`:
+1. Scrive `model.rendering_options['DisplayFog'/'FogStartDist'/'FogEndDist']`.
+2. **Se la scena del Properties è quella attiva nel viewport**, fa
+   `page.update(PAGE_USE_RENDERING_OPTIONS)` per snapshottarsi le RO
+   correnti nella scena. Altrimenti il modello cambia ma la scena non
+   lo cattura.
+3. **MAI `update_selected_style`**: lo stile diventa "dirty" come fa il
+   native Fog dialog, ma le altre scene mantengono il loro fog. Se
+   committassimo nello style, tutte le scene che lo usano cambierebbero
+   fog.
+
+PAGE_USE_RENDERING_OPTIONS lookup difensivo via `ro_use_bit_safe` (prova
+`Sketchup::PAGE_USE_RENDERING_OPTIONS`, poi `Sketchup::Page::...`,
+fallback `2`).
+
+### Vincolo "scena attiva"
+
+La fog si può leggere/editare solo sulla scena attualmente attiva nel
+viewport (è una RO del modello → riflette il viewport, non la scena
+arbitraria che l'utente ha aperto in Properties). Se Properties è
+aperto su scena non-attiva: controlli `disabled` + banner con bottone
+"Activate this scene" → callback `sm_props_activate_scene`.
+
+`scene_payload` include `is_active = active_page_id == id` per il flag.
+
+### Vincolo `start < end`
+
+Applicato lato JS in tutti i punti di modifica utente (drag thumb,
+click track, bottoni +/-, input numerico). Helpers `constrainStart` /
+`constrainEnd` con epsilon adattivo `max/10000`. Il thumb in movimento
+si ferma al limite, l'altro non viene spinto via (= comportamento
+nativo SU).
+
+Negli input numerici il clamp scatta **al commit** (change/blur/Enter),
+NON durante typing — così l'utente può digitare "1500" un digit alla
+volta senza che il campo si auto-corregga.
+
+### Dual-handle slider custom (pattern)
+
+HTML5 non offre nativamente un range con due thumb. Costruito con:
+- `<div id="fog-dual">` container con width fluida.
+- `<div class="fog-track">` linea di sfondo.
+- `<div id="fog-fill">` riempimento gradient tra i due thumb (densità).
+- Due `<div class="fog-thumb">` posizionati con `style.left = '%'`,
+  draggabili via `mousedown` + `mousemove`/`mouseup` su document.
+- Click sulla track sposta il thumb PIÙ VICINO alla posizione del click
+  (decide via `Math.abs(v - fogValues.start) <= Math.abs(v - end)`).
+- Le label "0%" / "100%" dentro ai thumb (`.fog-thumb-lbl`) sono assolute
+  e centrate, non draggabili (pointer-events: none).
+
+Commit a Ruby solo al rilascio del drag (`onFogUp`), non durante:
+mantiene il pattern "no write-spam su modelli con AttributeObserver
+terzo a 5s/write".
+
+### Number input spinner in CEF SU 2019: sono inutilizzabili
+
+I `<input type="number">` in CEF di SU 2019 hanno spinner microscopici
+(2-3 px wide) e a volte i click non vengono registrati. Soluzione
+standard adottata per la fog (replicabile altrove):
+
+1. Nasconderli via CSS:
+   ```css
+   input[type="number"] { -webkit-appearance: textfield; appearance: textfield; }
+   input[type="number"]::-webkit-inner-spin-button,
+   input[type="number"]::-webkit-outer-spin-button {
+     -webkit-appearance: none; margin: 0;
+   }
+   ```
+2. Fornire bottoni custom `−` / `+` 22×22px ai lati dell'input.
+3. **Auto-repeat**: dopo 350ms di hold parte un `setInterval` ogni 60ms,
+   stoppato su mouseup/mouseleave/blur. Un solo commit Ruby alla fine.
+4. **Modificatori**: Shift = step×10 (passo largo), Ctrl = step÷10
+   (passo fine). Cattura `e.shiftKey` / `e.ctrlKey` al mousedown,
+   NON al click successivo (perdita stato modificatore).
+5. **Step adattivo alla scala**: `baseStep = max / 200` arrotondato a
+   "step rotondo" (1/2/5 × 10ⁿ) — su modello 100m → 0.5m, su modello
+   10mm → 0.05mm.
+
 ## Note per future sessioni
 
 - Lavoro condiviso tra postazioni → utente continuerà da un'altra macchina.
