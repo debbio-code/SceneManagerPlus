@@ -996,10 +996,12 @@ module SceneManagerPlus
       def select_page(id)
         p = find_by_id(id)
         return false unless p
-        # Skip se è già la pagina attiva: riassegnare la stessa pagina su
-        # scena Match Photo con use_style=true può scatenare un restore-cycle
-        # interno del subsystem MP → BugSplat. No-op semantico in ogni caso.
-        return true if model.pages.selected_page == p
+        # Per scene Match Photo: skip se già attiva — riassegnare la stessa
+        # pagina MP con state dirty può scatenare un restore-cycle → BugSplat.
+        # Per scene normali: permettiamo il re-assign anche se già attiva,
+        # così l'utente può cliccare la scena corrente per ripristinare
+        # camera/stile/layers allo stato salvato (= "ri-applica scena").
+        return true if model.pages.selected_page == p && matchphoto?(p)
         model.pages.selected_page = p
         true
       end
