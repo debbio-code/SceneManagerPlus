@@ -1591,6 +1591,24 @@ scenes" → ricreazione delle scene con camera, stile, fog, flag, naming.
 - `Core::Styles.set_nickname` (validazione unicità), `set_color`.
 - Pattern hidden-spawn non serve (niente PowerShell qui).
 
+## Generazione manuale utente (docx/pdf) — toolchain su questa postazione
+
+Manuale utente in `Scene Manager+ - Manuale utente.docx` + `.pdf` (root repo),
+generato da `tools/gen-manual.py`. Da rigenerare quando si aggiungono feature.
+
+Trappole ambiente (dev machine):
+- **Niente Node/npm**: la skill `docx` di Anthropic usa `docx-js` (Node) →
+  non funziona qui. Usare **`python-docx`** (`py -m pip install python-docx`).
+  `tools/gen-manual.py` è già in python-docx, idempotente, riscrive entrambi
+  i file.
+- **Niente LibreOffice**: `soffice` non installato → lo script `soffice.py`
+  della skill fallisce. Per il PDF usare **Word via COM** (Office 2013 in
+  `C:\Program Files\Microsoft Office\Office15\WINWORD.EXE`):
+  `Word.Application` → `Documents.Open` → `Fields.Update()` +
+  `TablesOfContents.Update()` (aggiorna l'indice TOC) → `SaveAs(pdf, 17)`
+  (17 = `wdFormatPDF`) → `Quit()`. L'indice è un vero campo `TOC` inserito via
+  OOXML in gen-manual.py, quindi va aggiornato prima del SaveAs.
+
 ## Note per future sessioni
 
 - Lavoro condiviso tra postazioni → utente continuerà da un'altra macchina.
