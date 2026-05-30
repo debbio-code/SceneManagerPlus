@@ -978,6 +978,17 @@ window.SM = (function () {
     // ArrowUp / ArrowDown: sposta la selezione su/giù nell'ordine logico.
     // Funziona sia per scene a root sia per scene dentro la stessa cartella.
     // Selezione multipla supportata solo se contigua sotto lo stesso parent.
+    // Enter / F2 -> rinomina inline la scena selezionata (solo se ne e'
+    // selezionata esattamente una). Equivale al click destro -> Rename.
+    document.addEventListener('keydown', function (e) {
+      if (e.key !== 'Enter' && e.key !== 'F2') return;
+      var t = e.target;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+      if (selection.length !== 1) return;
+      if (!sceneById(selection[0])) return;
+      e.preventDefault();
+      startInlineRename(selection[0]);
+    });
     document.addEventListener('keydown', function (e) {
       if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
       var t = document.activeElement;
