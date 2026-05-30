@@ -1438,6 +1438,159 @@ standard adottata per la fog (replicabile altrove):
    "step rotondo" (1/2/5 × 10ⁿ) — su modello 100m → 0.5m, su modello
    10mm → 0.05mm.
 
+## [FUTURO / NON ANCORA IMPLEMENTATO] Copia/incolla scene cross-file
+
+> ⚠️ **Feature pianificata, non implementata.** L'utente la vuole in futuro
+> ("copio scene da un file, le incollo in un altro con gli stessi stili").
+> Questa sezione è il design da validare quando si parte. Nessun codice
+> esiste ancora. Sviluppo a fasi (A→D, vedi sotto).
+
+### Obiettivo
+
+Selezione scene nel file A → "Copy scenes" → apertura file B → "Paste
+scenes" → ricreazione delle scene con camera, stile, fog, flag, naming.
+
+### Vincoli architetturali che obbligano il design
+
+1. **No oggetto `Style` trasferibile**: `Styles#add_style` accetta solo
+   `.style` da disco; niente clone/rename via API (vedi sez. "Style pool").
+   → Lo stile viaggia come **snapshot del dict `rendering_options`** (colori
+   serializzati hex) e in destinazione viene iniettato in uno **slot del
+   pool** riusando `allocate_new_slot_from_viewport` (o una sua variante che
+   prende un hash RO invece del viewport corrente).
+2. **Cross-processo**: SU 2019 Windows può aprire file in istanze separate →
+   una var Ruby module-level NON è condivisa. → Clipboard su **file su disco**:
+   `~/.scene_manager_plus/clipboard.json`.
+3. **No keydown globali in CEF** + Ctrl+C/Ctrl+V riservati da SU per la
+   geometria → **bottoni toolbar** "Copy scenes"/"Paste scenes" (+ opz.
+   `UI::Command` con voce menu per shortcut assegnabile da Preferences).
+4. **Layer = oggetti diversi nei due file** → match **solo by-name**.
+5. **Match Photo non trasferibile** (foto/path non leggibili) → escludere
+   con avviso, come già in `add_from_view`.
+
+### Tabella trasferibilità
+
+| Campo scena | Trasferibile | Note |
+|---|---|---|
+| Camera (eye/target/up/perspective/fov/aspect_ratio) | ✅ pieno | API completa R/W |
+| Nome | ✅ | dedup nomi in destinazione |
+| Descrizione | ✅ | |
+| Flag `use_*` (8) | ✅ | riscrivere con diff `current != v` |
+| Stile (rendering_options) | ✅ via slot pool | snapshot RO → slot; dedup per stile sorgente |
+| Fog (DisplayFog/FogStartDist/FogEndDist) | ✅ | dentro le RO |
+| Nickname stile / badge color / colore scena | ✅ | metadata plugin, riapplicabili |
+| Visibilità tag/layer | ⚠️ parziale | match by-name; mancanti ignorati o creati su opzione |
+| Section planes | ❌ | legati a geometria del file sorgente |
+| Hidden geometry | ❌ | idem |
+| Scene Match Photo | ❌ | API non espone foto/path → escludere con avviso |
+
+### Schema `clipboard.json` (v1)
+
+```jsonc
+{
+  "schema": "smp-scene-clipboard/1",
+  "created_at": "2026-05-30T12:00:00",          // ISO8601 local
+  "source_model": "Pedrazzoli.skp",             // basename, solo per UI/debug
+  "source_model_guid": "abc-123",               // sanity check (paste su stesso file = warn)
+  "styles": [                                    // dedup: 1 entry per stile sorgente usato
+    {
+      "key": "src-style-0",                      // id locale referenziato dalle scene
+      "native_name": "SM+ Slot 03",             // info, NON usato in destinazione
+      "nickname": "Vista normale",              // riapplicato come nickname in dest (se libero)
+      "badge_color": "#4ea1ff",                 // "" se assente
+      "rendering_options": {                     // snapshot completo, colori → "#rrggbb"
+        "EdgeColorMode": 1,
+        "SilhouetteWidth": 1.0,                  // scrivere ANCHE ProfileWidth in dest
+        "BackgroundColor": "#ffffff",
+        "DisplayFog": false,
+        "FogStartDist": 0.0,
+        "FogEndDist": 0.0
+        // ... tutte le chiavi di model.rendering_options.each_pair
+      }
+    }
+  ],
+  "scenes": [
+    {
+      "name": "Sezione AA",
+      "description": "",
+      "scene_color": "#ffcc00",                  // "" se assente (metadata plugin per-scena)
+      "style_key": "src-style-0",                // ref in styles[]; null se scena senza stile
+      "flags": {                                 // gli 8 use_*
+        "use_camera": true, "use_style": true, "use_shadow_info": true,
+        "use_hidden": true, "use_layer_visibility": true,
+        "use_section_planes": true, "use_axes": true,
+        "use_rendering_options": true
+      },
+      "camera": {
+        "perspective": true,
+        "eye": [x, y, z], "target": [x, y, z], "up": [x, y, z],
+        "fov": 35.0,                             // se perspective
+        "height": null,                          // se ortho (camera.height)
+        "aspect_ratio": 0.0,                     // 0.0 = usa viewport; !=0 → probabile MP, escludere a monte
+        "image_width": null
+      },
+      "layer_visibility": [                       // by-name; SOLO override significativi
+        { "name": "Quote", "visible": false },
+        { "name": "Arredi", "visible": true }
+      ],
+      "is_matchphoto": false                      // se true → NON serializzare (avviso in Copy)
+    }
+  ]
+}
+```
+
+**Note di serializzazione:**
+- Colori: `Sketchup::Color` → `"#rrggbb"` (drop alpha). In lettura hex → `Sketchup::Color`.
+- Lunghezze camera in **inches** (unità interna SU), nessuna conversione: il
+  paste le riapplica raw.
+- `layer_visibility`: salvare la visibilità **effettiva** della scena
+  (`page.layers` è la hidden-list, semantica controintuitiva — vedi
+  `SU2019-LESSONS.md` "Sketchup::Page#layers"). Da decidere in Fase C se
+  salvare tutti i layer o solo i diff dal default; propendere per "tutti i
+  layer non-visibili" per minimizzare il payload.
+
+### Regole di paste (destinazione)
+
+1. **Tutto in 1 `start_operation`** (1 Ctrl+Z), con `disable_ui=true`.
+2. **Stili: dedup + riuso.** Per ogni `styles[].key` allocare **uno** slot
+   (non uno per scena). Prima di allocare, cercare in destinazione uno stile
+   con stesso nickname/RO equivalenti → riusarlo. Pool esaurito → messagebox
+   come già in `allocate_new_slot`. Scrivere SEMPRE sia `SilhouetteWidth` che
+   `ProfileWidth` (alias non-ufficiale, vedi sez. Mini Style Manager).
+3. **Scene**: `pages.add`, poi forzare i flag dallo schema con diff
+   `current != v` (regola anti-crash MP), set camera, assegnare lo stile via
+   `assign_style` (riusa il workaround esistente), applicare fog se la scena
+   diventa attiva (`page.update(PAGE_USE_RENDERING_OPTIONS)`).
+4. **Layer (Fase C)**: per ogni `layer_visibility[]` se esiste layer omonimo
+   → `page.set_visibility(layer, visible)`; mancanti → report (opzione "crea").
+5. **Nomi**: dedup con suffisso incrementale se collisione.
+6. **Metadata**: applicare nickname (se libero, validazione unicità esistente),
+   badge color, colore scena.
+7. **Ordine logico**: appendere le nuove scene in coda all'ordine logico
+   corrente (o opz. dentro una cartella "Pasted").
+8. **Report finale**: messagebox con conteggio scene create / stili
+   riusati vs allocati / layer mancanti / scene MP saltate.
+
+### Fasi di sviluppo
+
+- **Fase A — Copy**: serializzazione selezione → `clipboard.json`, esclusione
+  MP con avviso, bottone toolbar.
+- **Fase B — Paste base**: camera + flag + nome + stile (slot+dedup) + fog,
+  report. (Niente layer ancora.)
+- **Fase C — Layer match-by-name**: override visibilità + opzione "crea
+  mancanti".
+- **Fase D — Rifiniture**: dedup/riuso stili intelligente, metadata completi,
+  ordine logico/cartella "Pasted", gestione pool esaurito.
+
+### Primitive esistenti da riusare
+
+- `Core::Styles.allocate_new_slot_from_viewport` → serve una variante
+  `allocate_new_slot_from_ro_hash(ro_hash, nickname:)` che applichi uno
+  snapshot arbitrario invece del viewport corrente.
+- `Core::SceneModel.assign_style`, `matchphoto?`, `page_id`, `set_scene_color`.
+- `Core::Styles.set_nickname` (validazione unicità), `set_color`.
+- Pattern hidden-spawn non serve (niente PowerShell qui).
+
 ## Note per future sessioni
 
 - Lavoro condiviso tra postazioni → utente continuerà da un'altra macchina.
