@@ -38,6 +38,15 @@ Feature aggiunte post-Fase 4:
 - **`docs/RESOLVED-BUGS.md`** — Cronologia bug risolti con sintomo/causa/
   fix. Consultare se un problema "suona familiare", o per capire perché un
   pattern strano nel codice è strano.
+- **MCP `eval_ruby` per probing API live** — esiste un server MCP locale
+  (repo sibling `debbio-code/SketchUp-Mcp-mhyrr`, in `D:\Claude\sketchup-mcp`)
+  che esegue Ruby arbitrario dentro SketchUp via socket. Usarlo per rispondere
+  in un turno a "questa API/costante/RenderingOption esiste davvero in SU 2019?"
+  invece di scrivere `tools/dump-*.rb` + copia/incolla dalla Ruby Console.
+  Dettagli, gotcha di setup e funzione PowerShell `Invoke-SUEval` per il test
+  diretto: `docs/SU2019-LESSONS.md` (sezione "MCP per il probing API") e il
+  CLAUDE.md del repo MCP. Va avviato da `Extensions → MCP Server → Start Server`
+  dopo ogni restart di SU.
 
 ## Decisioni di design
 
