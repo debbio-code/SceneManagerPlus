@@ -62,6 +62,57 @@ module SceneManagerPlus
           return (New-Fnt $fam $minSz $style)
         }
 
+        # Divide $words in 2 righe bilanciate (larghezze il più simili
+        # possibile), almeno 1 parola per riga. Ritorna SEMPRE @($line1, $line2)
+        # con entrambe non vuote (presuppone $words.Count >= 2).
+        function Split-Balanced($g, $words, $font) {
+          $total = $words.Count
+          $best = 1
+          $bestDiff = [double]::PositiveInfinity
+          for ($s = 1; $s -lt $total; $s++) {
+            $l1 = ($words[0..($s - 1)] -join ' ')
+            $l2 = ($words[$s..($total - 1)] -join ' ')
+            $w1 = $g.MeasureString($l1, $font).Width
+            $w2 = $g.MeasureString($l2, $font).Width
+            $diff = [Math]::Abs($w1 - $w2)
+            if ($diff -lt $bestDiff) { $bestDiff = $diff; $best = $s }
+          }
+          return ,@(($words[0..($best - 1)] -join ' '), ($words[$best..($total - 1)] -join ' '))
+        }
+
+        # Fit per l'OGGETTO:
+        #  - se entra su UNA riga a $startSz → una riga, NESSUN rimpicciolimento.
+        #  - altrimenti va a capo: SEMPRE 2 righe bilanciate (mai collasso a una
+        #    riga rimpicciolita), partendo da -30% del font pieno e scalando
+        #    ancora solo se serve fino a $minSz.
+        # Ritorna @{ Font=..; Lines=@(..) } (1 o 2 righe). Caller disposa il Font.
+        function Fit-Object($g, [string]$text, [string]$fam, [single]$startSz, $style, [single]$maxW, [single]$minSz) {
+          $f = New-Fnt $fam $startSz $style
+          if ($g.MeasureString($text, $f).Width -le $maxW) { return @{ Font = $f; Lines = @($text) } }
+          $f.Dispose()
+          $words = @($text -split '\s+' | Where-Object { $_ -ne '' })
+          if ($words.Count -lt 2) {
+            # Una sola parola: non si può andare a capo, riduci e basta.
+            return @{ Font = (Fit-Fnt $g $text $fam $startSz $style $maxW $minSz); Lines = @($text) }
+          }
+          # Costretti ad andare a capo: parti da -30% del font pieno (richiesta
+          # esplicita), split bilanciato in 2 righe; se non entrano scala fino
+          # a $minSz (a $minSz si accetta l'eventuale overflow).
+          $sz = [single]([Math]::Max($minSz, $startSz * 0.7))
+          while ($true) {
+            $f = New-Fnt $fam $sz $style
+            $split = Split-Balanced $g $words $f
+            $line1 = $split[0]; $line2 = $split[1]
+            $w1 = $g.MeasureString($line1, $f).Width
+            $w2 = $g.MeasureString($line2, $f).Width
+            if (([Math]::Max($w1, $w2) -le $maxW) -or ($sz -le $minSz)) {
+              return @{ Font = $f; Lines = @($line1, $line2) }
+            }
+            $f.Dispose()
+            $sz = $sz - 1
+          }
+        }
+
         $tavolaPlaceholder = [string]$cfg.tavola_placeholder
         if ([string]::IsNullOrEmpty($tavolaPlaceholder)) { $tavolaPlaceholder = "00" }
         # Cliente: il valore è costante per tutto il batch (= prefix_custom).
@@ -126,9 +177,14 @@ module SceneManagerPlus
         $clienteW = 0; $tavolaW = 0; $progW = 0; $datiW = 0
         $iter = 0
         while ($true) {
-          $w1a = Measure-LV $measureG "CLIENTE:" $clientStr    $labelFont $valueFont
-          $w1b = Measure-LV $measureG "OGGETTO:" $sceneLongest $labelFont $valueFont
-          $clienteW = [int]([Math]::Ceiling([Math]::Max($w1a, $w1b))) + 2 * $pad
+          # OGGETTO (nome scena) NON guida lo shrink globale dei font: se è
+          # troppo lungo viene compresso e mandato a capo su 2 righe nel suo
+          # box (vedi Fit-Object). Lo shrink globale è guidato solo da CLIENTE
+          # (valore costante) + il label "OGGETTO:" come floor, così gli altri
+          # box restano a font pieno a parità di altezza del cartiglio.
+          $w1a = Measure-LV $measureG "CLIENTE:" $clientStr $labelFont $valueFont
+          $w1oggLbl = $measureG.MeasureString("OGGETTO:", $labelFont).Width
+          $clienteW = [int]([Math]::Ceiling([Math]::Max($w1a, $w1oggLbl))) + 2 * $pad
           # Box 2/3 misurati col MID font (più piccolo).
           $w2a = Measure-LV $measureG "TAVOLA nr.:" $tavolaPlaceholder $midLabelFont $midValueFont
           $w2b = Measure-LV $measureG "DATA:"       $date              $midLabelFont $midValueFont
@@ -262,16 +318,36 @@ module SceneManagerPlus
           # OGGETTO: occupa la larghezza unificata box 0 + box 1b.
           $rowMaxW_ogg = [single]($widths[0] + $widths[1] - 2 * $pad)
           $valMaxW2 = [single]($rowMaxW_ogg - $lblOggW - 8)
-          $fScene = Fit-Fnt $g $sceneName $fontFamily $valueSz ([System.Drawing.FontStyle]::Regular) $valMaxW2 9.0
+          # Se il nome scena non entra su una riga: comprime e va a capo (max 2 righe).
+          $oggFit = Fit-Object $g $sceneName $fontFamily $valueSz ([System.Drawing.FontStyle]::Regular) $valMaxW2 9.0
+          $fScene = $oggFit.Font
+          $oggLines = @($oggFit.Lines)
 
-          # Label CLIENTE:/OGGETTO: alla stessa X (left). Valore subito dopo
-          # la rispettiva label (no double-column).
+          # Label CLIENTE: e valore (riga superiore del box 0).
           $vAsc1 = Get-Asc $fClient
-          $vAsc2 = Get-Asc $fScene
           $g.DrawString($lblCli, $labelFont, $brush, [single]($x + $pad),               [single]($bY_top - $lblAsc))
           $g.DrawString($client, $fClient,   $brush, [single]($x + $pad + $lblCliW + 8), [single]($bY_top - $vAsc1))
-          $g.DrawString($lblOgg, $labelFont, $brush, [single]($x + $pad),               [single]($bY_bot - $lblAsc))
-          $g.DrawString($sceneName, $fScene, $brush, [single]($x + $pad + $lblOggW + 8), [single]($bY_bot - $vAsc2))
+
+          # Label OGGETTO: + valore (riga inferiore). Una o due righe.
+          $vAsc2 = Get-Asc $fScene
+          $vDsc2 = Get-Dsc $fScene
+          $oggValX = [single]($x + $pad + $lblOggW + 8)
+          if ($oggLines.Count -le 1) {
+            # Una riga: baseline centrata $bY_bot (come prima).
+            $g.DrawString($lblOgg, $labelFont, $brush, [single]($x + $pad), [single]($bY_bot - $lblAsc))
+            $g.DrawString([string]$oggLines[0], $fScene, $brush, $oggValX, [single]($bY_bot - $vAsc2))
+          } else {
+            # Due righe: blocco centrato verticalmente nella riga inferiore [halfH, H].
+            $oggLineH  = [single]($vAsc2 + $vDsc2)
+            $oggBlockH = [single]($oggLineH * 2)
+            $oggTopY   = [single]($halfH + (($H - $halfH) - $oggBlockH) / 2.0)
+            $base1 = [single]($oggTopY + $vAsc2)
+            $base2 = [single]($base1 + $oggLineH)
+            # Label OGGETTO: allineata alla prima riga del valore.
+            $g.DrawString($lblOgg, $labelFont, $brush, [single]($x + $pad), [single]($base1 - $lblAsc))
+            $g.DrawString([string]$oggLines[0], $fScene, $brush, $oggValX, [single]($base1 - $vAsc2))
+            $g.DrawString([string]$oggLines[1], $fScene, $brush, $oggValX, [single]($base2 - $vAsc2))
+          }
 
           $fClient.Dispose(); $fScene.Dispose()
           $x += $widths[0]

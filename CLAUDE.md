@@ -471,7 +471,27 @@ Assets bundlati in `scene_manager_plus/assets/titleblock/`:
 **Font global auto-shrink**: il calcolo larghezze gira in loop. Se
 `sum(box widths) > target`, scala TUTTI i font -1px e ricalcola.
 Mid font ricreati al volo a `labelSz × midRatio`. Ferma quando entra
-o a `valueSz ≤ 10`. Iters tipico 5-10.
+o a `valueSz ≤ 10`. Iters tipico 5-10. **L'OGGETTO (nome scena) NON
+partecipa a questo `autoSum`**: il box 0 (Cliente/Oggetto) è il
+"remainder" e ha come floor solo `CLIENTE:` (valore costante) + il label
+`OGGETTO:`. Prima il box 0 era dimensionato sul nome scena più lungo del
+batch, così un oggetto lungo gonfiava `autoSum` e rimpiccioliva il testo
+di TUTTI i box. Regola: a parità di altezza del cartiglio, i testi delle
+altre voci devono restare invariati.
+
+**Wrap dell'OGGETTO su 2 righe** (`Fit-Object` + `Split-Balanced` nel PS):
+- Sta su una riga a font pieno → una riga, **nessun rimpicciolimento**.
+- Non ci sta → va **sempre** davvero a capo su 2 righe, partendo da -30%
+  del font pieno e scalando ancora solo se serve fino a 9px. Le 2 righe
+  sono centrate verticalmente nella riga inferiore `[halfH, H]` del box 0
+  (label `OGGETTO:` allineata alla 1ª riga).
+- **Trappola risolta**: un wrap *greedy* (riempi riga 1 fino a maxW, resto
+  in riga 2) al 70% faceva rientrare tutto su riga 1 lasciando riga 2 vuota
+  → usciva un testo rimpicciolito su UNA riga (= il difetto segnalato).
+  Fix: `Split-Balanced` divide le parole nel punto che minimizza la
+  differenza di larghezza tra le due righe → SEMPRE 2 righe non vuote
+  (con ≥2 parole). Parola singola troppo lunga: non si può andare a capo,
+  fallback `Fit-Fnt` (shrink su una riga).
 
 **Cross-box baseline alignment**: `bY_top` e `bY_bot` calcolati una sola
 volta sul `labelFont`/`valueFont` (box 1, font più grande). Tutti i
