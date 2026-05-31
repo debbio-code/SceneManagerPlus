@@ -50,7 +50,7 @@ Feature aggiunte post-Fase 4:
 | Update da view (`⟳`) | `SceneModel.update_from_view(id)` costruisce una bitmask `PAGE_USE_*` con lookup difensivo (vedi `docs/SU2019-LESSONS.md`). Per `use_style?` tenta `PAGE_USE_STYLE` → `PAGE_USE_SKETCHCS` → `PAGE_USE_RENDERING_OPTIONS` (fallback piggyback). Per `use_axes?` tenta `PAGE_USE_AXES` → `PAGE_USE_CAMERA`. Script `tools/dump-page-use.rb` per verificare i nomi delle costanti effettivamente esposte dalla SU in uso. **Se lo stile attivo è dirty** (`styles.active_style_changed`), mostra un `UI.messagebox` 3-button YES/NO/CANCEL equivalente al "Warning - Scenes and Styles" nativo: YES → `update_selected_style` poi page.update; NO → mostra istruzioni per "Save as new" via browser (l'API Ruby SU 2019 non lo espone) e abort; CANCEL → toglie il bit style dal mask, salva il resto. Senza questo dialog le modifiche pending allo stile si perdono silenziosamente: `page.update(PAGE_USE_SKETCHCS)` lega la scena allo stile ma non lo flusha. UI: il trigger ⟳ vive nella toolbar (`btn-update`), opera su selezione (anche multipla con loop client-side). Niente più icona update per-row: quello slot è occupato dal badge lettera stile. |
 | Style letter badge | Sostituisce la vecchia ⟳ per-row. Mostra A,B,C... derivato da `SceneModel.styles_map` (ordine alfabetico su `model.styles.map(&:name)`, **tutti** gli stili, anche orfani). Per-scena `scene.style_name` da `page.style.name`. JS lookup via `letterForStyle()` → '?' se manca. Render solo (zero interazione di update): click sx apre mini Style Manager, click dx apre picker riassegna. |
 | Style assignment (click dx lettera) | `SceneModel.assign_style(uid, name)` attiva la target page, fa `styles.selected_style = X`, forza `use_style/use_rendering_options = true`, `page.update(STYLE_BIT \| RO_BIT)`, ripristina la scena attiva precedente. Tutto in una `start_operation` (1 Ctrl+Z). Immediato anche in defer mode (operazione viewport-dipendente, analoga a `update_from_view`). Side-effect noto: se lo stile precedente era dirty, le pending si perdono (come comportamento native SU). |
-| Mini Style Manager (click sx lettera) | `UI::StyleDialog` (`STYLE_DIALOG`) con 3 gruppi: **Edges** (`EdgeColorMode` 0/1/2 = All same/By material/By axis — è il colore *delle linee*, non delle facce; `TransparencySort` 0/1/2); **Background** (`BackgroundColor`, `DrawHorizon` on/off, `SkyColor`); **Display** (`DrawHidden`, Model axes toggle, `DisplaySectionPlanes`, `DisplaySectionCuts`). Edit live → `rendering_options[k] = v` + `styles.update_selected_style` per committare al persistente. All'apertura, la scena di contesto viene attivata nel viewport per feedback live. **Scope sempre = "all scenes using this style"**: niente "only this scene" perché l'API Ruby SU 2019 non espone `style.name=` né `Styles#add_style` da memoria, quindi clonare programmaticamente uno stile non è fattibile pulitamente. Banner nel dialog spiega il workaround manuale: duplicare lo stile in Window → Styles nativo, poi riassegnare via right-click su lettera. **Model Axes è bottone Toggle**, non checkbox: SU 2019 non espone state né setter per il display degli assi nemmeno via `RenderingOption` né via `model.options` (verificato enumerando ogni provider/chiave). Implementato via `Sketchup.send_action(axes_cmd_id)` con `WIN_AXES_CMD_ID = 10522` su Windows (override `Sketchup.write_default('SceneManagerPlus', 'axes_cmd_id', N)`); Mac selector `'showHideAxes:'`. |
+| Mini Style Manager (click sx lettera) | `UI::StyleDialog` (`STYLE_DIALOG`) con 3 gruppi: **Edges** (`EdgeColorMode` 0/1/2 = All same/By material/By axis — è il colore *delle linee*, non delle facce; `TransparencySort` 0/1/2); **Background** (`BackgroundColor`, `DrawHorizon` on/off, `SkyColor`); **Display** (`DrawHidden`, Model axes checkbox `DisplaySketchAxes`, `DisplaySectionPlanes`, `DisplaySectionCuts`). Edit live → `rendering_options[k] = v` + `styles.update_selected_style` per committare al persistente. All'apertura, la scena di contesto viene attivata nel viewport per feedback live. **Scope sempre = "all scenes using this style"**: niente "only this scene" perché l'API Ruby SU 2019 non espone `style.name=` né `Styles#add_style` da memoria, quindi clonare programmaticamente uno stile non è fattibile pulitamente. Banner nel dialog spiega il workaround manuale: duplicare lo stile in Window → Styles nativo, poi riassegnare via right-click su lettera. **Model Axes è un checkbox stateful** come gli altri Display: la rendering option `DisplaySketchAxes` (bool) controlla il display degli assi del modello — scoperto via MCP `eval_ruby` su SU 2019.0.685 (vedi sezione "Style management"). Niente più hack `Sketchup.send_action(10522)`/`axes_cmd_id`. |
 | Rinomina inline | Right-click su scena → context menu → "Rename" → input nella row, Enter = commit, Esc/blur-senza-modifiche = annulla. |
 | Selezione vs scena attiva | Due stati **distinti** nel JS: `selection` (array, barra azzurra, può essere multipla) e `activeId` (singolo, marker giallo sul `.grip`, = scena effettivamente nel viewport). `push_state` invia `active_id` dal `pages.selected_page` di Ruby. `setActiveFromNative` (polling 250ms) aggiorna SOLO `activeId`, mai la selezione (prima la collassava all'uid, e ogni cambio tab nativo distruggeva la multi-selezione). Helper `selectPageLocal(id)` per i click/keynav: in **defer mode è no-op** (la scena nel viewport non cambia → il giallo non deve seguire la selezione), altrimenti setta `activeId` e chiama `SMBridge.selectPage` per feedback immediato senza attendere il polling. **Ordine obbligatorio nei handler keynav (PageUp/Down/Home/End) e click**: `selectPageLocal(id)` PRIMA di `render()`, perché `selectPageLocal` muta `activeId` ma non re-renderizza; se invertito, il marker giallo resta sulla scena precedente fino al successivo `push_state` (lag di 1 step). |
 | Preview thumbnail | 300×150 (stesso aspect ratio dell'export finale). Durante batch generation: transizioni scena disabilitate, antialias off, yield a CEF batched ogni ~total/25 scene. Cache-buster `?t=` bumpato solo a cambio set chiavi o fine-generazione, non a ogni `setState`. |
@@ -580,8 +580,9 @@ powershell -ExecutionPolicy Bypass -File tools/dump-su-menu.ps1
 ```
 
 Output esempio: `ID=10534     > &View > &Scene Tabs`. ID utili scoperti:
-- 10522 = View → Axes (per Mini Style Manager: SU 2019 Ruby API non espone
-  state né setter per il display assi nemmeno via RenderingOptions/options)
+- 10522 = View → Axes (storicamente usato dal Mini Style Manager come hack
+  toggle; NON più necessario: la RO `DisplaySketchAxes` espone state+setter —
+  vedi sezione "Style management")
 - 10534 = View → Scene Tabs
 - 10535 = View → Animation → Next Scene
 - 10536 = View → Animation → Previous Scene
@@ -662,13 +663,19 @@ ENTRAMBI i flag Ruby `use_style?` e `use_rendering_options?` — sempre settati
 insieme. Nel plugin: un solo checkbox "Style and Fog" scrive entrambi. Il
 flag `use_rendering_options` da solo non ha effetto visibile in SU 2019.
 
-**Model axes: niente API Ruby in SU 2019**. Non esiste rendering option né
-metodo `View#display_axes` né provider in `model.options` per leggere/settare
-il display degli assi del modello. Verificato enumerando tutto. L'unico
-modo è `Sketchup.send_action(10522)` (ID View → Axes su Windows; selector
-`'showHideAxes:'` su Mac). Quindi nel Mini Style Manager Model Axes è un
-**bottone Toggle** (non checkbox): fire-and-forget, no state tracking.
-Override ID via `Sketchup.write_default('SceneManagerPlus', 'axes_cmd_id', N)`.
+**Model axes: rendering option `DisplaySketchAxes` (bool)**. Contrariamente a
+quanto si era concluso in passato (e a quanto SU documenta), il display degli
+assi del modello SI è leggibile/settabile via `rendering_options['DisplaySketchAxes']`.
+Scoperto via MCP `eval_ruby` su SU 2019.0.685 (vedi `docs/SU2019-LESSONS.md`,
+sezione "MCP per il probing API"): `Object.constants.grep(/PAGE_USE/)` e l'enum
+delle RO hanno rivelato la chiave, che la vecchia indagine "enumerando tutto"
+aveva mancato. Verificato empiricamente: `ro['DisplaySketchAxes']=false` nasconde
+gli assi nel viewport; ed è catturato **per-scena** via `PAGE_USE_RENDERING_OPTIONS`
+(una scena con `use_rendering_options` ripristina il valore salvato). Quindi nel
+Mini Style Manager Model Axes è un **checkbox stateful** come gli altri Display
+controls — niente più `Sketchup.send_action(10522)`, `WIN_AXES_CMD_ID` né override
+`axes_cmd_id`. **Lezione di metodo**: il MCP eval_ruby chiude in un turno indagini
+API che prima richiedevano `tools/dump-*.rb` + copia/incolla dalla Ruby Console.
 
 ## Match Photo: limite invalicabile dell'API Ruby SU 2019
 

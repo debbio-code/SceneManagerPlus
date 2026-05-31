@@ -19,7 +19,14 @@ module SceneManagerPlus
     #   DrawHidden (bool — Hidden Geometry)
     #   DisplaySectionPlanes (bool)
     #   DisplaySectionCuts (bool)
-    # Model Axes: model.options['DrawingOptions']['ShowAxes'] se disponibile.
+    #   DisplaySketchAxes (bool — Model Axes display)
+    #
+    # Model Axes: contrariamente a quanto si credeva, il display degli assi del
+    # modello SI si espone via rendering option 'DisplaySketchAxes' (bool).
+    # Verificato via MCP eval_ruby su SU 2019.0.685: ro['DisplaySketchAxes']=false
+    # nasconde gli assi, ed è catturato per-scena via PAGE_USE_RENDERING_OPTIONS.
+    # Quindi è un checkbox stateful come gli altri Display — niente più hack
+    # Sketchup.send_action(10522). Vedi docs/SU2019-LESSONS.md.
     module StyleDialog
       module_function
 
@@ -30,23 +37,8 @@ module SceneManagerPlus
       RO_KEYS = %w[
         EdgeColorMode TransparencySort BackgroundColor DrawHorizon SkyColor
         ModelTransparency DrawHidden DisplaySectionPlanes DisplaySectionCuts
-        DrawSilhouettes ProfileWidth
+        DrawSilhouettes ProfileWidth DisplaySketchAxes
       ].freeze
-
-      # Model Axes display: SU 2019 NON espone state né setter via Ruby API
-      # (no rendering option, no Sketchup::View accessor). L'unico modo è
-      # Sketchup.send_action con il command ID nativo Windows del menu
-      # View → Axes. Identificato 10522 enumerando il menu di SU via Win32
-      # GetMenu/GetMenuString (script tools/dump-su-menu.ps1).
-      # Override possibile via:
-      #   Sketchup.write_default('SceneManagerPlus', 'axes_cmd_id', N)
-      # Su Mac: selettore string 'showHideAxes:' (non testato sulla nostra
-      # postazione Windows ma documentato Trimble).
-      WIN_AXES_CMD_ID = 10522
-
-      def axes_cmd_id
-        Sketchup.read_default('SceneManagerPlus', 'axes_cmd_id', WIN_AXES_CMD_ID).to_i
-      end
 
       def html_dir
         File.join(PLUGIN_DIR, 'ui', 'html')
@@ -141,10 +133,6 @@ module SceneManagerPlus
           # Aggiorna anche il main dialog (in caso la modifica abbia effetto
           # sui badge — es. style name non cambia ma in futuro magari).
           Dialog.push_state if defined?(Dialog)
-        end
-
-        dlg.add_action_callback('sm_style_toggle_axes') do |_ctx|
-          toggle_axes!
         end
 
         # Apre il pannello Styles nativo (Window → Styles). API Trimble
@@ -307,18 +295,6 @@ module SceneManagerPlus
         end
       end
 
-      def toggle_axes!
-        if RUBY_PLATFORM =~ /darwin/
-          Sketchup.send_action('showHideAxes:')
-        else
-          Sketchup.send_action(axes_cmd_id)
-        end
-        true
-      rescue => e
-        warn "[SM+] toggle_axes!: #{e.class}: #{e.message}"
-        false
-      end
-
       # Applica le modifiche a rendering_options + committa lo stile.
       # changes: { 'FaceColorMode' => 1, 'BackgroundColor' => '#aabbcc', ... }
       def apply_changes(changes)
@@ -370,7 +346,7 @@ module SceneManagerPlus
       # Coerce JS values verso il tipo atteso da RenderingOptions per ogni chiave.
       # Boolean → bool, Color → Sketchup::Color da hex, Integer → int.
       COLOR_KEYS = %w[BackgroundColor SkyColor].freeze
-      BOOL_KEYS  = %w[DrawHorizon ModelTransparency DrawHidden DisplaySectionPlanes DisplaySectionCuts DrawSilhouettes].freeze
+      BOOL_KEYS  = %w[DrawHorizon ModelTransparency DrawHidden DisplaySectionPlanes DisplaySectionCuts DrawSilhouettes DisplaySketchAxes].freeze
       INT_KEYS   = %w[EdgeColorMode TransparencySort ProfileWidth].freeze
       FLOAT01_KEYS = %w[].freeze  # Fog spostata in PropertiesDialog (è per-scena, non per-stile)
 

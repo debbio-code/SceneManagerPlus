@@ -134,6 +134,49 @@ dedicato, e SU 2019 espone `PAGE_USE_SKETCHCS` con lo stesso significato.
 Se l'utente ha solo `use_style=true` (e `use_rendering_options=false`), il
 piggyback aggiornava il bit sbagliato → style non veniva catturato.
 
+### MCP per il probing API live (2026-05)
+
+Installato un server MCP locale (`mhyrr/sketchup-mcp`, community) che espone il
+tool **`eval_ruby`**: esegue Ruby arbitrario nel contesto di SU via socket TCP
+(127.0.0.1:9876) e ritorna il risultato. Sostituisce il flusso "scrivo
+`tools/dump-*.rb` → carico nella Ruby Console → copio/incollo l'output": ora
+l'introspezione API si chiude in un turno.
+
+Usarlo per qualunque domanda del tipo "questa API/costante/RO esiste davvero in
+SU 2019?". Esempi già fatti: enum `Object.constants.grep(/PAGE_USE/)` (confermata
+la tabella sopra — sono **top-level**, non sotto `Sketchup`), enum
+`rendering_options.keys`, test di persistenza per-scena.
+
+Setup: estensione `.rbz` da installare in SU + server Python via `uvx
+sketchup-mcp` con pin `mcp[cli]==1.3.0` (la 0.1.17 crasha con l'SDK mcp recente).
+Il server va riavviato (Extensions → MCP Server → Start Server) dopo ogni
+restart di SketchUp. Trappola packaging: il `.rbz` deve contenere solo il loader
+`su_mcp.rb` + `su_mcp/main.rb` — se ci finiscono `package.rb`/`extension.json`
+nella root, SU li auto-carica all'avvio e `package.rb` crasha (`require 'zip'`).
+
+### `DisplaySketchAxes`: gli assi del modello SONO una RenderingOption (2026-05)
+
+Correzione di una conclusione errata precedente ("Model axes: niente API Ruby
+in SU 2019"). Il display degli assi del modello è leggibile/settabile via
+`rendering_options['DisplaySketchAxes']` (bool). Scoperto enumerando le RO con
+l'MCP eval_ruby; la vecchia indagine "enumerando tutto" l'aveva mancato (forse
+cercando solo `Axes`/`ShowAxes` o tra `model.options`).
+
+Verifiche empiriche (SU 2019.0.685):
+- `ro['DisplaySketchAxes']=false` + `view.invalidate` → gli assi spariscono dal
+  viewport.
+- È catturato **per-scena** via `PAGE_USE_RENDERING_OPTIONS`: creata una scena
+  con assi ON, spenti nel viewport, riattivata la scena → assi ripristinati ON.
+- Quindi committabile in uno stile via `styles.update_selected_style`, esattamente
+  come `DrawHidden`/`DisplaySectionPlanes`.
+
+Conseguenza: nel Mini Style Manager Model Axes è ora un **checkbox stateful**
+(non più bottone toggle + `Sketchup.send_action(10522)`). Vedi `ui/style_dialog.rb`
+(`RO_KEYS`/`BOOL_KEYS` includono `DisplaySketchAxes`).
+
+Nota: esiste anche `DisplayInstanceAxes` (default false) — assi delle istanze
+group/component, non testato; non confondere con `DisplaySketchAxes`.
+
 ### `Sketchup::Page#layers`, `pages.add`, drift e AVT — quadro completo
 
 In SU 2019 `page.layers` ritorna l'array dei layer che la pagina vuole

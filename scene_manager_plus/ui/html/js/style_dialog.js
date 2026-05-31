@@ -320,6 +320,7 @@ window.SMS = (function () {
     setBool('DisplaySectionPlanes', vals.DisplaySectionPlanes);
     setBool('DisplaySectionCuts', vals.DisplaySectionCuts);
     setBool('DrawSilhouettes', vals.DrawSilhouettes);
+    setBool('DisplaySketchAxes', vals.DisplaySketchAxes);
     setNum('ProfileWidth', vals.ProfileWidth);
     // Feedback visivo bottone "→ 1": evidenziato quando Profiles è ON e
     // ProfileWidth = 1 (= stato target che il bottone applicherebbe).
@@ -391,13 +392,9 @@ window.SMS = (function () {
         var c = {}; c[k] = parseInt(el.value, 10); sendChanges(c);
       });
     });
-    // Toggle button per Model Axes — fire-and-forget (no state in SU 2019 API)
-    var btnAxes = $('ctrl-ToggleAxes');
-    if (btnAxes) {
-      btnAxes.addEventListener('click', function () { call('sm_style_toggle_axes'); });
-    }
-    // Checkbox bool
-    ['DrawHorizon', 'ModelTransparency', 'DrawHidden', 'DisplaySectionPlanes', 'DisplaySectionCuts', 'DrawSilhouettes'].forEach(function (k) {
+    // Checkbox bool (Model axes = DisplaySketchAxes, RO stateful — niente più
+    // toggle send_action: vedi style_dialog.rb)
+    ['DrawHorizon', 'ModelTransparency', 'DrawHidden', 'DisplaySectionPlanes', 'DisplaySectionCuts', 'DrawSilhouettes', 'DisplaySketchAxes'].forEach(function (k) {
       var el = $('ctrl-' + k);
       if (!el) return;
       el.addEventListener('change', function () {
