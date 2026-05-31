@@ -1488,23 +1488,56 @@ standard adottata per la fog (replicabile altrove):
 > Copy agisce sulla **selezione della main window** (come Export). Ri-cliccare
 > 📋 con la finestra aperta aggiorna la selezione (bring_to_front + push_state).
 >
-> **Verifica live fatta via MCP `eval_ruby` (2026-05-31)**: moduli caricati OK,
-> color hex↔Color round-trip esatto, `Sketchup::Camera.new(eye,target,up,persp)`
-> + `fov=`/`height=` OK su persp e ortho, **61 RO serializzate / 0 scartate**
-> (nessuna proprietà stile/fog persa). Round-trip copy→paste reale su 2 file
-> NON ancora validato dall'utente.
+> **Verifica live via MCP `eval_ruby` (2026-05-31)**: moduli caricati, color
+> hex↔Color round-trip esatto, `Sketchup::Camera.new` OK persp/ortho, **61 RO
+> serializzate / 0 scartate**. Round-trip copy→paste reale su 2 file validato
+> dall'utente (con i fix sotto).
 >
-> **Limiti noti / TODO aperti su questa feature**:
-> - `color_to_hex` **scarta l'alpha** (`#rrggbb`): RO colore con alpha (es.
->   `HorizonColor a=0`) tornano opachi in paste. Da preservare l'alpha.
-> - Vedi gotcha **HorizonColor** in `docs/SU2019-LESSONS.md`: il template degli
->   slot bundled ha `HorizonColor=#000000` → banda nera all'orizzonte nel cielo,
->   e `HorizonColor` non è esposto da nessuna UI (né nativa né Mini Style
->   Manager). Follow-up proposto: esporre un controllo "Horizon" nel Mini Style
->   Manager (Background) + fix alpha sopra.
+> **Fix di rifinitura applicati (2026-05-31, dopo test utente)** — vedi anche
+> `docs/SU2019-LESSONS.md`:
+> - **Alpha-preserving transfer**: `Core::Styles.color_to_hex` ora emette
+>   `#rrggbbaa` e `hex_to_color` accetta 6 o 8 cifre (sono usati SOLO dal
+>   clipboard; badge/scene color/mini style manager hanno percorsi 6-hex
+>   separati). Senza, il `HorizonColor` nativo "non impostato" `(0,0,0,a=0)`
+>   diventava nero opaco e non si trasferiva: il colore nativo si trasferiva
+>   solo se modificato almeno una volta. **`normalize_horizon!` RIMOSSO dal
+>   paste** (`allocate_new_slot_from_ro_hash`): col transfer fedele il paste deve
+>   riprodurre l'orizzonte sorgente esatto; `normalize_horizon!` resta solo in
+>   `allocate_new_slot_from_viewport` ("+ New style", default bianco).
+> - **HorizonColor risolto**: controllo "Horizon color" aggiunto al Mini Style
+>   Manager (Background) — espone una RO che SU non mostra da nessuna UI nativa.
+>   `serialize_value` mostra `#ffffff` come display quando il valore è il sentinel
+>   cattivo (nero/alpha-0), coerente con `normalize_horizon!`. Nuovi slot ("+ New
+>   style") nascono con orizzonte bianco.
+> - **Viewport invisibile a copy/paste**: copy (`read_styles_snapshot`) e paste
+>   salvano la vista attiva e la ripristinano a fine operazione. Ripristino via
+>   `selected_page = prev_page` (ricarica la camera salvata COMPLETA, two-point +
+>   pan inclusi); `Camera.new(eye,target,up,persp)` è solo fallback per camera
+>   libera ed è **lossy** (perde il two-point). In copy guard MP: la pagina
+>   attiva è la stessa → ri-selezionarla se MP rischia BugSplat, quindi per MP
+>   non ri-seleziono (lo snap ha già ripristinato la camera).
+> - **Color popup**: aprire lo swatch non committa più il colore corrente
+>   (`color_popup.js`: `onApply` annullato durante il `setFromHex` iniziale di
+>   `show()`). Prima, aprire il popup riscriveva subito il colore mostrato.
+>
+> **LIMITE INVALICABILE — Two Point Perspective non trasferibile**: le scene
+> "raddrizzate" (`camera.is_2d? == true`) NON sono ricreabili da dati
+> serializzati. SU 2019 NON espone `center_2d=`/`scale_2d=`/`is_2d=`
+> (tutti NoMethodError) e `Camera#copy` AZZERA lo stato 2d (verificato via MCP
+> anche su pan reale). L'unico modo di ottenere il 2d è `selected_page = page`
+> su una scena che lo ha GIÀ salvato. Quindi la scena incollata mantiene
+> eye/target corretti ma in **prospettiva normale** (non raddrizzata). `camera_of`
+> serializza comunque `is_2d`/`center_2d`/`scale_2d` (record/detection) e la copy
+> **avvisa** nel report quando ci sono scene two-point. Workaround imperfetto non
+> implementato (scelta utente): `send_action` Two-Point in paste raddrizzerebbe
+> le verticali ma con pan centrato (≠ sorgente).
+>
+> **Limiti noti / TODO aperti ancora veri**:
 > - Fase B alloca uno slot per ogni stile sorgente distinto (no riuso di stili
 >   equivalenti già in destinazione — è Fase D). Possibile esaurimento pool su
 >   incolli ripetuti.
+> - `color_to_hex` 8-hex preserva l'alpha; le scene incollate two-point restano
+>   prospettiva normale (vedi sopra).
 
 ### Obiettivo
 

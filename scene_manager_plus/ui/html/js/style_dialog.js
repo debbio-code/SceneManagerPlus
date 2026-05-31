@@ -314,6 +314,7 @@ window.SMS = (function () {
     setIntSelect('TransparencySort', vals.TransparencySort);
     setHex('BackgroundColor', vals.BackgroundColor);
     setHex('SkyColor', vals.SkyColor);
+    setHex('HorizonColor', vals.HorizonColor);
     setBool('DrawHorizon', vals.DrawHorizon);
     setBool('ModelTransparency', vals.ModelTransparency);
     setBool('DrawHidden', vals.DrawHidden);
@@ -474,7 +475,7 @@ window.SMS = (function () {
     }
     // Hex color: text input + swatch clickabile che apre il popup HSV custom.
     // (Niente più <input type="color">, broken in CEF SU 2019.)
-    ['BackgroundColor', 'SkyColor'].forEach(function (k) {
+    ['BackgroundColor', 'SkyColor', 'HorizonColor'].forEach(function (k) {
       var el = $('ctrl-' + k);
       var sw = $('sw-' + k);
       if (!el || !sw) return;

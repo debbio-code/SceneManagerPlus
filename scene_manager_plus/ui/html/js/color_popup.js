@@ -228,7 +228,14 @@ window.SMColorPopup = (function () {
     lastAppliedInSession = null;
     pendingHex = null;
     renderRecent();
+    // Set iniziale dei marker/preview dal colore corrente SENZA committare:
+    // altrimenti aprire il popup riscriverebbe subito il colore (onApply in
+    // updateAll). Era visibile su HorizonColor, dove il valore mostrato
+    // (#ffffff sentinel) differisce dal reale e l'apertura lo sovrascriveva.
+    var _savedApply = onApply;
+    onApply = null;
     setFromHex(currentHex || '#ffffff');
+    onApply = _savedApply;
     lastAppliedInSession = null; // setFromHex sopra non conta come commit utente
     pendingHex = null;
     var r = triggerEl.getBoundingClientRect();

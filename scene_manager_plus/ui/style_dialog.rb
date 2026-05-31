@@ -36,6 +36,7 @@ module SceneManagerPlus
 
       RO_KEYS = %w[
         EdgeColorMode TransparencySort BackgroundColor DrawHorizon SkyColor
+        HorizonColor
         ModelTransparency DrawHidden DisplaySectionPlanes DisplaySectionCuts
         DrawSilhouettes ProfileWidth DisplaySketchAxes
       ].freeze
@@ -276,6 +277,15 @@ module SceneManagerPlus
 
       def serialize_value(v, key = nil)
         if v.is_a?(Sketchup::Color)
+          # HorizonColor: il template degli slot ha #000000 a=0 (sentinel
+          # "non impostato"). Mostrarlo come #ffffff (default effettivo SU),
+          # coerente con Core::Styles.normalize_horizon! e con la scrittura
+          # che è sempre opaca. Così il valore iniziale combacia con
+          # l'orizzonte bianco invece di mostrare un nero fuorviante.
+          if key == 'HorizonColor' &&
+             (v.alpha == 0 || (v.red == 0 && v.green == 0 && v.blue == 0))
+            return '#ffffff'
+          end
           format('#%02x%02x%02x', v.red, v.green, v.blue)
         elsif v == true || v == false
           v
@@ -345,7 +355,7 @@ module SceneManagerPlus
 
       # Coerce JS values verso il tipo atteso da RenderingOptions per ogni chiave.
       # Boolean → bool, Color → Sketchup::Color da hex, Integer → int.
-      COLOR_KEYS = %w[BackgroundColor SkyColor].freeze
+      COLOR_KEYS = %w[BackgroundColor SkyColor HorizonColor].freeze
       BOOL_KEYS  = %w[DrawHorizon ModelTransparency DrawHidden DisplaySectionPlanes DisplaySectionCuts DrawSilhouettes DisplaySketchAxes].freeze
       INT_KEYS   = %w[EdgeColorMode TransparencySort ProfileWidth].freeze
       FLOAT01_KEYS = %w[].freeze  # Fog spostata in PropertiesDialog (è per-scena, non per-stile)

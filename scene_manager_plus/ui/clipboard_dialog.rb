@@ -109,6 +109,13 @@ module SceneManagerPlus
           msg += "\n\nSkipped #{report[:skipped_mp].size} Match Photo scene(s):\n" \
                  "#{report[:skipped_mp].first(6).join(', ')}"
         end
+        tp = Array(report[:two_point])
+        if tp.any?
+          msg += "\n\nNote: #{tp.size} scene(s) use Two-Point Perspective " \
+                 "(straightened view). SketchUp 2019 cannot recreate it via the " \
+                 "API, so the pasted scenes will be regular perspective:\n" \
+                 "#{tp.first(6).join(', ')}"
+        end
         ::UI.messagebox(msg)
         push_state
       end

@@ -180,6 +180,9 @@ module SceneManagerPlus
             end
           end
 
+          # Fix orizzonte nero del template slot (vedi normalize_horizon!).
+          normalize_horizon!(ro)
+
           # Committa: lo slot 'name' ora contiene esattamente la vista
           # catturata. È persistente sullo stile, non più "dirty".
           m.styles.update_selected_style
@@ -244,6 +247,10 @@ module SceneManagerPlus
           m.styles.selected_style = loaded
           ro = m.rendering_options
 
+          # NB: niente normalize_horizon! qui. Il paste deve riprodurre
+          # FEDELMENTE l'orizzonte sorgente (alpha preservato dal clipboard);
+          # normalizzarlo a bianco falserebbe il transfer. normalize_horizon!
+          # resta solo in allocate_new_slot_from_viewport ("+ New style").
           apply_ro_snapshot(ro, ro_hash)
 
           m.styles.update_selected_style
@@ -284,17 +291,51 @@ module SceneManagerPlus
         end
       end
 
-      # "#rrggbb" → Sketchup::Color. Ritorna nil su input invalido.
+      # Fix dell'orizzonte nero degli slot del pool.
+      #
+      # Il cielo SU è un gradiente SkyColor (zenit) → HorizonColor (orizzonte).
+      # Il template degli slot bundled ha HorizonColor = #000000 a=0 → banda
+      # nera all'orizzonte. HorizonColor non è esposto da NESSUNA UI (né nativa
+      # SU né Mini Style Manager), quindi l'utente non può correggerlo a mano.
+      # Vedi docs/SU2019-LESSONS.md, sezione "HorizonColor".
+      #
+      # Strategia: se HorizonColor è il default "cattivo" (nero puro e/o alpha 0)
+      # lo rimpiazziamo con **bianco opaco** → il cielo sfuma da SkyColor (zenit)
+      # a bianco (orizzonte), come il default nativo di SketchUp. Condizionale:
+      # un HorizonColor già sensato (es. da un file sorgente in paste) viene
+      # preservato. (Mettere SkyColor invece di bianco dava un cielo piatto senza
+      # gradiente — vedi screenshot OpzB; bianco è quello giusto.)
+      def normalize_horizon!(ro)
+        hc = (ro['HorizonColor'] rescue nil)
+        return unless hc.is_a?(Sketchup::Color)
+        bad = (hc.red == 0 && hc.green == 0 && hc.blue == 0) || hc.alpha == 0
+        return unless bad
+        begin; ro['HorizonColor'] = Sketchup::Color.new(255, 255, 255, 255); rescue; end
+      end
+
+      # "#rrggbb" o "#rrggbbaa" → Sketchup::Color. Ritorna nil su input invalido.
+      # L'8-digit preserva l'alpha (necessario per il transfer fedele di RO con
+      # alpha != 255, es. HorizonColor "non impostato" = nero con alpha 0; senza
+      # alpha quel sentinel diventerebbe nero opaco e non si trasferirebbe).
       def hex_to_color(hex)
         s = hex.to_s.strip.sub(/^#/, '')
+        if s =~ /^[0-9a-fA-F]{8}$/
+          return Sketchup::Color.new(
+            s[0, 2].to_i(16), s[2, 2].to_i(16), s[4, 2].to_i(16), s[6, 2].to_i(16)
+          )
+        end
         return nil unless s =~ /^[0-9a-fA-F]{6}$/
         Sketchup::Color.new(s[0, 2].to_i(16), s[2, 2].to_i(16), s[4, 2].to_i(16))
       end
 
-      # Sketchup::Color → "#rrggbb" (drop alpha).
+      # Sketchup::Color → "#rrggbbaa" (alpha preservato). Usato SOLO dal clipboard
+      # (copy/paste RO snapshot): il round-trip deve essere fedele al colore
+      # nativo, alpha incluso. Gli altri consumer di colori (badge, scene color,
+      # mini style manager) usano percorsi 6-hex separati, non toccati da qui.
       def color_to_hex(color)
         return nil unless color.respond_to?(:red)
-        format('#%02x%02x%02x', color.red, color.green, color.blue)
+        a = (color.respond_to?(:alpha) ? color.alpha : 255)
+        format('#%02x%02x%02x%02x', color.red, color.green, color.blue, a)
       end
 
       # ── Nickname API ──────────────────────────────────────────────────

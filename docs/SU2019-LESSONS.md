@@ -197,9 +197,39 @@ l'alpha per "spegnerlo", va cambiato l'RGB. Quando si serializza un colore RO
 per la clipboard (`Core::Styles.color_to_hex`) si scarta l'alpha → un
 `HorizonColor a=0` torna opaco in paste (TODO: preservare alpha).
 
-Follow-up proposto (non ancora fatto): esporre un controllo "Horizon" nella
-sezione Background del Mini Style Manager — dà accesso a qualcosa che SU nativo
-nasconde.
+Follow-up FATTO (2026-05-31): controllo "Horizon" aggiunto alla sezione
+Background del Mini Style Manager (`HorizonColor` in `RO_KEYS`/`COLOR_KEYS`).
+Display: `serialize_value` mostra `#ffffff` quando il valore è il sentinel
+cattivo (nero o alpha 0), così l'iniziale non è un nero fuorviante.
+
+### Two Point Perspective NON è trasferibile programmaticamente (2026-05-31)
+
+Le viste "raddrizzate" (Camera → Two-Point Perspective) hanno uno stato 2D —
+`camera.is_2d? == true`, `camera.center_2d` (il pan 2D), `camera.scale_2d` — che
+**non si può impostare via API** in SU 2019:
+
+- `center_2d=`, `scale_2d=`, `is_2d=` → **NoMethodError** (sono solo getter).
+- `Sketchup::Camera#copy` **azzera** lo stato 2d (verificato via MCP: copia di una
+  camera con pan reale → `is_2d? == false`, `center_2d == [0,0,0]`).
+- `Sketchup::Camera.new(eye, target, up, persp)` costruisce solo prospettiva
+  normale (1-point).
+
+L'UNICO modo di ottenere una camera 2D è `model.pages.selected_page = page` su una
+scena che ha **già** il 2d salvato (SU ricarica lo stato completo). Quindi:
+
+- **Ripristinare** la vista di una scena 2D esistente: OK via `selected_page`
+  (lo usano copy/paste del clipboard per non muovere il viewport).
+- **Ricreare** una scena 2D da dati serializzati (es. paste cross-file): IMPOSSIBILE.
+  La scena incollata mantiene eye/target ma in prospettiva normale.
+
+È un limite analogo a Match Photo. Per il clipboard: `camera_of` serializza
+comunque `is_2d`/`center_2d`/`scale_2d` (record/detection) e la copy avvisa
+l'utente quando copia scene two-point.
+
+Workaround imperfetto NON implementato: `Sketchup.send_action` "Two-Point
+Perspective" sul viewport in paste raddrizzerebbe le verticali, ma con pan
+centrato (azzerato), diverso da quello sorgente. Verticali dritte ma inquadratura
+non identica.
 
 ### `Sketchup::Page#layers`, `pages.add`, drift e AVT — quadro completo
 

@@ -40,9 +40,10 @@ module SceneManagerPlus
         m = model
         return nil unless m
         ids = Array(uids).compact
-        return { copied: 0, skipped_mp: [], styles: 0 } if ids.empty?
+        return { copied: 0, skipped_mp: [], styles: 0, two_point: [] } if ids.empty?
 
         skipped_mp = []
+        two_point  = []
         pages = []
         ids.each do |uid|
           p = Core::SceneModel.find_by_id(uid)
@@ -51,6 +52,9 @@ module SceneManagerPlus
             skipped_mp << p.name.to_s
             next
           end
+          # Two-point perspective: la scena si copia, ma il 2d non è
+          # ricostruibile in paste (API SU 2019). Segnaliamo nel report.
+          two_point << p.name.to_s if two_point?(p)
           pages << [uid, p]
         end
 
@@ -86,7 +90,7 @@ module SceneManagerPlus
         }
 
         write_doc(doc)
-        { copied: scenes_payload.size, skipped_mp: skipped_mp, styles: styles_payload.size }
+        { copied: scenes_payload.size, skipped_mp: skipped_mp, styles: styles_payload.size, two_point: two_point }
       rescue => e
         warn "[SM+] Clipboard.copy: #{e.class}: #{e.message}"
         warn e.backtrace.first(4).join("\n")
@@ -101,6 +105,21 @@ module SceneManagerPlus
         return [] if style_names.empty?
         out = []
         prev_style = (m.styles.selected_style rescue nil)
+        # Salva la vista: attivare stili + commit può far snappare il viewport.
+        # La copy deve essere invisibile sul viewport → ripristiniamo a fine.
+        # Ripristino preferito via selected_page (ricarica la camera salvata
+        # COMPLETA, two-point + pan inclusi); Camera.new è solo fallback per
+        # camera libera (nessuna scena attiva) e PERDE il two-point/pan, quindi
+        # va usato solo quando non c'è scena da riattivare.
+        prev_page = m.pages.selected_page
+        prev_cam = begin
+                     c = m.active_view.camera
+                     Sketchup::Camera.new(c.eye, c.target, c.up, c.perspective?).tap do |nc|
+                       c.perspective? ? (nc.fov = c.fov) : (nc.height = c.height)
+                     end
+                   rescue
+                     nil
+                   end
         began = false
         begin
           m.start_operation('SM+ Read styles for copy', true, false, true)
@@ -127,6 +146,23 @@ module SceneManagerPlus
         rescue => e
           m.abort_operation if began
           warn "[SM+] Clipboard.read_styles_snapshot: #{e.class}: #{e.message}"
+        end
+        # Ripristina la vista pre-copy (viewport invisibile alla copy).
+        # selected_page ricarica la camera completa (two-point + pan); Camera.new
+        # è fallback lossy solo se non eravamo su una scena.
+        # MP guard: in copy prev_page è la STESSA pagina già attiva (la copy non
+        # cambia pagina, snappa solo la camera). Ri-selezionare la stessa pagina
+        # Match Photo con eventuale state dirty può scatenare un BugSplat
+        # (vedi CLAUDE.md). Per le MP NON ri-selezioniamo: lo snap della copy ha
+        # già ripristinato la loro camera (two-point inclusa).
+        begin
+          if prev_page && prev_page.valid? && !Core::SceneModel.matchphoto?(prev_page)
+            m.pages.selected_page = prev_page
+          elsif prev_page.nil? && prev_cam
+            m.active_view.camera = prev_cam
+          end
+        rescue => e
+          warn "[SM+] Clipboard.read_styles_snapshot: view restore failed: #{e.message}"
         end
         out
       end
@@ -157,8 +193,20 @@ module SceneManagerPlus
           'up'           => c.up.to_a,
           'fov'          => (persp ? (c.fov rescue nil) : nil),
           'height'       => (persp ? nil : (c.height rescue nil)),
-          'aspect_ratio' => (c.aspect_ratio rescue 0.0)
+          'aspect_ratio' => (c.aspect_ratio rescue 0.0),
+          # Two-point perspective: registrato per record/detection ma NON
+          # ricostruibile in paste — SU 2019 non espone setter per
+          # center_2d/scale_2d/is_2d e Camera#copy azzera il 2d. La scena
+          # incollata sarà in prospettiva normale (vedi warning in copy).
+          'is_2d'        => (c.is_2d? rescue false),
+          'center_2d'    => (c.center_2d.to_a rescue nil),
+          'scale_2d'     => (c.scale_2d rescue nil)
         }
+      end
+
+      # True se la scena è in Two Point Perspective (camera raddrizzata).
+      def two_point?(page)
+        page.camera.is_2d? rescue false
       end
 
       def write_doc(doc)
@@ -239,6 +287,19 @@ module SceneManagerPlus
         end
 
         # 2) Crea le scene in una sola operazione (1 Ctrl+Z per le pagine).
+        # Salva la vista corrente: pages.add + apply_camera muovono il viewport
+        # (ogni nuova scena diventa selected_page con la sua camera). A fine
+        # paste ripristiniamo, così l'utente NON viene catapultato sull'ultima
+        # scena incollata — resta dov'era a navigare.
+        prev_page = m.pages.selected_page
+        prev_cam  = begin
+                      c = m.active_view.camera
+                      Sketchup::Camera.new(c.eye, c.target, c.up, c.perspective?).tap do |nc|
+                        c.perspective? ? (nc.fov = c.fov) : (nc.height = c.height)
+                      end
+                    rescue
+                      nil
+                    end
         existing_names = m.pages.map { |p| p.name.to_s }
         created = []
         m.start_operation('SM+ Paste scenes', true)
@@ -279,6 +340,18 @@ module SceneManagerPlus
           Core::SceneModel.set_logical_order(Core::SceneModel.logical_order)
         rescue => e
           warn "[SM+] Clipboard.paste: set_logical_order failed: #{e.message}"
+        end
+
+        # 4) Ripristina la vista pre-paste: se eravamo su una scena, riattivala
+        # (ripristina camera/stile/layer); altrimenti rimetti la camera libera.
+        begin
+          if prev_page && prev_page.valid?
+            m.pages.selected_page = prev_page
+          elsif prev_cam
+            m.active_view.camera = prev_cam
+          end
+        rescue => e
+          warn "[SM+] Clipboard.paste: view restore failed: #{e.message}"
         end
 
         {
