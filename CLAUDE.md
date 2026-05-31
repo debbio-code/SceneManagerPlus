@@ -1454,12 +1454,57 @@ standard adottata per la fog (replicabile altrove):
    "step rotondo" (1/2/5 × 10ⁿ) — su modello 100m → 0.5m, su modello
    10mm → 0.05mm.
 
-## [FUTURO / NON ANCORA IMPLEMENTATO] Copia/incolla scene cross-file
+## Copia/incolla scene cross-file (Fase A+B implementate — 2026-05-31)
 
-> ⚠️ **Feature pianificata, non implementata.** L'utente la vuole in futuro
-> ("copio scene da un file, le incollo in un altro con gli stessi stili").
-> Questa sezione è il design da validare quando si parte. Nessun codice
-> esiste ancora. Sviluppo a fasi (A→D, vedi sotto).
+> ✅ **Fase A (Copy) + Fase B (Paste base) IMPLEMENTATE.** Fase C (layer
+> match-by-name) e D (rifiniture) ancora da fare — il design sotto resta il
+> riferimento per quelle.
+>
+> **Variante UX rispetto al design originale**: NON due bottoni toolbar
+> Copy/Paste (no spazio in larghezza). Invece il vecchio bottone **refresh**
+> (`btn-refresh`, ridondante: ri-pushava lo stato già pushato a ogni mutazione,
+> non era nel manuale) è stato **riusato** come bottone 📋 (`btn-clipboard`)
+> che apre una **finestra separata** `UI::ClipboardDialog` con Copy/Paste
+> (e spazio per futuri bottoni).
+>
+> File implementati:
+> - `core/clipboard.rb` — `copy(uids)` / `read` / `peek` / `paste`. Clipboard
+>   su `~/.scene_manager_plus/clipboard.json` (schema `smp-scene-clipboard/1`).
+> - `ui/clipboard_dialog.rb` + `html/clipboard.{html,css}` + `js/clipboard.js`
+>   (mirror leggero di ExportDialog, `STYLE_DIALOG`, callback `sm_clip_*`).
+> - `Core::Styles.allocate_new_slot_from_ro_hash(ro_hash, nickname:)` — variante
+>   di `allocate_new_slot_from_viewport` che applica uno snapshot RO arbitrario
+>   (hex→Color via `hex_to_color`/`color_to_hex`, helper riusabili). Scrive
+>   sempre `SilhouetteWidth`+`ProfileWidth`.
+> - Wiring: `sm_open_clipboard` in `dialog.rb`, `openClipboard` in `bridge.js`,
+>   handler `btn-clipboard` in `app.js` (passa `selection` corrente).
+>
+> Cosa viaggia: camera (eye/target/up in inches, persp/fov o ortho/height),
+> name, description, flag `use_*` (diff `current != v` in paste — regola
+> anti-crash MP), stile (snapshot delle **61** rendering_options → slot pool,
+> con nickname+badge color), fog (dentro le RO), colore scena. Match Photo
+> escluse con report. Layer/section planes/hidden geometry NO (Fase C+).
+>
+> Copy agisce sulla **selezione della main window** (come Export). Ri-cliccare
+> 📋 con la finestra aperta aggiorna la selezione (bring_to_front + push_state).
+>
+> **Verifica live fatta via MCP `eval_ruby` (2026-05-31)**: moduli caricati OK,
+> color hex↔Color round-trip esatto, `Sketchup::Camera.new(eye,target,up,persp)`
+> + `fov=`/`height=` OK su persp e ortho, **61 RO serializzate / 0 scartate**
+> (nessuna proprietà stile/fog persa). Round-trip copy→paste reale su 2 file
+> NON ancora validato dall'utente.
+>
+> **Limiti noti / TODO aperti su questa feature**:
+> - `color_to_hex` **scarta l'alpha** (`#rrggbb`): RO colore con alpha (es.
+>   `HorizonColor a=0`) tornano opachi in paste. Da preservare l'alpha.
+> - Vedi gotcha **HorizonColor** in `docs/SU2019-LESSONS.md`: il template degli
+>   slot bundled ha `HorizonColor=#000000` → banda nera all'orizzonte nel cielo,
+>   e `HorizonColor` non è esposto da nessuna UI (né nativa né Mini Style
+>   Manager). Follow-up proposto: esporre un controllo "Horizon" nel Mini Style
+>   Manager (Background) + fix alpha sopra.
+> - Fase B alloca uno slot per ogni stile sorgente distinto (no riuso di stili
+>   equivalenti già in destinazione — è Fase D). Possibile esaurimento pool su
+>   incolli ripetuti.
 
 ### Obiettivo
 

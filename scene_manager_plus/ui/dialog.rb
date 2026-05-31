@@ -340,6 +340,11 @@ module SceneManagerPlus
           ExportDialog.show(selected_ids: Array(data['selected']))
         end
 
+        dlg.add_action_callback('sm_open_clipboard') do |_ctx, payload|
+          data = parse(payload)
+          ClipboardDialog.show(selected_ids: Array(data['selected']))
+        end
+
         dlg.add_action_callback('sm_export_cancel_running') do |_ctx|
           Core::Exporter.request_cancel!
         end

@@ -11,11 +11,13 @@ module SceneManagerPlus
   require File.join(PLUGIN_DIR, 'core', 'text_render')
   require File.join(PLUGIN_DIR, 'core', 'titleblock')
   require File.join(PLUGIN_DIR, 'core', 'exporter')
+  require File.join(PLUGIN_DIR, 'core', 'clipboard')
   require File.join(PLUGIN_DIR, 'ui', 'dialog')
   require File.join(PLUGIN_DIR, 'ui', 'settings_dialog')
   require File.join(PLUGIN_DIR, 'ui', 'properties_dialog')
   require File.join(PLUGIN_DIR, 'ui', 'export_dialog')
   require File.join(PLUGIN_DIR, 'ui', 'style_dialog')
+  require File.join(PLUGIN_DIR, 'ui', 'clipboard_dialog')
 
   unless file_loaded?(__FILE__)
     cmd = ::UI::Command.new(PLUGIN_NAME) { SceneManagerPlus::UI::Dialog.show }

@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Scene Manager+ Clipboard</title>
+  <link rel="stylesheet" href="css/settings.css">
+  <link rel="stylesheet" href="css/clipboard.css">
+</head>
+<body>
+  <div id="clip-app">
+    <section class="group">
+      <h2>Copy</h2>
+      <p class="hint" id="copy-summary">No scenes selected.</p>
+      <ul class="clip-list" id="copy-list">
+        <li class="empty">Select scenes in the main window.</li>
+      </ul>
+      <div class="actions">
+        <button id="btn-copy" class="primary" disabled>Copy selected scenes</button>
+      </div>
+    </section>
+
+    <section class="group">
+      <h2>Clipboard</h2>
+      <p class="hint" id="clip-summary">Empty — nothing copied yet.</p>
+      <ul class="clip-list" id="clip-list">
+        <li class="empty">Empty.</li>
+      </ul>
+      <div class="actions">
+        <button id="btn-paste" class="primary" disabled>Paste into this file</button>
+      </div>
+    </section>
+
+    <p class="foot-note">
+      Match Photo scenes are skipped. Tag/layer visibility and section planes
+      are not transferred yet.
+    </p>
+  </div>
+
+  <script src="js/clipboard.js"></script>
+</body>
+</html>

@@ -45,6 +45,7 @@ window.SMBridge = (function () {
     deferToggle:     function ()      { call('sm_defer_toggle'); },
     generatePreviews:function (ids)   { call('sm_generate_previews', { ids: ids || [] }); },
     openExport:      function (sel)   { call('sm_open_export', { selected: sel || [] }); },
+    openClipboard:   function (sel)   { call('sm_open_clipboard', { selected: sel || [] }); },
     cancelExport:    function ()      { call('sm_export_cancel_running'); },
     setExportIncluded: function (ids, included) {
                        var arr = Array.isArray(ids) ? ids : [ids];

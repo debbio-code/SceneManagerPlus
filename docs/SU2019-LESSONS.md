@@ -177,6 +177,30 @@ Conseguenza: nel Mini Style Manager Model Axes è ora un **checkbox stateful**
 Nota: esiste anche `DisplayInstanceAxes` (default false) — assi delle istanze
 group/component, non testato; non confondere con `DisplaySketchAxes`.
 
+### `HorizonColor`: il cielo va da SkyColor a HorizonColor (RO nascosta) (2026-05)
+
+Il gradiente del cielo in SU non è SkyColor → bianco: è **`SkyColor` (zenit) →
+`HorizonColor` (orizzonte)**. `HorizonColor` è una RenderingOption **non esposta
+da NESSUNA UI**: il pannello Background nativo (Window → Styles → Edit) mostra
+solo Sky e Ground; `HorizonColor` si tocca solo via `rendering_options`.
+
+Trappola concreta: il template degli slot bundled del plugin
+(`assets/styles/slot_NN.style`, derivati da "Architectural Design Style") ha
+`HorizonColor = #000000 a=0` → **banda nera all'orizzonte** nel cielo di ogni
+nuovo slot allocato (`+ New style`, paste, ecc.). L'utente non può correggerlo
+perché non è esposto. Verificato live via MCP eval_ruby (SU 2019): settando
+`ro['HorizonColor'] = Sketchup::Color.new(198,205,208,255)` +
+`update_selected_style` + `view.invalidate` il nero sparisce.
+
+Nota alpha: il valore di default ha `a=0` ma rende comunque nero; non basta
+l'alpha per "spegnerlo", va cambiato l'RGB. Quando si serializza un colore RO
+per la clipboard (`Core::Styles.color_to_hex`) si scarta l'alpha → un
+`HorizonColor a=0` torna opaco in paste (TODO: preservare alpha).
+
+Follow-up proposto (non ancora fatto): esporre un controllo "Horizon" nella
+sezione Background del Mini Style Manager — dà accesso a qualcosa che SU nativo
+nasconde.
+
 ### `Sketchup::Page#layers`, `pages.add`, drift e AVT — quadro completo
 
 In SU 2019 `page.layers` ritorna l'array dei layer che la pagina vuole

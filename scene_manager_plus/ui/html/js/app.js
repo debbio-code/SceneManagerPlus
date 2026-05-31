@@ -729,7 +729,12 @@ window.SM = (function () {
     listEl        = $('scene-list');
     statusEl      = $('status');
 
-    $('btn-refresh').addEventListener('click', function () { SMBridge.refresh(); });
+    var btnClipboard = $('btn-clipboard');
+    if (btnClipboard) {
+      btnClipboard.addEventListener('click', function () {
+        SMBridge.openClipboard(selection.slice());
+      });
+    }
     var bannerOrder = $('banner-order');
     if (bannerOrder) bannerOrder.addEventListener('click', onBannerOrderClick);
     var btnNewScene = $('btn-new-scene');

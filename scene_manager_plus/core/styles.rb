@@ -196,6 +196,107 @@ module SceneManagerPlus
         end
       end
 
+      # Come allocate_new_slot_from_viewport ma applica uno snapshot di
+      # rendering options ARBITRARIO invece di catturare il viewport corrente.
+      # Usato dal paste cross-file (Core::Clipboard): lo snapshot RO arriva
+      # dal clipboard.json del file sorgente, con i colori serializzati come
+      # stringhe hex "#rrggbb".
+      #
+      # ro_hash: { 'BackgroundColor' => '#ffffff', 'EdgeColorMode' => 1, ... }
+      #   I valori colore sono hex string; vengono convertiti in Sketchup::Color
+      #   inferendo il tipo dalla RO corrente dello slot template (se la chiave
+      #   è un colore nello slot, la stringa hex viene promossa a Color).
+      # nickname: stringa friendly opzionale (validazione unicità a monte).
+      #
+      # Ritorna il Sketchup::Style allocato o nil (pool esaurito / errore).
+      def allocate_new_slot_from_ro_hash(ro_hash, nickname: nil)
+        m = model
+        return nil unless m
+        ro_hash ||= {}
+        n = next_free_slot_index(m)
+        unless n
+          ::UI.messagebox(
+            "Pool di stili esaurito (#{MAX_SLOT_INDEX} slot occupati).\n\n" \
+            "Per estendere il pool: rilancia tools/generate-slot-styles.rb\n" \
+            "su una postazione dev aumentando NUM_SLOTS, poi commit dei\n" \
+            "nuovi assets/styles/slot_NN.style."
+          )
+          return nil
+        end
+        path = slot_path(n)
+        unless File.exist?(path)
+          ::UI.messagebox("File slot mancante: #{path}")
+          return nil
+        end
+        name = slot_name(n)
+
+        m.start_operation('SM+ New style from snapshot', true)
+        begin
+          m.styles.add_style(path, false)
+          loaded = m.styles.find { |s| s.name == name }
+          unless loaded
+            m.abort_operation
+            warn "[SM+] allocate_new_slot_from_ro_hash: add_style non ha aggiunto '#{name}'"
+            return nil
+          end
+
+          # Attiva lo slot: model.rendering_options ora riflette il template.
+          m.styles.selected_style = loaded
+          ro = m.rendering_options
+
+          apply_ro_snapshot(ro, ro_hash)
+
+          m.styles.update_selected_style
+          set_nickname(name, nickname) if nickname && !nickname.to_s.strip.empty?
+
+          m.commit_operation
+          loaded
+        rescue => e
+          m.abort_operation
+          warn "[SM+] allocate_new_slot_from_ro_hash: #{e.class}: #{e.message}"
+          warn e.backtrace.first(3).join("\n")
+          nil
+        end
+      end
+
+      # Applica uno snapshot RO (chiavi → valori, colori come hex string) su
+      # un RenderingOptions live. Inferisce il tipo colore dal valore corrente.
+      # Scrive sempre sia SilhouetteWidth che ProfileWidth se una delle due è
+      # presente (alias non-ufficiale in SU 2019, cfr. CLAUDE.md).
+      def apply_ro_snapshot(ro, ro_hash)
+        ro_hash.each do |k, v|
+          begin
+            cur = ro[k]
+            if cur.is_a?(Sketchup::Color) && v.is_a?(String)
+              ro[k] = hex_to_color(v)
+            else
+              ro[k] = v
+            end
+          rescue
+            # chiave read-only o non riassegnabile: best-effort, ignora.
+          end
+        end
+        # Profile width: tieni allineate le due chiavi alias.
+        pw = ro_hash['SilhouetteWidth'] || ro_hash['ProfileWidth']
+        unless pw.nil?
+          begin; ro['SilhouetteWidth'] = pw; rescue; end
+          begin; ro['ProfileWidth']    = pw; rescue; end
+        end
+      end
+
+      # "#rrggbb" → Sketchup::Color. Ritorna nil su input invalido.
+      def hex_to_color(hex)
+        s = hex.to_s.strip.sub(/^#/, '')
+        return nil unless s =~ /^[0-9a-fA-F]{6}$/
+        Sketchup::Color.new(s[0, 2].to_i(16), s[2, 2].to_i(16), s[4, 2].to_i(16))
+      end
+
+      # Sketchup::Color → "#rrggbb" (drop alpha).
+      def color_to_hex(color)
+        return nil unless color.respond_to?(:red)
+        format('#%02x%02x%02x', color.red, color.green, color.blue)
+      end
+
       # ── Nickname API ──────────────────────────────────────────────────
 
       def get_nickname(style_name)
