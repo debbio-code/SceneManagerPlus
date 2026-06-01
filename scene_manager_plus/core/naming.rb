@@ -20,6 +20,7 @@ module SceneManagerPlus
         prefix = case settings['prefix_mode']
                  when 'custom'   then (settings['prefix_custom'] || '').to_s.strip
                  when 'skp_name' then sanitize(skp_title.to_s)
+                 when 'skp_first_word' then sanitize(skp_title.to_s).split(/\s+/).first.to_s
                  else ''
                  end
 

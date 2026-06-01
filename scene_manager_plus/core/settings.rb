@@ -11,8 +11,8 @@ module SceneManagerPlus
 
       DEFAULTS = {
         'naming' => {
-          'enabled'        => false,
-          'prefix_mode'    => 'skp_name', # 'skp_name' | 'custom' | 'none'
+          'enabled'        => true,
+          'prefix_mode'    => 'skp_first_word', # 'skp_first_word' | 'skp_name' | 'custom' | 'none'
           'prefix_custom'  => '',
           'pad'            => 2,
           'separator'      => '_',

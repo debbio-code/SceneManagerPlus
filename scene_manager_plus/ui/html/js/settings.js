@@ -53,7 +53,7 @@
     // in editing, altrimenti il valore in-progress viene "ripristinato" al
     // contenuto persistito (vecchio).
     setIfNotFocused($('#naming-enabled'),     'checked', !!naming.enabled);
-    setIfNotFocused($('#prefix-mode'),        'value',   naming.prefix_mode || 'skp_name');
+    setIfNotFocused($('#prefix-mode'),        'value',   naming.prefix_mode || 'skp_first_word');
     setIfNotFocused($('#prefix-custom'),      'value',   naming.prefix_custom || '');
     setIfNotFocused($('#pad'),                'value',   (naming.pad == null ? 2 : naming.pad));
     setIfNotFocused($('#separator'),          'value',   naming.separator || '_');
@@ -74,6 +74,7 @@
     const sep = f.separator || '';
     const prefix = f.prefix_mode === 'none' ? '' :
                    f.prefix_mode === 'custom' ? (f.prefix_custom || '<custom>') :
+                   f.prefix_mode === 'skp_first_word' ? '<skp_first_word>' :
                    '<skp_name>';
     const pad = Math.max(0, Math.min(6, f.pad));
     const num = '1'.padStart(pad, '0');
