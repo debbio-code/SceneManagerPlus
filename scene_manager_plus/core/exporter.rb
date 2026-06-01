@@ -33,6 +33,7 @@ module SceneManagerPlus
       # on_progress: lambda (done, total, current_name)
       # on_done:     lambda (count, output_dir, errors[])
       def export(scope:, selected_ids: nil, folder_ids: nil,
+                 out_dir_override: nil, overwrite: false,
                  on_progress: nil, on_done: nil)
         if @running
           warn '[SM+] Export already running, ignoring second call'
@@ -55,14 +56,22 @@ module SceneManagerPlus
         label_cfg     = settings_all['filename_label'] || {}
         tb_cfg        = settings_all['titleblock']     || {}
 
-        out_dir, dir_notes, dir_err = resolve_output_dir(export_cfg['output_dir'], model.path.to_s)
-        unless out_dir
-          # Path esplicito non valido o modello non salvato: chiedi all'utente
-          warn "[SM+] resolve_output_dir: #{dir_err}" if dir_err
-          chosen = ::UI.select_directory(title: 'Choose export folder')
-          return on_done&.call(0, nil, ['Export cancelled'], true) unless chosen
-          out_dir = chosen
+        # out_dir_override (quarta opzione "selezione → cartella"): bypassa
+        # del tutto la logica Immagini/Superate. La cartella è già stata
+        # scelta dall'utente nel dialog; qui la usiamo grezza.
+        if out_dir_override && File.directory?(out_dir_override.to_s)
+          out_dir   = out_dir_override.to_s
           dir_notes = []
+        else
+          out_dir, dir_notes, dir_err = resolve_output_dir(export_cfg['output_dir'], model.path.to_s)
+          unless out_dir
+            # Path esplicito non valido o modello non salvato: chiedi all'utente
+            warn "[SM+] resolve_output_dir: #{dir_err}" if dir_err
+            chosen = ::UI.select_directory(title: 'Choose export folder')
+            return on_done&.call(0, nil, ['Export cancelled'], true) unless chosen
+            out_dir = chosen
+            dir_notes = []
+          end
         end
 
         targets = collect_targets(scope, selected_ids, folder_ids)
@@ -301,7 +310,8 @@ module SceneManagerPlus
           page, _idx_for_name, base_name, uid = targets_meta[i]
           i += 1
           fname = base_name + ext
-          fpath = unique_path(File.join(out_dir, fname))
+          fpath = File.join(out_dir, fname)
+          fpath = unique_path(fpath) unless overwrite
 
           begin
             pages.selected_page = page

@@ -57,9 +57,13 @@
     renderSummary(state);
 
     const selCount = (state.selected || []).length;
-    $('#count-selected').textContent = selCount ? '(' + selCount + ')' : '(none)';
+    const selLabel = selCount ? '(' + selCount + ')' : '(none)';
+    $('#count-selected').textContent = selLabel;
+    $('#count-selected-dir').textContent = selLabel;
     $('#rb-selected').disabled = !state.has_select;
-    if (!state.has_select && document.querySelector('input[name="scope"]:checked').value === 'selected') {
+    $('#rb-selected-dir').disabled = !state.has_select;
+    const checked = document.querySelector('input[name="scope"]:checked').value;
+    if (!state.has_select && (checked === 'selected' || checked === 'selected_dir')) {
       document.querySelector('input[name="scope"][value="all"]').checked = true;
     }
     updateScopeUI();

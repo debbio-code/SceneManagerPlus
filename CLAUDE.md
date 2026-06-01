@@ -223,6 +223,15 @@ Copy-Item "$src\scene_manager_plus" "$plug\" -Recurse
 ```
 
 - Modifiche **Ruby (.rb)** → **avvisare l'utente di riavviare SketchUp**.
+  In alternativa, se l'MCP è attivo, **reload a caldo** via `eval_ruby` senza
+  riavvio: dopo la copia in Plugins, `load '<path>/file.rb'` sui file toccati
+  (i moduli sono `module_function`, il re-eval è idempotente). Verificare poi
+  che il cambiamento sia attivo (es. `Method#parameters`). Pattern già usato
+  per aggiungere kwarg a `Exporter.export` senza restart. Trappola diagnostica:
+  se la UI mostra una feature nuova ma "non fa quanto concordato", controllare
+  PRIMA che il Ruby in memoria sia aggiornato — l'HTML/JS si ricaricano da soli
+  (cache-bust) ma il `.rb` no, e un payload sconosciuto può cadere su un ramo
+  `else` col comportamento di default sbagliato.
 - Modifiche **HTML/CSS/JS** → basta chiudere+riaprire la finestra del plugin
   (c'è cache-bust su `index.html` / `settings.html` / `properties.html` /
   `style.html` / `export.html`).
@@ -338,6 +347,21 @@ decidere Caso B vs C **deve escludere** la entry `Superate`, altrimenti
 dopo il primo archivio scatterebbe sempre Caso B.
 
 Le note di archivio entrano negli `errors` mostrati nel messagebox finale.
+
+### Quarta opzione: "Current selection → choose folder…"
+
+Radio `selected_dir` nel dialog Export (sotto "Specific folders…"). Esporta
+le scene della **selezione blu** (stessi uid di `scope='selected'`) in una
+cartella scelta **ogni volta** col picker Windows (`UI.select_directory`),
+**bypassando del tutto** la logica `Immagini/`/`Superate/` e **sovrascrivendo**
+in caso di conflitto nome (no `unique_path`). Si abilita/disabilita come
+"Current selection" (dipende da `has_select`).
+
+Implementazione: in `ExportDialog.run`, se `scope=='selected_dir'` apre il
+picker (se annullato → resta nel dialog), poi rimappa a `scope='selected'`
+passando a `Exporter.export` i due nuovi kwarg `out_dir_override:` (bypassa
+`resolve_output_dir`) e `overwrite: true` (salta `unique_path`). `collect_targets`
+NON è stato toccato (riusa il caso `'selected'`).
 
 ## Modello dati cartelle
 

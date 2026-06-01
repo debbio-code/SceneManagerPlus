@@ -96,6 +96,20 @@ module SceneManagerPlus
         folder_ids = Array(data['folder_ids'])
         sel_ids    = @selected_ids
 
+        # Quarta opzione: esporta la selezione (fascia blu) in una cartella
+        # scelta ogni volta col picker di Windows. Sovrascrive in caso di
+        # conflitto nome; niente logica Immagini/Superate. Internamente è uno
+        # scope 'selected' con out_dir_override + overwrite.
+        out_dir_override = nil
+        overwrite        = false
+        if scope == 'selected_dir'
+          chosen = ::UI.select_directory(title: 'Choose export folder')
+          return unless chosen # picker annullato → resta nel dialog Export
+          out_dir_override = chosen
+          overwrite        = true
+          scope            = 'selected'
+        end
+
         main = Dialog.dialog_handle # accessor; nil-safe
         progress_cb = lambda do |done, total, name|
           if main && main.visible?
@@ -122,11 +136,13 @@ module SceneManagerPlus
         dlg.close
 
         Core::Exporter.export(
-          scope:        scope,
-          selected_ids: sel_ids,
-          folder_ids:   folder_ids,
-          on_progress:  progress_cb,
-          on_done:      done_cb
+          scope:            scope,
+          selected_ids:     sel_ids,
+          folder_ids:       folder_ids,
+          out_dir_override: out_dir_override,
+          overwrite:        overwrite,
+          on_progress:      progress_cb,
+          on_done:          done_cb
         )
       end
 
