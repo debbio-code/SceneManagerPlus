@@ -123,6 +123,22 @@ module SceneManagerPlus
       end
     end
 
+    # Debugging mode on startup (Settings → Interface): apre la Ruby Console e
+    # avvia il server MCP a ogni lancio di SketchUp. Flag globale per-macchina
+    # (write_default), utile per i tanti riavvii durante lo sviluppo così le
+    # verifiche via MCP sono disponibili senza riaprire il dialog. Defer 0.7s:
+    # leggermente dopo l'auto-open, per dare tempo al plugin MCP (su_mcp) di
+    # registrarsi durante lo startup.
+    if Sketchup.read_default('SceneManagerPlus', 'debug_mode_on_open', false)
+      ::UI.start_timer(0.7, false) do
+        begin
+          SceneManagerPlus::UI::SettingsDialog.activate_debug_mode
+        rescue => e
+          warn "[SM+] debug auto-start failed: #{e.class}: #{e.message}"
+        end
+      end
+    end
+
     file_loaded(__FILE__)
   end
 end

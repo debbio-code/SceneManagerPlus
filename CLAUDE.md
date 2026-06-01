@@ -1188,6 +1188,39 @@ Quando devi editare un file JS con caratteri Unicode (frecce, em-dash,
 ecc.), verifica sempre dopo l'edit con il check sopra. Pattern alternativo:
 fai l'edit con `Write` invece di `Edit` quando puoi.
 
+## Debugging mode (checkbox Settings → Interface) — 2026-06-01
+
+Checkbox "Debugging mode on startup (Ruby Console + MCP server)" in Settings →
+Interface. A ogni avvio di SketchUp apre la Ruby Console e avvia il server MCP,
+così le verifiche live via `eval_ruby` sono disponibili senza riaprire nulla
+(comodo nei tanti riavvii dovuti a modifiche `.rb`).
+
+**Logica** in `SettingsDialog.activate_debug_mode` (riusata da `main.rb` allo
+startup e dal callback della checkbox):
+- Console: `::SKETCHUP_CONSOLE.show` (fallback `Sketchup.send_action('showRubyPanel:')`).
+- MCP: il plugin MCP `su_mcp` espone il server come **ivar del modulo**
+  `SU_MCP` → si avvia con `::SU_MCP.instance_variable_get(:@server).start`
+  (idempotente, `return if @running`). Porta letta da `srv.instance_variable_get(:@port)`
+  (default 9876). Tutto guardato con `defined?(::SU_MCP)`: su macchine senza MCP
+  apre solo la console e lo segnala nello status.
+
+**Persistenza = flag GLOBALE per-macchina** via `Sketchup.write_default(
+'SceneManagerPlus', 'debug_mode_on_open', bool)`, **NON** il gruppo settings
+`ui` (che è per-file model attribute). Motivo: è una preferenza di sviluppo che
+deve valere su qualsiasi `.skp` apri, non solo su quello dove hai spuntato.
+Stesso pattern di `main_dialog_open`. Quindi nel `push_state` del Settings
+dialog `debug_mode_on_open` è un campo **top-level** dello state (non dentro
+`settings.ui`), e in `settings.js` la checkbox `#ui-debug-on-open` si setta da
+`state.debug_mode_on_open` (non da `writeUi`). Avvio in `main.rb`: timer 0.7s
+(dopo l'auto-open del dialog, per dar tempo a `su_mcp` di registrarsi).
+
+**Nota diagnostica**: la Ruby Console che si apre da sola a ogni avvio di SU
+**NON è Scene Manager+** — è il plugin MCP `su_mcp/main.rb` che fa
+`SKETCHUP_CONSOLE.show` a livello top-level (riga ~7) e di nuovo in
+`Server#initialize` (eseguito perché `@server = Server.new` parte al load).
+Il server MCP però NON parte da solo: solo la console viene mostrata. Per non
+far aprire la console all'avvio, il fix va fatto in `su_mcp`, non qui.
+
 ## Update from view parziale (tasto destro)
 
 Right-click su `btn-update` (toolbar) e su `btn-update-view` (Properties dialog)

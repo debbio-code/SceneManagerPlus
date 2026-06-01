@@ -189,6 +189,68 @@ module SceneManagerPlus
             puts "[SM+] purge_unused_styles: aborted by user"
           end
         end
+
+        # Debugging mode: checkbox persistente (flag GLOBALE per-macchina via
+        # Sketchup.write_default, NON nel gruppo 'ui' che è per-file model
+        # attribute). Quando abilitato, a ogni avvio di SketchUp `main.rb`
+        # chiama `activate_debug_mode`. Toggle-on lo attiva anche subito.
+        dlg.add_action_callback('sm_settings_debug_on_open') do |_ctx, payload|
+          data    = parse(payload)
+          enabled = data['enabled'] ? true : false
+          Sketchup.write_default('SceneManagerPlus', 'debug_mode_on_open', enabled)
+          if enabled
+            status = activate_debug_mode
+            dlg.execute_script("window.SMS && SMS.setDebugResult(#{status.to_json});")
+          else
+            dlg.execute_script(
+              "window.SMS && SMS.setDebugResult(#{'Off — will not auto-start on next launch'.to_json});"
+            )
+          end
+        end
+      end
+
+      # Apre la Ruby Console e avvia il server MCP (se il plugin `su_mcp` è
+      # installato). Entrambe le azioni sono guardate: su una macchina senza
+      # MCP apre solo la console e lo segnala. Il server MCP espone `@server`
+      # come ivar del modulo SU_MCP (vedi su_mcp/main.rb); `Server#start` è
+      # idempotente (`return if @running`). Ritorna la stringa di status.
+      # Riusata da `main.rb` all'avvio e dal callback della checkbox.
+      def activate_debug_mode
+        msgs = []
+
+        # 1) Ruby Console
+        begin
+          if defined?(::SKETCHUP_CONSOLE) && ::SKETCHUP_CONSOLE
+            ::SKETCHUP_CONSOLE.show
+          else
+            Sketchup.send_action('showRubyPanel:')
+          end
+          msgs << 'Ruby Console opened'
+        rescue => e
+          msgs << "Console error: #{e.message}"
+        end
+
+        # 2) MCP server (porta TCP locale)
+        if defined?(::SU_MCP)
+          begin
+            srv = ::SU_MCP.instance_variable_get(:@server)
+            if srv && srv.respond_to?(:start)
+              srv.start
+              port = (srv.instance_variable_get(:@port) rescue nil)
+              msgs << (port ? "MCP server listening on port #{port}" : 'MCP server started')
+            else
+              msgs << 'MCP plugin loaded but server object missing'
+            end
+          rescue => e
+            msgs << "MCP error: #{e.message}"
+          end
+        else
+          msgs << 'MCP plugin not installed'
+        end
+
+        status = msgs.join(' · ')
+        puts "[SM+] Debugging mode: #{status}"
+        status
       end
 
       def push_state
@@ -197,7 +259,10 @@ module SceneManagerPlus
         state = {
           settings:           Core::Settings.all,
           skp_title:          (Sketchup.active_model ? Sketchup.active_model.title.to_s : ''),
-          default_logo_name:  (default_logo ? File.basename(default_logo) : nil)
+          default_logo_name:  (default_logo ? File.basename(default_logo) : nil),
+          # Flag globale per-macchina (write_default), non per-file: vedi
+          # callback sm_settings_debug_on_open.
+          debug_mode_on_open: Sketchup.read_default('SceneManagerPlus', 'debug_mode_on_open', false)
         }
         js = "window.SMS && SMS.setState(#{state.to_json});"
         @dialog.execute_script(js)

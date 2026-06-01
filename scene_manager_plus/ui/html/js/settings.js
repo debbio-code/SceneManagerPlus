@@ -193,6 +193,9 @@
     writeLabel(label);
     writeTitleblock(tb);
     writeUi(ui);
+    // Debug-on-startup: flag globale (non nel gruppo 'ui'), arriva al
+    // top-level dello state.
+    setIfNotFocused($('#ui-debug-on-open'), 'checked', !!state.debug_mode_on_open);
     requestPreview();
   };
 
@@ -307,6 +310,15 @@
     $('#logo-status').textContent = msg;
     if (msg) setTimeout(() => { $('#logo-status').textContent = ''; }, 2500);
   }
+
+  function setDebugStatus(msg) {
+    const el = $('#debug-status');
+    if (!el) return;
+    el.textContent = msg || '';
+  }
+  SMS.setDebugResult = function (msg) {
+    setDebugStatus(msg || 'Done');
+  };
 
   SMS.setPreview = function (samples) {
     renderPreview(samples);
@@ -510,6 +522,17 @@
     if (purgeBtn) {
       purgeBtn.addEventListener('click', () => {
         call('sm_settings_purge_unused_styles');
+      });
+    }
+
+    // Debugging mode on startup: checkbox persistente (flag globale).
+    // Toggle-on attiva subito (Ruby apre console + MCP e riporta via
+    // SMS.setDebugResult); toggle-off persiste solo per i prossimi avvii.
+    const debugChk = document.getElementById('ui-debug-on-open');
+    if (debugChk) {
+      debugChk.addEventListener('change', () => {
+        if (debugChk.checked) setDebugStatus('Starting…');
+        call('sm_settings_debug_on_open', { enabled: debugChk.checked });
       });
     }
 

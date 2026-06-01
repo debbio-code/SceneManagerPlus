@@ -386,6 +386,17 @@
       </div>
 
       <div class="row">
+        <label class="check">
+          <input type="checkbox" id="ui-debug-on-open">
+          <span>Debugging mode on startup (Ruby Console + MCP server)</span>
+        </label>
+        <small class="muted" style="margin-top:4px;">
+          On every SketchUp launch, automatically open the Ruby Console and start the MCP server (if the MCP plugin is installed) so external tools can probe the live API. Toggling this on also activates it right now. For development only. This preference is stored per machine, not per file.
+        </small>
+        <span id="debug-status" class="status"></span>
+      </div>
+
+      <div class="row">
         <small class="muted">
           To assign a keyboard shortcut for <strong>"Jump to active scene"</strong>
           (re-activate the scene shown by the yellow grip), open SketchUp
