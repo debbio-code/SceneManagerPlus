@@ -448,8 +448,15 @@ La costante `SECTION = 'SceneManagerPlus'` non è più usata per i settings
 indipendente da logo watermark e filename label.
 
 Layout 6 box (left → right):
-1. **Cliente** (top) / **Oggetto** (bottom, merged) — box 0. Cliente =
-   `naming.prefix_custom`. Oggetto = `page.name`. CLIENTE è nella sola riga
+1. **Cliente** (top) / **Oggetto** (bottom, merged) — box 0. Cliente = il
+   **prefisso del naming pattern** secondo `naming.prefix_mode` (non solo
+   `prefix_custom`!): `custom`→`prefix_custom`, `skp_name`→titolo SKP
+   sanitizzato, `skp_first_word`→prima parola del titolo, `none`→vuoto.
+   Stessa logica di `Naming.format` (replicata in `Exporter`, non riusata —
+   `Naming.format` costruisce il nome intero, qui serve solo il prefisso).
+   Già stato un bug: era hardcoded su `prefix_custom`, quindi con
+   `skp_first_word` (oggi default) il Cliente usciva vuoto.
+   Oggetto = `page.name`. CLIENTE è nella sola riga
    superiore del box 0; OGGETTO si estende su tutta la larghezza di box 0 +
    box 1b (riga inferiore unificata).
 1b. **Fase di progetto** — box 1b, solo riga superiore. Label "PROGETTO:"

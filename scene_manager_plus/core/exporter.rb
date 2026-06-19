@@ -180,8 +180,9 @@ module SceneManagerPlus
         end
 
         # Pre-renderizza titleblock per ogni scena se abilitato. Una sola
-        # spawn PowerShell per export (batch). Cliente = naming.prefix_custom
-        # (riuso semantico richiesto dall'utente). Tavola nr. = stesso
+        # spawn PowerShell per export (batch). Cliente = prefisso del naming
+        # pattern secondo prefix_mode (custom/skp_name/skp_first_word — vedi
+        # sotto). Tavola nr. = stesso
         # progressivo {nnn} del naming pattern (1-based su targets_meta).
         tb_pngs = nil
         tb_warn = nil
@@ -189,7 +190,17 @@ module SceneManagerPlus
         tb_height = 40 if tb_height < 40
         if tb_cfg['enabled']
           begin
-            client_str = (naming_cfg['prefix_custom'] || '').to_s
+            # Cliente = stesso prefisso del naming pattern (riuso semantico
+            # richiesto dall'utente). Deve rispettare prefix_mode, non solo
+            # prefix_custom: con 'skp_name'/'skp_first_word' il prefisso deriva
+            # dal titolo del file SKP (vedi Naming.format).
+            skp_title  = Sketchup.active_model ? Sketchup.active_model.title.to_s : ''
+            client_str = case naming_cfg['prefix_mode']
+                         when 'custom'         then (naming_cfg['prefix_custom'] || '').to_s.strip
+                         when 'skp_name'       then Naming.sanitize(skp_title)
+                         when 'skp_first_word' then Naming.sanitize(skp_title).split(/\s+/).first.to_s
+                         else ''
+                         end
             date_str   = if (do_str = tb_cfg['date_override'].to_s).strip.empty?
                            Time.now.strftime('%d/%m/%Y')
                          else
