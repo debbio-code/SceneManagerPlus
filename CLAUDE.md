@@ -769,6 +769,19 @@ subsystem:
   `tools/dump-matchphoto-attrs.rb`)
 - Nessuna `Sketchup::Image` o ComponentDefinition nasconde la foto
 - Nessun path di file immagine accessibile via attributi
+- **Opacità "Foreground Photo" / "Background Photo"** (gli slider nella
+  sezione Match Photo del pannello Styles → Edit) NON è esposta da
+  nessuna parte. Verificato live via MCP `eval_ruby` (2026-07-07,
+  SU 2019): enumerate tutte le **61** rendering options (`ro.each_pair`)
+  → nessuna chiave photo/foreground/background-opacity/alpha; enumerate
+  tutti i 5 provider di `model.options` (PageOptions, UnitsOptions,
+  SlideshowOptions, NamedOptions, PrintOptions) → niente. Le uniche RO
+  "fore/back" sono `ForegroundColor`/`BackgroundColor` (colori bordi/sfondo)
+  e `FaceBackColor`/`DrawBackEdges`. Conseguenza pratica: **impossibile
+  aggiungere lo slider opacità foto al Mini Style Manager** — non c'è un
+  valore da leggere/scrivere. `ForegroundColor` (colore, non opacità) è
+  l'unico controllo "foreground" implementabile. Richiesta utente
+  archiviata come non fattibile.
 
 L'unica API esposta è `Sketchup::Pages#add_matchphoto_page(image_filename,
 camera, page_name)` ma richiede di passare il path della foto a mano —
