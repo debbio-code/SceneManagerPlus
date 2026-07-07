@@ -154,6 +154,32 @@ restart di SketchUp. Trappola packaging: il `.rbz` deve contenere solo il loader
 `su_mcp.rb` + `su_mcp/main.rb` — se ci finiscono `package.rb`/`extension.json`
 nella root, SU li auto-carica all'avvio e `package.rb` crasha (`require 'zip'`).
 
+**Protocollo wire + `Invoke-SUEval` (verificato 2026-07-07).** Il server è un
+`TCPServer` su `127.0.0.1:9876` che legge **una riga** JSON (`client.gets`,
+newline-terminata), valuta, e risponde con JSON + `\n`. Il formato più semplice
+è la shorthand `command` (non serve `method`/`params`):
+`{"command":"eval_ruby","parameters":{"code":"<ruby>"},"id":1}`. Il risultato
+Ruby (già `.to_s`) torna in `result.content[0].text`. Funzione PowerShell
+minimale (nessun modulo esterno):
+
+```powershell
+function Invoke-SUEval {
+  param([Parameter(Mandatory)][string]$Code)
+  $req = @{ command='eval_ruby'; parameters=@{ code=$Code }; id=1 } |
+         ConvertTo-Json -Compress -Depth 6
+  $c = [System.Net.Sockets.TcpClient]::new(); $c.Connect('127.0.0.1',9876)
+  $s = $c.GetStream()
+  $w = [System.IO.StreamWriter]::new($s); $w.WriteLine($req); $w.Flush()
+  $line = [System.IO.StreamReader]::new($s).ReadLine(); $c.Close(); $line
+}
+```
+
+Gotcha: `TOPLEVEL_BINDING.dup` come binding — variabili non persistono tra
+chiamate, quindi ogni `eval_ruby` è self-contained (mettere tutto in un unico
+snippet, usare `\n` per multi-statement). Per enumerare RO:
+`Sketchup.active_model.rendering_options.each_pair { |k,v| ... }` (in SU 2019
+sono **61** chiavi — vedi lista in CLAUDE.md sez. Match Photo).
+
 ### `DisplaySketchAxes`: gli assi del modello SONO una RenderingOption (2026-05)
 
 Correzione di una conclusione errata precedente ("Model axes: niente API Ruby
