@@ -1194,6 +1194,46 @@ fa tutto in un singolo load → set_data → save_file. Helpers chiave:
 Misure indicative su modelli reali: 3-8x più veloce in funzione delle
 feature attive (più sono attive più si guadagna dal merge).
 
+## Cornice export + margine bianco anti-stampa (2026-07)
+
+Due feature accoppiate in `Core::Exporter`, entrambe sul canvas **finale**
+(disegno + eventuale cartiglio):
+
+- **Cornice (frame)**: rettangolo nero sui 4 lati del canvas finale, come
+  prosecuzione del bordo del cartiglio. Costanti `FRAME_ENABLED = true` /
+  `FRAME_THICKNESS = 2` (px, = borderPen del titleblock) in cima al modulo —
+  hardcoded per scelta utente, editabili al volo. Disegnata da `draw_frame!`
+  (scrive byte neri opachi sul buffer BGRA, quindi visibile anche su export
+  a sfondo trasparente). Il lato inferiore/angoli in basso **coincidono**
+  con il bordo già disegnato dal cartiglio (stesso spessore/posizione) → si
+  sovrappongono senza artefatti; drawing di un rettangolo pieno è quindi
+  idempotente lì.
+- **Margine bianco esterno** (`titleblock.white_margin_px`, default 2):
+  `pad_white` espande il canvas di N px per lato con **bianco opaco**
+  (`"\xFF".b * ...` = BGRA B=G=R=A=255) DOPO aver disegnato la cornice, così
+  la cornice non è più sul bordo estremo e la stampa taglia il bianco invece
+  della cornice (il problema era: in stampa il bordo destro veniva "mangiato").
+
+Trappole / note di design:
+- **`composite_to_file` ora gira SEMPRE**: la condizione di composite è
+  `FRAME_ENABLED || white_margin > 0 || overlays || tb`. Con `FRAME_ENABLED`
+  true, ogni export fa un load/set_data/save_file anche senza logo/label/
+  cartiglio. È il costo di una cornice sempre-on (accettato). Se un domani si
+  spegne la cornice, la condizione tiene comunque conto del margine e degli
+  overlay.
+- **Il margine vive nel gruppo settings `titleblock`** ma è applicato
+  **sempre** (anche a cartiglio disabilitato), perché la cornice è
+  indipendente dal cartiglio. UI: campo "White frame margin (px)" nella
+  sezione Title block dei Settings.
+- Ordine in `composite_to_file`: build buf (base + tb append) → blend overlays
+  (clippati a `bh`) → `draw_frame!` sul canvas `bw × final_h` → `pad_white` →
+  `set_data`. Il frame va disegnato PRIMA del pad, sennò finirebbe sotto il
+  bianco.
+- Rimosso il bottone "Rename scenes now" dai Settings (naming): era ridondante
+  (l'utente non lo usa). `#apply-status` e `setStatus` restano (li usa ancora
+  il "Saved" del naming auto-save); `SMS.setApplyResult` / `sm_naming_apply`
+  sono ora dead-code innocuo.
+
 ## Trappola Edit tool → smart quotes nei file JS (2026-05)
 
 Il tool Edit dell'assistente, quando il `new_string` contiene caratteri

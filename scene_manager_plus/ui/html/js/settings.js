@@ -264,7 +264,8 @@
       project_by:     $('#tb-project-by').value || 'Arch. Nicola Debiasi',
       designer:       $('#tb-designer').value,
       project_phase:  $('#tb-project-phase').value || 'Definitivo',
-      date_override:  $('#tb-date-override').value || ''
+      date_override:  $('#tb-date-override').value || '',
+      white_margin_px: toIntOr($('#tb-white-margin').value, 2)
     };
   }
   function writeTitleblock(t) {
@@ -275,6 +276,7 @@
     setIfNotFocused($('#tb-designer'),       'value',   (t.designer == null ? 'Arch. Nicola Debiasi' : t.designer));
     setIfNotFocused($('#tb-project-phase'),  'value',   t.project_phase || 'Definitivo');
     setIfNotFocused($('#tb-date-override'),  'value',   t.date_override || '');
+    setIfNotFocused($('#tb-white-margin'),   'value',   (t.white_margin_px == null ? 2 : t.white_margin_px));
   }
   function setTbStatus(msg) {
     const el = $('#tb-status');
@@ -364,13 +366,6 @@
     ['naming-enabled', 'prefix-mode', 'include-scene-name'].forEach(id => {
       const el = document.getElementById(id);
       if (el) el.addEventListener('change', () => { onChange(); saveNamingNow(); });
-    });
-
-    $('#btn-apply').addEventListener('click', () => {
-      const msg = 'Rename ALL scenes using the current pattern?\n\n' +
-                  'Use Ctrl+Z in SketchUp to revert.';
-      if (!confirm(msg)) return;
-      call('sm_naming_apply', { values: readForm() });
     });
 
     // Export form: auto-save su qualsiasi change (con piccolo debounce sui
@@ -498,7 +493,7 @@
       clearTimeout(tbSaveTimer);
       tbSaveTimer = setTimeout(saveTbNow, 350);
     }
-    ['tb-height', 'tb-font-family', 'tb-date-override'].forEach(id => {
+    ['tb-height', 'tb-font-family', 'tb-date-override', 'tb-white-margin'].forEach(id => {
       const el = document.getElementById(id);
       if (el) el.addEventListener('change', saveTbNow);
     });

@@ -77,7 +77,11 @@ module SceneManagerPlus
           # Formato libero (es. "20/05/2026"). Vuoto = data del momento di export.
           'date_override'  => '',
           # Fase del progetto: 'Preliminare' | 'Definitivo' | 'Esecutivo'
-          'project_phase'  => 'Preliminare'
+          'project_phase'  => 'Preliminare',
+          # Margine bianco esterno alla cornice (px, tutto attorno
+          # all'immagine). Serve a evitare che la stampa "mangi" la cornice
+          # sui bordi. 0 = nessun margine.
+          'white_margin_px' => 2
         }
       }.freeze
 

@@ -62,9 +62,6 @@
 
       <div class="actions">
         <span class="auto-save-hint">Changes are saved automatically.</span>
-        <button id="btn-apply" class="primary" title="Rename all scenes now using the current pattern">
-          Rename scenes now
-        </button>
         <span id="apply-status" class="status"></span>
       </div>
     </section>
@@ -316,6 +313,18 @@
             <option value="Georgia">
           </datalist>
         </div>
+      </div>
+
+      <div class="row two-col">
+        <div>
+          <label>White frame margin (px)</label>
+          <input type="number" id="tb-white-margin" min="0" max="200" step="1">
+          <small class="muted" style="margin-top:4px;">
+            Bordo bianco tutto attorno alla cornice, così la stampa non la
+            "mangia" sui bordi. Default 2. Metti 0 per nessun margine.
+          </small>
+        </div>
+        <div></div>
       </div>
 
       <div class="row">

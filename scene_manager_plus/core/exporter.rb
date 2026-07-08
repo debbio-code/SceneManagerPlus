@@ -10,6 +10,16 @@ module SceneManagerPlus
 
       EXTS = { 'png' => '.png', 'jpg' => '.jpg', 'jpeg' => '.jpg' }.freeze
 
+      # Cornice (frame) attorno all'intera immagine esportata: una
+      # prosecuzione delle linee del cartiglio sui 4 lati del canvas finale
+      # (disegno + eventuale cartiglio). Il lato inferiore e gli angoli in
+      # basso coincidono col bordo già disegnato dal cartiglio (stesso
+      # spessore, stessa posizione) → si sovrappongono senza artefatti.
+      # Valori fissi (per richiesta): per cambiare lo spessore basta
+      # editare FRAME_THICKNESS. Coincide con il borderPen del titleblock (2).
+      FRAME_ENABLED   = true
+      FRAME_THICKNESS = 2
+
       @cancel  = false
       @running = false
 
@@ -188,6 +198,10 @@ module SceneManagerPlus
         tb_warn = nil
         tb_height = (tb_cfg['height_px'] || 120).to_i
         tb_height = 40 if tb_height < 40
+        # Margine bianco esterno alla cornice (px, tutto attorno). Letto dal
+        # gruppo titleblock ma applicato sempre (la cornice è sempre attiva).
+        white_margin = (tb_cfg['white_margin_px'] || 2).to_i
+        white_margin = 0 if white_margin < 0
         if tb_cfg['enabled']
           begin
             # Cliente = stesso prefisso del naming pattern (riuso semantico
@@ -391,9 +405,9 @@ module SceneManagerPlus
               end
             end
 
-            if !overlays.empty? || tb_bgra_scene
+            if FRAME_ENABLED || white_margin > 0 || !overlays.empty? || tb_bgra_scene
               begin
-                composite_to_file(fpath, overlays, tb_bgra_scene, tb_h_scene)
+                composite_to_file(fpath, overlays, tb_bgra_scene, tb_h_scene, white_margin)
               rescue => e
                 errors << "Composite failed on '#{page.name}': #{e.class}: #{e.message}"
                 warn "[SM+] composite_to_file failed on '#{page.name}': #{e.class}: #{e.message}"
@@ -572,7 +586,8 @@ module SceneManagerPlus
       #   confinati nell'area immagine (il cartiglio non li copre).
       # tb_bgra: BGRA top-down a larghezza bw, oppure nil.
       # tb_h: altezza del cartiglio in px (0 se tb_bgra nil).
-      def composite_to_file(image_path, overlays, tb_bgra, tb_h)
+      # margin: px di bordo bianco esterno alla cornice (0 = nessuno).
+      def composite_to_file(image_path, overlays, tb_bgra, tb_h, margin = 0)
         base = Sketchup::ImageRep.new
         base.load_file(image_path)
         bw = base.width
@@ -591,10 +606,71 @@ module SceneManagerPlus
         end
 
         final_h = bh + ((tb_bgra && tb_h > 0) ? tb_h : 0)
+        # Cornice sull'intero canvas finale (dopo aver appeso il cartiglio):
+        # i 4 lati del bordo estremo. Il lato inferiore/angoli in basso
+        # coincidono col bordo già disegnato dal cartiglio.
+        draw_frame!(buf, bw, final_h, FRAME_THICKNESS) if FRAME_ENABLED
+        # Margine bianco esterno: espande il canvas di `margin` px per lato
+        # con bianco opaco, così la cornice non è più sul bordo estremo e la
+        # stampa può tagliare il bianco senza mangiare la cornice.
+        if margin && margin > 0
+          buf, bw, final_h = pad_white(buf, bw, final_h, margin)
+        end
         base.set_data(bw, final_h, 32, 0, buf)
         ok = base.save_file(image_path)
         puts "[SM+] composite save_file ok=#{ok.inspect} → #{File.basename(image_path)} " \
-             "(#{bw}x#{final_h} overlays=#{overlays.size} tb=#{tb_bgra ? 'y' : 'n'})"
+             "(#{bw}x#{final_h} overlays=#{overlays.size} tb=#{tb_bgra ? 'y' : 'n'} margin=#{margin})"
+      end
+
+      # Espande un buffer BGRA (w×h, top-down) con un bordo bianco opaco di
+      # `m` px su tutti i lati. Ritorna [nuovo_buf, nuovo_w, nuovo_h].
+      def pad_white(buf, w, h, m)
+        nw = w + 2 * m
+        nh = h + 2 * m
+        # Tutti i byte a 255 → BGRA bianco opaco (B=G=R=A=255).
+        out = ("\xFF".b * (nw * nh * 4))
+        row_bytes = w * 4
+        (0...h).each do |y|
+          src = (y * w) * 4
+          dst = ((y + m) * nw + m) * 4
+          out[dst, row_bytes] = buf[src, row_bytes]
+        end
+        [out, nw, nh]
+      end
+
+      # Disegna una cornice nera opaca spessa `t` px sui 4 bordi estremi
+      # del buffer BGRA (w×h, top-down). Scrive direttamente i byte (nero
+      # pieno, alpha 255) — così la cornice è visibile anche su export a
+      # sfondo trasparente. Idempotente sulle zone già nere (es. il bordo
+      # inferiore del cartiglio).
+      def draw_frame!(buf, w, h, t)
+        t = 1 if t < 1
+        t = h if t > h
+        t = w if t > w
+        set_black = lambda do |x, y|
+          j = (y * w + x) * 4
+          buf.setbyte(j,     0)
+          buf.setbyte(j + 1, 0)
+          buf.setbyte(j + 2, 0)
+          buf.setbyte(j + 3, 255)
+        end
+        # Righe superiori e inferiori (spesse t).
+        (0...t).each do |k|
+          y_top = k
+          y_bot = h - 1 - k
+          (0...w).each do |x|
+            set_black.call(x, y_top)
+            set_black.call(x, y_bot)
+          end
+        end
+        # Colonne sinistra e destra (spesse t), evitando di ripassare le
+        # righe già scritte sopra/sotto.
+        (t...(h - t)).each do |y|
+          (0...t).each do |k|
+            set_black.call(k,         y)
+            set_black.call(w - 1 - k, y)
+          end
+        end
       end
 
       # Lista [page, name_index] dove name_index è la posizione 1-based in
