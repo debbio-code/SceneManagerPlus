@@ -38,3 +38,25 @@
 }
 
 input[type="radio"]:disabled + span { color: #777; }
+
+/* Promemoria trappola Version Control X (set che cambiano composizione):
+   riquadro ambra discreto in fondo alla sezione Output. */
+.warn-vcx {
+  margin-top: 10px;
+  padding: 6px 8px;
+  background: #2b2416;
+  border: 1px solid #55461f;
+  border-radius: 2px;
+  color: #c9ad5f;
+  font-size: 10.5px;
+  line-height: 1.5;
+}
+.warn-vcx strong { color: #e0c778; }
+.warn-vcx code {
+  background: #232323;
+  padding: 0 4px;
+  border-radius: 2px;
+  color: #4ea1ff;
+  font-family: Consolas, monospace;
+  font-size: 10px;
+}

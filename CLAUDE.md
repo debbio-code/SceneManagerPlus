@@ -348,6 +348,19 @@ dopo il primo archivio scatterebbe sempre Caso B.
 
 Le note di archivio entrano negli `errors` mostrati nel messagebox finale.
 
+### Nota "Version Control X" nel dialog Export (solo promemoria)
+
+In fondo alla sezione Output di `export.html` c'è un riquadro ambra
+(`.warn-vcx` in `export.css`) che ricorda la trappola dei set condivisi via
+Version Control X (repo `C:\Claude\Version Control X`): l'export archivia e
+rimpiazza solo il set **locale**; se si tolgono o rinominano scene, nelle
+cartelle dei colleghi restano immagini del set vecchio che sembrano valide
+(la numerazione `{nnn}` slitta: l'orfano è l'ultimo numero) e la bonifica di
+VCX le riporterebbe sul master. È testo statico, nessuna logica — se si
+cambia il flusso di export/archivio, aggiornare anche la nota. VCX dal canto
+suo esclude `Superate/` dalla propria bonifica (dalla sua v3.18); una difesa
+attiva (manifest del set scritto dall'export) è discussa ma non implementata.
+
 ### Quarta opzione: "Current selection → choose folder…"
 
 Radio `selected_dir` nel dialog Export (sotto "Specific folders…"). Esporta

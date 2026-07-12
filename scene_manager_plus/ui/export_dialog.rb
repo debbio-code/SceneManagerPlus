@@ -46,7 +46,7 @@ module SceneManagerPlus
           scrollable:      true,
           resizable:       true,
           width:           420,
-          height:          480,
+          height:          560,   # spazio per la nota Version Control X in fondo
           min_width:       360,
           min_height:      360,
           style:           ::UI::HtmlDialog::STYLE_DIALOG
