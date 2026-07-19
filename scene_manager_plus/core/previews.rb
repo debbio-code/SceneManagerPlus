@@ -168,8 +168,11 @@ module SceneManagerPlus
           begin
             if prev_page
               pages.selected_page = prev_page
+              # Riallinea lo stato variante alla scena ripristinata
+              Core::Variants.on_scene_activated(prev_page)
             else
               view.camera = prev_camera
+              Core::Variants.restore_applied!
             end
           rescue => e
             warn "[SM+] Preview restore context failed: #{e.message}"
@@ -206,6 +209,13 @@ module SceneManagerPlus
           path = File.join(dir, "#{uid}.png")
           begin
             pages.selected_page = page
+            # Variante colore: applica gli override della scena target così
+            # la thumbnail mostra i colori variante.
+            begin
+              Core::Variants.on_scene_activated(page)
+            rescue => e
+              warn "[SM+] previews variant apply: #{e.class}: #{e.message}"
+            end
             # Riapplica il line scale DOPO pages.selected_page=: se la scena
             # ha PAGE_USE_RENDERING_OPTIONS, SU appena cambia pagina ripristina
             # EdgeWidth/ProfileWidth salvati nella scena, sovrascrivendo la

@@ -10,6 +10,7 @@ window.SM = (function () {
   var lastClickId = null;
   var lastClickTs = 0;
   var DBLCLICK_MS = 400;
+  var pendingSelectTimer = null; // debounce attivazione scena (vedi scheduleSelectPage)
   var thumbsOn = false; // session-only toggle
   var listEl, statusEl;
   var sceneByIdMap = {};
@@ -254,6 +255,9 @@ window.SM = (function () {
       thumbHtml +
       pendingDot +
       '<span class="name"></span>' +
+      (scene.has_variant
+        ? '<img class="row-variant-badge" src="img/variant.png" title="Color variant defined - click to edit" alt="variant">'
+        : '') +
       '<span class="row-scene-color" title="Scene color — click to pick, right-click to clear"' + sceneSwatchStyle + '></span>';
     row.querySelector('.name').textContent = scene.name;
     row.addEventListener('mousedown', function (e) { onRowClick(e, scene.id); });
@@ -436,6 +440,37 @@ window.SM = (function () {
       startInlineRename(sceneId);
     });
     menu.appendChild(item);
+    var vItem = document.createElement('div');
+    vItem.className = 'ctx-item';
+    vItem.textContent = 'Color variant...';
+    vItem.addEventListener('click', function () {
+      hideContextMenu();
+      SMBridge.openVariant(sceneId);
+    });
+    menu.appendChild(vItem);
+    // Copy: solo se la scena ha una variante. Paste: solo se c'e' qualcosa
+    // nella clipboard di sessione (state.variant_clipboard da Ruby).
+    var sc = sceneById(sceneId);
+    if (sc && sc.has_variant) {
+      var cItem = document.createElement('div');
+      cItem.className = 'ctx-item';
+      cItem.textContent = 'Copy color variant';
+      cItem.addEventListener('click', function () {
+        hideContextMenu();
+        SMBridge.copyVariant(sceneId);
+      });
+      menu.appendChild(cItem);
+    }
+    if (state.variant_clipboard) {
+      var pItem = document.createElement('div');
+      pItem.className = 'ctx-item';
+      pItem.textContent = 'Paste color variant';
+      pItem.addEventListener('click', function () {
+        hideContextMenu();
+        SMBridge.pasteVariant(sceneId);
+      });
+      menu.appendChild(pItem);
+    }
     document.body.appendChild(menu);
     // Posiziona dentro la viewport
     var mw = menu.offsetWidth, mh = menu.offsetHeight;
@@ -671,6 +706,10 @@ window.SM = (function () {
         !e.shiftKey && !e.ctrlKey && !e.metaKey) {
       lastClickId = null;
       lastClickTs = 0;
+      // Cancella l'attivazione debounced del primo click e attiva ora
+      // (Properties vuole la scena attiva per la sezione Fog).
+      if (pendingSelectTimer) { clearTimeout(pendingSelectTimer); pendingSelectTimer = null; }
+      selectPageLocal(id);
       SMBridge.openProperties(id);
       return;
     }
@@ -693,15 +732,32 @@ window.SM = (function () {
       if (selection.indexOf(id) !== -1 && selection.length > 1) {
         pendingCollapseId = id;
         anchorId = id;
-        selectPageLocal(id);
+        scheduleSelectPage(id);
         render();
         return;
       }
       selection = [id];
       anchorId = id;
-      selectPageLocal(id);
+      scheduleSelectPage(id);
     }
     render();
+  }
+
+  // Debounce dell'attivazione scena sul click singolo dentro la lista:
+  // il primo click NON chiama subito Ruby. select_page ora puo' costare
+  // (variante colore: restore+apply materiali; modelli con observer terzi)
+  // e se SketchUp congela tra i due click del doppio click, la finestra
+  // DBLCLICK_MS scade e Properties non si apre mai. Deferendo di
+  // DBLCLICK_MS, la detection del dblclick e' indipendente dai tempi Ruby.
+  // La barra blu di selezione resta comunque immediata (render nel caller);
+  // solo il marker giallo/viewport arrivano dopo il timer.
+  function scheduleSelectPage(id) {
+    if (pendingSelectTimer) clearTimeout(pendingSelectTimer);
+    pendingSelectTimer = setTimeout(function () {
+      pendingSelectTimer = null;
+      selectPageLocal(id);
+      render();
+    }, DBLCLICK_MS);
   }
 
   // Mouseup sul container: se c'è un collapse pending e non c'è stato drag,
@@ -940,6 +996,21 @@ window.SM = (function () {
       SMBridge.setSceneColor(row.dataset.id, '');
     }, true);
 
+    // Badge variante colore: click apre il dialog Color variant.
+    // mousedown stoppato per non triggerare selezione/drag della row.
+    listEl.addEventListener('mousedown', function (e) {
+      if (!e.target.classList || !e.target.classList.contains('row-variant-badge')) return;
+      e.stopPropagation();
+      e.preventDefault();
+    }, true);
+    listEl.addEventListener('click', function (e) {
+      if (!e.target.classList || !e.target.classList.contains('row-variant-badge')) return;
+      e.stopPropagation();
+      var row = e.target.closest('.scene-row');
+      if (!row || !row.dataset || !row.dataset.id) return;
+      SMBridge.openVariant(row.dataset.id);
+    });
+
     // Export-include checkbox: blocca selezione/drag, invia toggle a Ruby.
     // Se la row cliccata è dentro una selezione multipla, applica a tutte:
     // tutte incluse → tutte escluse; altrimenti (mixed/tutte escluse) →
@@ -1097,6 +1168,9 @@ window.SM = (function () {
   // Chiamato dai click/keynav locali: aggiorna activeId immediatamente
   // (no attesa del polling 250ms) e attiva la scena nel viewport.
   function selectPageLocal(id) {
+    // Chiamata diretta (keynav) mentre c'e' un'attivazione debounced in
+    // coda: cancella il timer, vince l'attivazione esplicita.
+    if (pendingSelectTimer) { clearTimeout(pendingSelectTimer); pendingSelectTimer = null; }
     // In defer mode la scena nel viewport NON cambia, quindi nemmeno il
     // marker giallo deve seguire la selezione. Aggiorniamo activeId solo
     // quando attiviamo davvero la pagina.

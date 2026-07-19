@@ -232,6 +232,19 @@ body {
   background-position: 0 0, 4px 4px;
 }
 .scene-row .row-scene-color:hover { border-color: #4ea1ff; }
+
+/* Badge "questa scena ha una variante colore" — click apre il dialog.
+   Icona bitmap (img/variant.png, tre cerchi colore). */
+.scene-row .row-variant-badge {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  margin-left: 6px;
+  cursor: pointer;
+  flex-shrink: 0;
+  vertical-align: middle;
+}
+.scene-row .row-variant-badge:hover { filter: brightness(1.25); }
 .scene-row.dragging { opacity: 0.4; }
 
 .scene-row .thumb {

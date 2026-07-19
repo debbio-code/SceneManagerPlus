@@ -305,6 +305,7 @@ module SceneManagerPlus
         return {
           scenes: [], tree: [], folders: [], active_id: nil,
           native_order_divergent: false,
+          variant_clipboard: false,
           model_info: { title: '', pages_count: 0 }
         } unless m
 
@@ -378,6 +379,7 @@ module SceneManagerPlus
           folders: folders_list,
           active_id: active_id,
           native_order_divergent: divergent,
+          variant_clipboard: Core::Variants.clipboard?,
           model_info: {
             title:       m.title.to_s,
             pages_count: pages_arr.length
@@ -415,7 +417,8 @@ module SceneManagerPlus
             export_included: export_included?(p),
             style_name:      page_style_name(p),
             color:           get_scene_color(page_id(p)),
-            is_matchphoto:   matchphoto?(p)
+            is_matchphoto:   matchphoto?(p),
+            has_variant:     Core::Variants.has_variant?(p)
           }
         end
       end
@@ -521,6 +524,7 @@ module SceneManagerPlus
           style_name:      page_style_name(page),
           color:           get_scene_color(uid),
           is_matchphoto:   matchphoto?(page),
+          has_variant:     Core::Variants.has_variant?(page),
           pending:         false
         }
         # Overlay buffer edits
@@ -1003,6 +1007,9 @@ module SceneManagerPlus
         # camera/stile/layers allo stato salvato (= "ri-applica scena").
         return true if model.pages.selected_page == p && matchphoto?(p)
         model.pages.selected_page = p
+        # Variante colore: ripristina l'eventuale variante precedente e
+        # applica quella della scena attivata (no-op se nessuna delle due).
+        Core::Variants.on_scene_activated(p)
         true
       end
 

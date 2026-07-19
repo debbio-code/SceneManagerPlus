@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Color variant</title>
+  <link rel="stylesheet" href="css/variant.css">
+</head>
+<body>
+  <div id="app">
+    <header class="hdr">
+      <div class="hdr-title">
+        <img src="img/variant.png" class="hdr-icon" alt="">
+        <span class="hdr-label">Color variant</span>
+        <span id="scene-name" class="hdr-scene">&mdash;</span>
+      </div>
+      <div id="inactive-banner" class="inactive-banner hidden">
+        Scene is not active in the viewport.
+        <button id="btn-activate" class="mini-btn">Activate</button>
+      </div>
+    </header>
+
+    <section class="group">
+      <h3>Assign</h3>
+      <div class="assign-row">
+        <select id="mat-select"></select>
+        <button id="btn-assign" title="Record an override for every entity currently selected in the viewport">Assign to selection</button>
+      </div>
+      <div class="hint">
+        Select entities in the viewport, choose a material, then click
+        &ldquo;Assign to selection&rdquo;. Overrides are stored in the scene and applied
+        every time the scene is activated from Scene Manager+.
+      </div>
+    </section>
+
+    <section class="group group-list">
+      <h3>Overrides <span id="ov-count" class="ov-count"></span></h3>
+      <div id="ov-list" class="ov-list"></div>
+      <div id="ov-empty" class="ov-empty hidden">No overrides yet.</div>
+    </section>
+
+    <footer class="ftr">
+      <button id="btn-clear" class="danger" title="Remove all overrides and restore base materials">Clear variant</button>
+      <button id="btn-clean" class="mini-btn hidden" title="Remove overrides whose entity no longer exists in the model">Clean missing</button>
+      <span id="status" class="status">&mdash;</span>
+    </footer>
+  </div>
+
+  <script src="js/variant.js"></script>
+</body>
+</html>

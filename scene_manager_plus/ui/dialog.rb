@@ -67,6 +67,19 @@ module SceneManagerPlus
         return unless uid
         return if uid == @last_active_uid
         @last_active_uid = uid
+        # Variante colore: il cambio scena via TAB NATIVI passa solo da qui.
+        # Deroga consapevole alla regola "il polling non scrive mai":
+        # on_scene_activated è zero-write se né la scena entrante né quella
+        # uscente hanno varianti (uid identico → return; nessuna variante e
+        # niente applied → sola lettura attributo). Scrive materiali SOLO
+        # nella transizione che coinvolge una variante — evento raro,
+        # equivalente a un click utente, non un write per-tick.
+        begin
+          page_for_variant = m.pages.selected_page
+          Core::Variants.on_scene_activated(page_for_variant) if page_for_variant
+        rescue => e
+          warn "[SM+] poll variant apply: #{e.class}: #{e.message}"
+        end
         @dialog.execute_script("window.SM && SM.setActiveFromNative(#{uid.to_json});")
       rescue => e
         warn "[SM+] poll_active_scene: #{e.class}: #{e.message}"
@@ -250,6 +263,36 @@ module SceneManagerPlus
         dlg.add_action_callback('sm_open_style') do |_ctx, payload|
           data = parse(payload)
           StyleDialog.show_for(data['id'], data['style_name'])
+        end
+
+        dlg.add_action_callback('sm_open_variant') do |_ctx, payload|
+          data = parse(payload)
+          VariantDialog.show_for(data['id']) if data['id']
+        end
+
+        # Copy/paste variante colore tra scene (clipboard RAM di sessione,
+        # stesso modello). Push state dopo entrambi: copy abilita la voce
+        # "Paste" nel context menu, paste aggiorna il badge.
+        dlg.add_action_callback('sm_variant_copy') do |_ctx, payload|
+          data = parse(payload)
+          page = Core::SceneModel.find_by_id(data['id'])
+          if page
+            n = Core::Variants.copy_variant(page)
+            puts "[SM+] variant copy: #{n} override(s) from '#{page.name}'"
+          end
+          push_state
+        end
+
+        dlg.add_action_callback('sm_variant_paste') do |_ctx, payload|
+          data = parse(payload)
+          page = Core::SceneModel.find_by_id(data['id'])
+          if page
+            ok = Core::Variants.paste_variant(page)
+            puts "[SM+] variant paste onto '#{page.name}': #{ok}"
+            # Se il dialog Color variant è aperto su questa scena, refresh
+            VariantDialog.push_state if defined?(VariantDialog)
+          end
+          push_state
         end
 
         # Right-click sul badge stile di una scena Match Photo: apriamo
@@ -453,7 +496,8 @@ module SceneManagerPlus
           pending:   Core::Buffer.pending_count,
           previews:  Core::Previews.url_map,
           model_info: payload[:model_info],
-          native_order_divergent: payload[:native_order_divergent]
+          native_order_divergent: payload[:native_order_divergent],
+          variant_clipboard: payload[:variant_clipboard]
         }
         puts "[SM+] push_state: model=#{state[:model_info][:title].inspect} " \
              "native_pages=#{state[:model_info][:pages_count]} " \

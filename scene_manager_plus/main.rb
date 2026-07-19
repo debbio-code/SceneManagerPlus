@@ -4,6 +4,7 @@ module SceneManagerPlus
   require File.join(PLUGIN_DIR, 'core', 'buffer')
   require File.join(PLUGIN_DIR, 'core', 'styles')
   require File.join(PLUGIN_DIR, 'core', 'scene_model')
+  require File.join(PLUGIN_DIR, 'core', 'variants')
   require File.join(PLUGIN_DIR, 'core', 'folders')
   require File.join(PLUGIN_DIR, 'core', 'settings')
   require File.join(PLUGIN_DIR, 'core', 'naming')
@@ -17,6 +18,7 @@ module SceneManagerPlus
   require File.join(PLUGIN_DIR, 'ui', 'properties_dialog')
   require File.join(PLUGIN_DIR, 'ui', 'export_dialog')
   require File.join(PLUGIN_DIR, 'ui', 'style_dialog')
+  require File.join(PLUGIN_DIR, 'ui', 'variant_dialog')
   require File.join(PLUGIN_DIR, 'ui', 'clipboard_dialog')
 
   unless file_loaded?(__FILE__)
@@ -113,6 +115,10 @@ module SceneManagerPlus
     # Defer di 0.5s: a `file_loaded` la UI di SU non è ancora pronta a ospitare
     # un HtmlDialog (su SU 2019 mostrare la finestra troppo presto causa
     # posizione errata o crash silenzioso).
+    # Varianti colore: observer di salvataggio (pre-save restore base,
+    # post-save re-apply) + re-attach su nuovi modelli/file aperti.
+    Core::Variants.install_observers!
+
     if Sketchup.read_default('SceneManagerPlus', 'main_dialog_open', false)
       ::UI.start_timer(0.5, false) do
         begin

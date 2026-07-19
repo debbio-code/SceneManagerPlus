@@ -93,7 +93,8 @@ scene_manager_plus/
 │   ├── settings.rb                 # config persistente con defaults
 │   ├── styles.rb                   # pool slot + nickname per-modello
 │   ├── text_render.rb              # PowerShell+System.Drawing per filename label
-│   └── titleblock.rb               # PowerShell+System.Drawing per cartiglio
+│   ├── titleblock.rb               # PowerShell+System.Drawing per cartiglio
+│   └── variants.rb                 # varianti colore per-scena (override materiali)
 └── ui/
     ├── dialog.rb                   # Main HtmlDialog + bridge + polling scene attiva
     ├── export_dialog.rb            # Dialog Export (scope picker + progress)
@@ -1834,6 +1835,96 @@ scenes" → ricreazione delle scene con camera, stile, fog, flag, naming.
 - `Core::SceneModel.assign_style`, `matchphoto?`, `page_id`, `set_scene_color`.
 - `Core::Styles.set_nickname` (validazione unicità), `set_color`.
 - Pattern hidden-spawn non serve (niente PowerShell qui).
+
+## Varianti colore per-scena (`Core::Variants`) — 2026-07-19
+
+Le scene native SU NON catturano i materiali. La feature emula "varianti
+colore" per-scena: override materiale registrati dall'utente via schermata
+"Color variant" e applicati/ripristinati a ogni attivazione scena.
+
+### Architettura
+
+- **Storage**: page attribute `SceneManagerPlus/color_variant` (JSON
+  `{v:1, overrides:[{pid, mat, base}]}`). Vive sulla *pagina* (non
+  sull'uid) → viaggia col file gratis, zero dipendenza dal sistema uid.
+- **Chiave = `Entity#persistent_id`**, materiali **by-name** (vedi fatti
+  verificati sotto). `mat: null` = rimuovi materiale.
+- **Motore diff-apply** (`on_scene_activated`): ripristina lo snapshot RAM
+  della variante precedente + applica la nuova, in UNA transparent op.
+  Il **restore runtime usa lo snapshot RAM** catturato all'apply (ciò che
+  il modello aveva un istante prima), NON il `base` persistito (che è solo
+  riferimento/recovery): robusto se l'utente cambia i materiali base dopo
+  la registrazione. Guard no-op su ri-attivazione stessa scena (evita
+  snapshot pollution).
+- **Editing SOLO dalla schermata** (`ui/variant_dialog.rb`): selezione
+  viewport → picker materiale → record+apply. Il secchiello nativo usato
+  con variante attiva NON entra nella variante (niente observer sul paint
+  nativo — scelta di design). Il dialog attiva la scena di contesto
+  all'apertura, così `@applied` è sempre coerente (nil o la scena stessa).
+- **Copy/paste** (context menu): clipboard RAM di sessione, **solo stesso
+  modello** (i pid non significano nulla altrove). Paste sovrascrive e
+  ri-applica se la scena target è attiva.
+- **Igiene**: `prune_missing` (bottone "Clean missing" nel dialog) rimuove
+  override con pid orfani; materiali mancanti → option disabilitata
+  "missing: X" nel dropdown + skip con report all'apply.
+
+### Hook (tutti i punti che attivano una scena)
+
+| Punto | Nota |
+|---|---|
+| `SceneModel.select_page` | dopo `selected_page=` |
+| Polling 250ms (`poll_active_scene`) | **deroga documentata** alla regola "il polling non scrive": `on_scene_activated` è zero-write a regime (stesso uid → return; niente varianti → sola lettura attributo); scrive materiali SOLO nella transizione con variante coinvolta. In defer mode il polling è no-op → tab nativi non applicano varianti in defer. |
+| `Exporter` / `Previews` loop | dopo `pages.selected_page = page` nello step; in `finish` riallinea alla scena ripristinata |
+| Save (`SaveObserver`) | `onPreSaveModel` → restore base (il **.skp su disco è sempre stato base**); `onPostSaveModel` → re-apply. Attach via `install_observers!` in main.rb + `AppObserver` per file aperti dopo. |
+
+### Fatti verificati via MCP su SU 2019 (19.3.253), 2026-07-19
+
+- `Entity#persistent_id` valido su Face/Group/ComponentInstance anche
+  annidati; **sopravvive a salva/riapri**. `find_entity_by_persistent_id`
+  accetta array (nil per i mancanti). MAI lookup con pid ≤ 0 (ritorna
+  entità arbitrarie, es. un Layer).
+- **`Material#persistent_id` è uno stub: ritorna 0** in SU 2019 →
+  materiali referenziabili solo by-name (rename nativo = riferimento
+  rotto, gestito con report).
+- **`onPreSaveModel` esiste, è sincrono, e le mutazioni fatte lì dentro
+  ENTRANO nel file salvato** (verificato con reopen). In pre-save niente
+  `start_operation` (mutazione diretta).
+- **Transparent op: sporca comunque `model.modified?`** e si aggancia
+  all'op precedente nell'undo stack → un Ctrl+Z utente può portarsi via
+  anche l'apply della variante (si risistema alla prossima attivazione).
+  Caveat accettato e non mitigato (onTransactionUndo possibile ma rischia
+  di combattere l'undo dell'utente).
+
+### Conseguenze UX accettate
+
+- Navigare scene con varianti = modello dirty (SU chiede "Save changes?"
+  anche solo per aver navigato). Dopo un save il modello torna dirty
+  subito (re-apply post-save).
+- Due scene possono differire solo per COME sono colorati i materiali
+  delle stesse entità; "in variante B questo pannello usa un altro
+  materiale" sì, ma la geometria è condivisa.
+- Varianti NON trasferibili cross-file (❌ anche nella clipboard scene).
+
+### Trappola collegata: debounce attivazione scena (app.js)
+
+Il primo click su una row NON chiama più Ruby subito: `scheduleSelectPage`
+rimanda `selectPageLocal` di `DBLCLICK_MS` (400ms). Motivo: select_page ora
+può costare (variante: restore+apply materiali; modelli con observer terzi)
+e se SU congela tra i due click del doppio click, la detection manuale
+(lastClickId/lastClickTs) scadeva e Properties non si apriva mai. Col
+debounce la detection è indipendente dai tempi Ruby; al dblclick il timer
+viene cancellato e la scena attivata esplicitamente prima di openProperties.
+Chiamate dirette a `selectPageLocal` (keynav) cancellano il timer pending.
+Click rapidi su più scene = si attiva solo l'ultima (bonus sui modelli lenti).
+
+### Trappola push_state: i campi top-level vanno aggiunti in TRE posti
+
+`Dialog.push_state` costruisce lo state con field-list esplicita: un campo
+nuovo in `ui_payload` NON arriva al JS finché non viene aggiunto anche lì.
+Già successo con `variant_clipboard` (la voce "Paste color variant" non
+compariva mai). Regola: campo per-scena → `scene_hash` + `list_ordered`
+(trappola due-payload esistente); campo top-level → `ui_payload` + la
+field-list in `Dialog.push_state`.
 
 ## Generazione manuale utente (docx/pdf) — toolchain su questa postazione
 

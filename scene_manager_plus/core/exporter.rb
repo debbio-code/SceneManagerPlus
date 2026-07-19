@@ -308,8 +308,13 @@ module SceneManagerPlus
           begin
             if prev_page
               pages.selected_page = prev_page
+              # Ripristina lo stato variante coerente con la scena ripristinata
+              # (restore dell'ultima applicata dal loop + apply di quella della
+              # prev_page se ne ha una).
+              Core::Variants.on_scene_activated(prev_page)
             else
               view.camera = prev_camera
+              Core::Variants.restore_applied!
             end
           rescue
           end
@@ -340,6 +345,13 @@ module SceneManagerPlus
 
           begin
             pages.selected_page = page
+            # Variante colore: applica gli override della scena target (e
+            # ripristina quelli della precedente) prima di write_image.
+            begin
+              Core::Variants.on_scene_activated(page)
+            rescue => e
+              warn "[SM+] export variant apply: #{e.class}: #{e.message}"
+            end
             # Riapplica EdgeWidth/ProfileWidth DOPO pages.selected_page=: se la
             # scena ha PAGE_USE_RENDERING_OPTIONS, SU al cambio pagina ripristina
             # i valori salvati nella scena, sovrascrivendo la nostra modifica
