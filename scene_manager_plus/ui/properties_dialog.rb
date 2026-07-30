@@ -132,16 +132,128 @@ module SceneManagerPlus
           id   = data['id'] || @scene_id
           fog_apply(id, data) if id
         end
+
+        # Sezione Layers: un unico dispatcher invece di 8 callback separati.
+        # Payload: { op: 'visible'|'current'|'rename'|'color'|'line_style'|
+        #                'add'|'delete'|'purge', name: <layer>, value: ... }
+        dlg.add_action_callback('sm_props_layer_op') do |_ctx, payload|
+          handle_layer_op(parse(payload))
+        end
       end
 
-      def push_state
+      # Tutte le operazioni sui layer sono MODEL-WIDE (come il pannello Layers
+      # nativo): valgono per ogni scena, e la scena corrente le cattura solo
+      # con "Update from view". La lista invece e' filtrata per-scena.
+      # Sono immediate anche in defer mode, come assign_style: toccano il
+      # modello, non gli attributi di pagina bufferizzati.
+      def handle_layer_op(data)
+        op    = data['op'].to_s
+        name  = data['name'].to_s
+        focus = nil
+
+        case op
+        when 'visible'
+          Core::Layers.set_visible(name, data['value'])
+        when 'current'
+          Core::Layers.set_current(name)
+        when 'rename'
+          ok, err = Core::Layers.rename(name, data['value'])
+          unless ok
+            ::UI.messagebox(rename_error_message(err, data['value']))
+          end
+        when 'color'
+          Core::Layers.set_color(name, data['value'])
+        when 'line_style'
+          Core::Layers.set_line_style(name, data['value'])
+        when 'add'
+          focus = Core::Layers.add_layer
+        when 'add_scene_only'
+          focus = add_layer_visible_only_in_scene
+        when 'delete'
+          delete_layer_interactive(name)
+        when 'purge'
+          n = Core::Layers.purge_unused
+          ::UI.messagebox(
+            n > 0 ? "#{n} unused layer(s) purged.\n\nUndo with Ctrl+Z if this was a mistake."
+                  : 'No unused layers to purge.'
+          )
+        end
+
+        push_state(focus_layer: focus)
+      rescue => e
+        warn "[SM+] handle_layer_op failed: #{e.class}: #{e.message}"
+      end
+
+      # "+ occhio": crea un layer visibile SOLO nella scena aperta in questo
+      # dialog, che puo' non essere quella attiva nel viewport (differenza
+      # sostanziale rispetto ad "Add Visible Tag" del Layers Manager, che
+      # lavora sempre sulla scena attiva).
+      def add_layer_visible_only_in_scene
+        return nil unless @scene_id
+        p = Core::SceneModel.find_by_id(@scene_id)
+        return nil unless p
+        res = Core::Layers.add_layer_visible_only_in(p)
+        return nil unless res
+        warn_unconstrained_scenes(res['unconstrained'])
+        res['name']
+      end
+
+      def warn_unconstrained_scenes(names)
+        return if names.nil? || names.empty?
+        shown = names.first(8).join(', ')
+        more  = names.size > 8 ? " (and #{names.size - 8} more)" : ''
+        ::UI.messagebox(
+          "The layer was created, but #{names.size} scene(s) do not save layer " \
+          "visibility (their \"Visible Layers\" property is off), so they will " \
+          "show it anyway:\n\n#{shown}#{more}"
+        )
+      end
+
+      def rename_error_message(err, attempted)
+        case err
+        when 'exists'    then "A layer named \"#{attempted}\" already exists."
+        when 'empty'     then 'Layer name cannot be empty.'
+        when 'default'   then 'The default layer (Layer0) cannot be renamed.'
+        when 'not_found' then 'Layer not found (it may have been deleted).'
+        else                  'Rename failed.'
+        end
+      end
+
+      # Replica la domanda del pannello nativo su cosa fare della geometria.
+      # UI.messagebox espone solo YES/NO/CANCEL, quindi mappiamo i due esiti
+      # utili del nativo (sposta / cancella) su YES e NO.
+      def delete_layer_interactive(name)
+        return if name.empty?
+        res = ::UI.messagebox(
+          "Delete layer \"#{name}\"?\n\n" \
+          "YES — delete the layer, KEEP its entities (moved to Layer0)\n" \
+          "NO — delete the layer AND all entities on it\n" \
+          "CANCEL — do nothing",
+          MB_YESNOCANCEL
+        )
+        return if res == IDCANCEL
+        ok, err = Core::Layers.delete_layer(name, res == IDYES ? 'move' : 'erase')
+        return if ok
+        msg = case err
+              when 'default'   then 'The default layer (Layer0) cannot be deleted.'
+              when 'last'      then 'Cannot delete the only layer in the model.'
+              when 'not_found' then 'Layer not found (it may have been deleted).'
+              else                  'Delete failed.'
+              end
+        ::UI.messagebox(msg)
+      end
+
+      # `focus_layer`: nome del layer appena creato — il JS ci apre sopra il
+      # rename inline, come fa il pannello nativo dopo il "+".
+      def push_state(focus_layer: nil)
         return unless @dialog && @dialog.visible?
         scene = scene_payload(@scene_id)
         preview = @scene_id ? Core::Previews.url_map[@scene_id] : nil
         state = {
           scene:       scene,
           flag_keys:   Core::SceneModel::FLAG_KEYS,
-          preview_url: preview
+          preview_url: preview,
+          focus_layer: focus_layer
         }
         @dialog.execute_script("window.SMP && SMP.setState(#{state.to_json});")
       rescue => e
@@ -162,7 +274,8 @@ module SceneManagerPlus
           'pending'      => !!h[:pending],
           'is_matchphoto'=> Core::SceneModel.matchphoto?(p),
           'is_active'    => active_page_id == id,
-          'fog'          => read_fog
+          'fog'          => read_fog,
+          'layers'       => Core::Layers.payload_for_page(p)
         }
       end
 

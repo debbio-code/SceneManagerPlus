@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <title>Scene properties</title>
   <link rel="stylesheet" href="css/properties.css">
+  <link rel="stylesheet" href="css/color_popup.css">
 </head>
 <body>
   <div id="props-app">
@@ -27,6 +28,27 @@
       <fieldset>
         <legend>Properties to save</legend>
         <div id="prop-flags"></div>
+      </fieldset>
+
+      <fieldset id="layers-fieldset">
+        <legend>Layers in this scene</legend>
+        <div class="lay-bar">
+          <span id="lay-count" class="lay-count"></span>
+          <span class="lay-spacer"></span>
+          <button type="button" id="btn-lay-add" class="lay-tool" title="Add a new layer (visible everywhere, like the native Layers window)">+</button>
+          <button type="button" id="btn-lay-add-here" class="lay-tool lay-tool-wide" title="Add a new layer visible ONLY in this scene: hidden in every other scene, and hidden by default in scenes created later. Works even when this scene is not the active one.">+&#128065;</button>
+          <button type="button" id="btn-lay-del" class="lay-tool" title="Delete the selected layer">&minus;</button>
+          <button type="button" id="btn-lay-purge" class="lay-tool lay-tool-wide" title="Delete every layer that has no geometry on it">Purge</button>
+        </div>
+        <div class="lay-head">
+          <span class="lay-h-cur" title="Current layer: new geometry goes here">Cur</span>
+          <span class="lay-h-vis" title="Visible in the model (same as the native Layers window)">Vis</span>
+          <span class="lay-h-name">Name</span>
+          <span class="lay-h-col" title="Layer color">Col</span>
+          <span class="lay-h-dash" title="Line style (dashes)">Dashes</span>
+        </div>
+        <div id="lay-list" class="lay-list"></div>
+        <div id="lay-note" class="lay-note"></div>
       </fieldset>
 
       <fieldset id="fog-fieldset">
@@ -91,6 +113,24 @@
     </footer>
   </div>
 
+  <!-- Markup del picker HSV condiviso. In CEF non si possono includere
+       fragment HTML, quindi questo blocco e duplicato in ogni dialog che usa
+       SMColorPopup (index.html, style.html). -->
+  <div id="sm-color-popup" class="sm-color-popup hidden">
+    <div class="cp-main">
+      <div id="cp-sb" class="cp-sb"><span class="cp-marker" id="cp-sb-marker"></span></div>
+      <div id="cp-hue" class="cp-hue"><span class="cp-hue-marker" id="cp-hue-marker"></span></div>
+    </div>
+    <div class="cp-bot">
+      <span id="cp-preview" class="cp-preview"></span>
+      <input type="text" id="cp-hex" class="cp-hex" maxlength="7" placeholder="#aabbcc" spellcheck="false">
+      <button id="cp-none" class="cp-none-btn" title="No color" style="display:none">None</button>
+    </div>
+    <div id="cp-recent" class="cp-recent"></div>
+    <div id="cp-presets" class="cp-presets"></div>
+  </div>
+
+  <script src="js/color_popup.js"></script>
   <script src="js/properties.js"></script>
 </body>
 </html>

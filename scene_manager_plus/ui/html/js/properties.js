@@ -136,6 +136,7 @@
     renderFlags(state.flag_keys || [], s.flags || {}, !!s.is_matchphoto);
     $('#btn-update-view').disabled = false;
     renderPreview(state.preview_url);
+    renderLayers(state);
     renderFog(s.fog || {}, !!s.is_active);
     SMP.applying = false;
   };
@@ -420,6 +421,275 @@
     }
   }
 
+  // === Layers section ========================================================
+  // Filtro della lista = PER-SCENA (solo i layer che questa scena non
+  // nasconde). Tutte le operazioni = SUL MODELLO, come il pannello Layers
+  // nativo di SU: valgono per ogni scena e la scena le cattura solo con
+  // "Update from view". I due assi sono indipendenti, quindi togliere la
+  // spunta non fa sparire la riga dalla lista.
+  var laySel      = null;   // nome del layer selezionato (target di "-")
+  var layRenaming = null;   // nome del layer in rename inline
+
+  function layCall(op, name, value) {
+    var data = { op: op };
+    if (name  !== undefined && name  !== null) data.name  = name;
+    if (value !== undefined) data.value = value;
+    call('sm_props_layer_op', data);
+  }
+
+  function renderLayers(state) {
+    var fs   = $('#layers-fieldset');
+    var list = $('#lay-list');
+    var note = $('#lay-note');
+    var cnt  = $('#lay-count');
+    if (!fs || !list) return;
+
+    var p = (state && state.scene && state.scene.layers) || null;
+    if (!p) {
+      list.innerHTML = '<div class="lay-empty">Layers unavailable.</div>';
+      if (note) note.textContent = '';
+      if (cnt)  cnt.textContent = '';
+      return;
+    }
+
+    // Se l'utente sta rinominando, non ridisegnare: il push_state arriva anche
+    // per motivi scollegati (fog, focus della finestra) e cancellerebbe l'input
+    // a meta' digitazione. Stesso principio del setIfNotFocused sugli altri campi.
+    var editing = document.querySelector('.lay-name-input');
+    if (editing && document.activeElement === editing) return;
+
+    var rows = p.layers || [];
+    var supportsDash = !!p.supports_line_style;
+    fs.classList.toggle('no-dash', !supportsDash);
+
+    var dashOpts = '<option value="">Default</option>';
+    (p.line_styles || []).forEach(function (n) {
+      dashOpts += '<option value="' + escapeHtml(n) + '">' + escapeHtml(n) + '</option>';
+    });
+
+    if (rows.length === 0) {
+      list.innerHTML = '<div class="lay-empty">This scene shows no layers.</div>';
+    } else {
+      list.innerHTML = rows.map(function (r) {
+        var n     = r.name || '';
+        var sel   = (n === laySel) ? ' is-sel' : '';
+        // Layer elencato dalla scena ma spento nel modello: nome in grigio
+        // corsivo. E' il "drift" fra stato scena e stato modello.
+        var dim   = (r.visible === false) ? ' is-hiddenmodel' : '';
+        var curOn = r.current ? ' is-on' : '';
+        var col   = r.color || '';
+        var swCls = col ? 'lay-sw' : 'lay-sw is-empty';
+        // Il valore hex viaggia in data-hex: style.background rileggerebbe
+        // "rgb(r, g, b)", che SMColorPopup non accetta.
+        var swSty = ' data-hex="' + escapeHtml(col) + '"' +
+                    (col ? ' style="background:' + escapeHtml(col) + '"' : '');
+        var nameTitle = r.is_default
+          ? 'Default layer: cannot be renamed or deleted'
+          : 'Double-click to rename';
+        var dash = supportsDash
+          ? '<select class="lay-dash" title="Line style (dashes)">' + dashOpts + '</select>'
+          : '<span></span>';
+        return '<div class="lay-row' + sel + dim + '" data-name="' + escapeHtml(n) + '">' +
+               '<button type="button" class="lay-cur' + curOn + '" title="Set as current layer"></button>' +
+               '<input type="checkbox" class="lay-vis"' + (r.visible ? ' checked' : '') +
+                 ' title="Visible in the model, exactly like the native Layers window. The scene captures it only with Update from view.">' +
+               '<span class="lay-name" title="' + escapeHtml(nameTitle) + '">' + escapeHtml(n) + '</span>' +
+               '<button type="button" class="' + swCls + '"' + swSty + ' title="Layer color"></button>' +
+               dash +
+               '</div>';
+      }).join('');
+
+      // I <select> non accettano il valore selezionato via attributo quando le
+      // option sono generate a stringa: lo settiamo dopo l'inserimento nel DOM.
+      var els = list.querySelectorAll('.lay-row');
+      for (var i = 0; i < els.length; i++) {
+        var sd = els[i].querySelector('.lay-dash');
+        if (sd) sd.value = rows[i].line_style || '';
+      }
+    }
+
+    bindLayerRows(rows);
+
+    if (cnt) {
+      cnt.textContent = rows.length + ' of ' + (p.total_count || rows.length) + ' layers';
+    }
+    if (note) {
+      var msgs = [];
+      if (p.scene_tracks === false) {
+        msgs.push('This scene does not save layer visibility (Visible Layers is off), so every layer in the model is listed.');
+      } else if (p.hidden_count > 0) {
+        var names = (p.hidden_names || []).join(', ');
+        msgs.push(p.hidden_count + ' layer(s) hidden by this scene are not listed: ' + names +
+                  '. Turn them back on from the native Layers window, then Update from view.');
+      }
+      note.textContent = msgs.join(' ');
+    }
+  }
+
+  function bindLayerRows(rows) {
+    var list = $('#lay-list');
+    if (!list) return;
+
+    list.querySelectorAll('.lay-row').forEach(function (row) {
+      var name = row.dataset.name;
+
+      row.addEventListener('mousedown', function (e) {
+        if (e.target.classList.contains('lay-name-input')) return;
+        laySel = name;
+        list.querySelectorAll('.lay-row').forEach(function (r) {
+          r.classList.toggle('is-sel', r.dataset.name === laySel);
+        });
+        syncLayerToolbar();
+      });
+
+      var cur = row.querySelector('.lay-cur');
+      if (cur) {
+        cur.addEventListener('click', function (e) {
+          e.stopPropagation();
+          layCall('current', name);
+        });
+      }
+
+      var vis = row.querySelector('.lay-vis');
+      if (vis) {
+        vis.addEventListener('change', function () {
+          layCall('visible', name, vis.checked);
+        });
+      }
+
+      var sw = row.querySelector('.lay-sw');
+      if (sw) {
+        sw.addEventListener('click', function (e) {
+          e.stopPropagation();
+          if (!window.SMColorPopup) return;
+          var curHex = sw.dataset.hex || '';
+          // commitOnEnd: il colore del layer si vede nel viewport solo con
+          // "Color by layer" attivo, quindi non serve il live update e
+          // risparmiamo una write a SU per ogni movimento del cursore.
+          window.SMColorPopup.show(sw, curHex, function (hex) {
+            if (!hex) return;
+            layCall('color', name, hex);
+          }, { commitOnEnd: true });
+        });
+      }
+
+      var dash = row.querySelector('.lay-dash');
+      if (dash) {
+        dash.addEventListener('change', function () {
+          layCall('line_style', name, dash.value);
+        });
+        dash.addEventListener('mousedown', function (e) { e.stopPropagation(); });
+      }
+
+      var nameEl = row.querySelector('.lay-name');
+      if (nameEl) {
+        var isDefault = false;
+        for (var i = 0; i < rows.length; i++) {
+          if (rows[i].name === name) { isDefault = !!rows[i].is_default; break; }
+        }
+        if (!isDefault) {
+          nameEl.addEventListener('dblclick', function (e) {
+            e.stopPropagation();
+            startLayerRename(row, name);
+          });
+        }
+      }
+    });
+
+    syncLayerToolbar();
+
+    // Il layer appena creato dal "+" entra subito in rename inline, come fa
+    // il pannello nativo.
+    var focus = SMP.state && SMP.state.focus_layer;
+    if (focus) {
+      SMP.state.focus_layer = null;
+      // Scan invece di querySelector: dataset.name e' gia' de-escapato dal
+      // browser, quindi funziona anche con nomi che contengono virgolette.
+      var all = list.querySelectorAll('.lay-row');
+      for (var j = 0; j < all.length; j++) {
+        if (all[j].dataset.name === focus) {
+          laySel = focus;
+          all[j].classList.add('is-sel');
+          syncLayerToolbar();
+          startLayerRename(all[j], focus);
+          break;
+        }
+      }
+    }
+  }
+
+  function startLayerRename(row, name) {
+    var nameEl = row.querySelector('.lay-name');
+    if (!nameEl) return;
+    layRenaming = name;
+    var input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'lay-name-input';
+    input.value = name;
+    input.spellcheck = false;
+    nameEl.replaceWith(input);
+    input.focus();
+    input.select();
+
+    var done = false;
+    function finish(commit) {
+      if (done) return;
+      done = true;
+      layRenaming = null;
+      var v = input.value;
+      // Blur esplicito PRIMA di chiamare Ruby: il push_state di risposta
+      // arriva async e renderLayers salta il re-render se l'input di rename
+      // ha ancora il focus (sul path Enter non lo perderebbe mai da solo).
+      try { input.blur(); } catch (e) {}
+      if (commit && v.trim() && v !== name) {
+        // La selezione segue il nuovo nome, altrimenti dopo il re-render
+        // nessuna riga combacia e il bottone "-" tornerebbe disabilitato.
+        if (laySel === name) laySel = v.trim();
+        layCall('rename', name, v.trim());
+      } else {
+        // Nessuna modifica: ripristiniamo la riga senza disturbare Ruby.
+        call('sm_props_ready');
+      }
+    }
+    input.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter')       { e.preventDefault(); finish(true); }
+      else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+    });
+    input.addEventListener('blur', function () { finish(true); });
+  }
+
+  function syncLayerToolbar() {
+    var del = $('#btn-lay-del');
+    if (del) del.disabled = !laySel;
+  }
+
+  function bindLayers() {
+    var add = $('#btn-lay-add');
+    if (add) {
+      add.addEventListener('click', function () { layCall('add'); });
+    }
+    // Layer visibile solo nella scena di questo dialog. Ruby lo aggancia a
+    // @scene_id, non alla scena attiva: nessun id da passare da qui.
+    var addHere = $('#btn-lay-add-here');
+    if (addHere) {
+      addHere.addEventListener('click', function () { layCall('add_scene_only'); });
+    }
+    var del = $('#btn-lay-del');
+    if (del) {
+      del.addEventListener('click', function () {
+        if (!laySel) { setStatus('Select a layer first'); return; }
+        var target = laySel;
+        laySel = null;
+        layCall('delete', target);
+      });
+    }
+    var purge = $('#btn-lay-purge');
+    if (purge) {
+      purge.addEventListener('click', function () { layCall('purge'); });
+    }
+    syncLayerToolbar();
+  }
+
   function renderPreview(url) {
     const box = $('#preview-box');
     if (!url) {
@@ -494,6 +764,7 @@
     });
 
     bindFog();
+    bindLayers();
 
     // Bottone "Open native Scenes panel" nell'header — riusa il callback
     // sm_props_open_scenes_panel già esistente (attiva la scena nel viewport

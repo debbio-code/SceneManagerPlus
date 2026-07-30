@@ -174,6 +174,31 @@ function Invoke-SUEval {
 }
 ```
 
+⚠️ **`eval_ruby` gira sul modello aperto IN QUEL MOMENTO.** Un check "il modello
+e' vuoto, posso testarci sopra" fatto a inizio sessione **non vale piu'** dopo
+che l'utente ha aperto un file: SU riusa la stessa istanza e `Sketchup.active_model`
+cambia sotto i piedi senza alcun segnale. Successo davvero (2026-07-30: scene di
+test e un layer creati dentro un file di produzione dell'utente, `selected_page`
+lasciata `nil` e non ripristinabile). **Regola: ri-leggere `model.path` / `title` /
+`pages.count` nello stesso turno, subito prima di ogni snippet che SCRIVE** — non
+fidarsi di una verifica precedente. Per i test distruttivi chiedere all'utente un
+modello nuovo (Ctrl+N) e verificarlo.
+
+### API layer/tag disponibili in SU 2019 (verificate 19.3.253, 2026-07-30)
+
+- `Sketchup::LineStyles` e `Layer#line_style` / `line_style=` **esistono**
+  (introdotti in SU 2019). `model.line_styles.names` ritorna 12 stili
+  ("Solid Basic", "Short dash", "Dash", "Dot", "Dash dot", ...).
+  `layer.line_style = nil` riporta al default.
+- `LAYER_IS_HIDDEN_ON_NEW_PAGES` = **32** (costante top-level), per
+  `Layer#page_behavior=`.
+- `model.layers.unique_name` esiste.
+- `Layers#remove` ha **arity -1** e accetta `(layer, remove_geometry)`.
+- `Layers#purge_unused` esiste; ritorna il collection, quindi per sapere quanti
+  ne ha tolti va fatto il diff di `layers.count` prima/dopo.
+- SU **rifiuta** di rimuovere il layer corrente: riportare prima
+  `model.active_layer` sul default (`layers[0]`, sempre "Layer0").
+
 Gotcha: `TOPLEVEL_BINDING.dup` come binding — variabili non persistono tra
 chiamate, quindi ogni `eval_ruby` è self-contained (mettere tutto in un unico
 snippet, usare `\n` per multi-statement). Per enumerare RO:
@@ -298,6 +323,29 @@ pre_visible.each do |layer, was_visible|
   page.set_visibility(layer, was_visible)
 end
 ```
+
+**Asimmetria di `set_visibility` attiva vs non attiva (2026-07-30)**. Verificato
+su SU 19.3.253:
+
+| Chiamata | effetto su `page.layers` | effetto su `layer.visible?` (model) |
+|---|---|---|
+| `set_visibility` su pagina **non attiva** | scritto | **nessuno** |
+| `set_visibility` su pagina **attiva**     | scritto | **sincronizzato** |
+
+Quindi il pattern classico `pages.each { |p| p.set_visibility(l, p == target) }`
+sistema anche lo stato del modello **solo se `target` e' la pagina attiva** (ed
+e' per questo che "Add Visible Tag" del Layers Manager funziona: lavora sempre
+sulla scena attiva). Se il target e' una pagina qualsiasi — o se
+`pages.selected_page` e' `nil` — il layer resta `visible? == true` e compare nel
+viewport della scena sbagliata. In quel caso va forzato a valle:
+
+```ruby
+want_now = (active == target_page)
+l.visible = want_now if l.visible? != want_now
+```
+
+Usato da `Core::Layers.add_layer_visible_only_in` (vedi CLAUDE.md, sez. "Layers
+nel Properties dialog").
 
 **Tentativi precedenti che NON funzionano**:
 - `set_visibility(layer, !layer.visible?)` su `active.layers` → bug opposto.

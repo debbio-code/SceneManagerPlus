@@ -87,6 +87,7 @@ scene_manager_plus/
 │   ├── buffer.rb                   # Defer mode: stato globale edit in RAM + flush!
 │   ├── exporter.rb                 # Batch export PNG/JPG + watermark + titleblock via ImageRep
 │   ├── folders.rb                  # cartelle logiche (schema + load/save)
+│   ├── layers.rb                   # layer/tag model-wide + payload per-scena
 │   ├── naming.rb                   # format/preview/apply_rename pattern
 │   ├── previews.rb                 # cache PNG anteprime per-modello persistente
 │   ├── scene_model.rb              # wrapper su Sketchup.active_model.pages
@@ -1604,6 +1605,98 @@ standard adottata per la fog (replicabile altrove):
 5. **Step adattivo alla scala**: `baseStep = max / 200` arrotondato a
    "step rotondo" (1/2/5 × 10ⁿ) — su modello 100m → 0.5m, su modello
    10mm → 0.05mm.
+
+## Layers nel Properties dialog (`Core::Layers`) — 2026-07-30
+
+Sezione "Layers in this scene" sopra Display Fog: mini pannello Layers dentro
+la scheda della singola scena.
+
+### I due assi sono separati (decisione esplicita dell'utente)
+
+- **Filtro della lista = PER-SCENA**: `model.layers − page.layers` (`page.layers`
+  e' la hidden-list della pagina — semantica controintuitiva, vedi
+  `docs/SU2019-LESSONS.md`). Se `use_hidden_layers?` e' false la scena non
+  ripristina override: in quel caso si elencano TUTTI i layer e il payload
+  espone `scene_tracks=false` perche' la UI lo spieghi.
+- **Tutte le operazioni = SUL MODELLO**, come il pannello Layers nativo:
+  visibilita', rename, layer corrente, colore, line style, add/delete/purge.
+  La scena le cattura solo con "Update from view".
+
+Conseguenza importante e non ovvia: **togliere la spunta NON fa sparire la riga**,
+perche' il filtro dipende da `page.layers` e la spunta da `layer.visible?`. Le
+righe con `visible? == false` si mostrano grigie/corsivo (`.is-hiddenmodel`):
+e' il "drift" scena↔modello reso visibile. I layer nascosti *dalla scena* non
+sono raggiungibili da qui — la nota in fondo li elenca per nome, e per
+riaccenderli serve il pannello nativo + Update from view. Era chiaro all'utente
+quando ha scelto il filtro: NON "correggerlo" in futuro senza chiedere.
+
+### Bottone `+👁` — layer visibile solo in QUESTA scena
+
+Variante di "Add Visible Tag" del plugin Layers Manager (repo di fianco,
+`C:\Claude\Sketchup Plugins\Layers (add visible tag)`, vedi
+`layers/layers_loader.rb` ~riga 178). L'originale fa:
+
+```ruby
+active = model.pages.selected_page
+model.pages.each { |p| p.set_visibility(layer, p == active) }
+```
+
+cioe' e' ancorato alla scena **attiva**. Qui il target e' la scena aperta nel
+Properties dialog, che puo' NON essere quella attiva — per questo
+`Core::Layers.add_layer_visible_only_in(page)` e' una funzione separata e non
+un riuso di quel comando. Aggiunge un passo che l'originale non ha:
+
+```ruby
+want_now = (active == page)
+l.visible = want_now if l.visible? != want_now
+```
+
+**Serve per via dell'asimmetria di `set_visibility`** (verificata su SU 19.3.253,
+vedi `SU2019-LESSONS.md`): su pagina NON attiva non tocca `layer.visible?`, su
+pagina ATTIVA lo sincronizza. Quindi senza quella riga, con target ≠ attiva o
+con `selected_page == nil`, il layer nascerebbe `visible? == true` e comparirebbe
+subito nel viewport della scena sbagliata.
+
+Come l'originale, setta `page_behavior = LAYER_IS_HIDDEN_ON_NEW_PAGES` (= 32 in
+SU 2019) cosi' le scene future lo nascondono. Nota: `SceneModel.add_from_view`
+snapshotta comunque `layer.visible?` PRE-add e lo applica alla nuova scena, quindi
+creando una scena *dalla vista del target* il layer resta visibile anche li' —
+coerente con la filosofia "scatta foto completa" del plugin, non un bug.
+
+Ritorna anche `unconstrained`: le scene con "Visible Layers" spento non possono
+nascondere nulla, quindi mostrerebbero il layer comunque → messagebox che le
+elenca invece di promettere un'esclusivita' inesistente.
+
+### Dettagli implementativi
+
+- **Chiave di identita' = il NOME**, non `persistent_id` (su `Layer` non e'
+  affidabile in SU 2019, stesso sospetto gia' confermato per `Material`, che
+  ritorna 0). Il rename passa `{name, value}` e subito dopo si ri-pusha lo state.
+- **Layer0 protetto** da rename e delete. Cancellare il layer **corrente**
+  richiede di riportare prima `model.active_layer` sul default, altrimenti SU
+  rifiuta.
+- Delete: `UI.messagebox` YES/NO/CANCEL = mantieni geometria (va su Layer0) /
+  cancella anche la geometria / annulla. `layers.remove` ha arity -1 e accetta
+  `(layer, remove_geometry)`; c'e' comunque un `rescue ArgumentError` sul
+  fallback a 1 argomento.
+- Colore in `commitOnEnd` (vedi sez. `SMColorPopup`): si vede nel viewport solo
+  con "Color by layer" attivo, quindi niente live update e una sola write.
+  L'hex viaggia in `data-hex` sullo swatch: rileggere `style.background`
+  darebbe `rgb(r, g, b)`, che `SMColorPopup` non accetta.
+- `PropertiesDialog.push_state` ha ora il kwarg **`focus_layer:`**: il layer
+  appena creato entra in rename inline, come il "+" nativo. Se aggiungi altri
+  campi top-level allo state ricordati della trappola dei tre posti (vedi sez.
+  "Trappola push_state").
+- `renderLayers` **salta il re-render se l'input di rename ha il focus**
+  (stesso principio del `setIfNotFocused`), e `finish()` fa `input.blur()`
+  PRIMA di chiamare Ruby: sul path Enter l'input non perderebbe mai il focus
+  da solo e il push_state di risposta verrebbe scartato.
+- **Niente scroll interno alla lista** (richiesta esplicita): `.lay-list` non
+  ha ne' `max-height` ne' `overflow`. Attenzione, basta impostare `overflow` su
+  UN asse per creare un contenitore di scroll anche sull'altro. A scrollare e'
+  `.body` dell'intero dialog.
+- Il markup di `SMColorPopup` e' stato duplicato anche in `properties.html`
+  (in CEF non si includono fragment HTML).
 
 ## Copia/incolla scene cross-file (Fase A+B implementate — 2026-05-31)
 

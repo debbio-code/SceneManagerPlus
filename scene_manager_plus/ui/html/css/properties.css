@@ -216,6 +216,165 @@ fieldset legend {
   font-style: italic;
 }
 
+/* === Layers section ========================================= */
+/* Griglia a 5 colonne, condivisa da header e righe, cosi le colonne restano
+   allineate anche quando la lista scrolla. */
+#layers-fieldset { padding-top: 8px; }
+
+.lay-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+.lay-bar .lay-spacer { flex: 1; }
+.lay-count { color: #888; font-size: 11px; }
+.lay-tool {
+  background: #3a3a3a;
+  border: 1px solid #1e1e1e;
+  color: #ddd;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  cursor: pointer;
+  border-radius: 2px;
+  font-size: 14px;
+  line-height: 1;
+  font-weight: bold;
+  flex: 0 0 auto;
+}
+.lay-tool-wide { width: auto; padding: 0 8px; font-size: 11px; font-weight: normal; }
+.lay-tool:hover { background: #4a4a4a; border-color: #4ea1ff; }
+.lay-tool:active { background: #2b5a86; color: #fff; }
+.lay-tool:disabled { opacity: 0.4; cursor: default; }
+.lay-tool:disabled:hover { background: #3a3a3a; border-color: #1e1e1e; }
+
+.lay-head, .lay-row {
+  display: grid;
+  grid-template-columns: 20px 22px 1fr 24px 76px;
+  align-items: center;
+  gap: 4px;
+}
+.lay-head {
+  color: #888;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  padding: 0 4px 3px;
+  border-bottom: 1px solid #1e1e1e;
+  user-select: none;
+}
+.lay-head span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lay-h-cur, .lay-h-vis, .lay-h-col { text-align: center; }
+
+/* Nessuno scroll interno: il box cresce quanto serve e a scrollare e' semmai
+   .body dell'intero dialog. Niente max-height/overflow qui — basta impostare
+   overflow su UN asse per creare un contenitore di scroll anche sull'altro. */
+.lay-list { }
+.lay-row {
+  padding: 2px 4px;
+  border-radius: 2px;
+  cursor: default;
+}
+.lay-row:hover { background: #383838; }
+.lay-row.is-sel { background: #2b5a86; }
+.lay-row.is-sel:hover { background: #316799; }
+
+/* Pallino "layer corrente" (colonna radio del pannello nativo) */
+.lay-cur {
+  width: 13px;
+  height: 13px;
+  margin: 0 auto;
+  border: 1px solid #666;
+  border-radius: 50%;
+  background: #232323;
+  cursor: pointer;
+  padding: 0;
+  display: block;
+}
+.lay-cur:hover { border-color: #4ea1ff; }
+.lay-cur.is-on { background: #4ea1ff; border-color: #cfe6ff; box-shadow: inset 0 0 0 2px #232323; }
+
+.lay-vis { margin: 0 auto; display: block; cursor: pointer; }
+
+.lay-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: #ddd;
+  cursor: text;
+}
+.lay-row.is-hiddenmodel .lay-name { color: #777; font-style: italic; }
+.lay-name-input {
+  width: 100%;
+  background: #232323;
+  border: 1px solid #4ea1ff;
+  color: #fff;
+  font-size: 12px;
+  font-family: inherit;
+  padding: 1px 3px;
+  border-radius: 2px;
+}
+.lay-name-input:focus { outline: none; }
+
+/* Swatch colore: usa lo stesso pattern a quadretti degli altri swatch del
+   plugin per il "nessun colore". */
+.lay-sw {
+  width: 18px;
+  height: 15px;
+  margin: 0 auto;
+  border: 1px solid #1e1e1e;
+  border-radius: 2px;
+  cursor: pointer;
+  padding: 0;
+  display: block;
+}
+.lay-sw:hover { border-color: #4ea1ff; }
+.lay-sw.is-empty {
+  background-image:
+    linear-gradient(45deg, #555 25%, transparent 25%, transparent 75%, #555 75%),
+    linear-gradient(45deg, #555 25%, #333 25%, #333 75%, #555 75%);
+  background-size: 8px 8px;
+  background-position: 0 0, 4px 4px;
+}
+
+.lay-dash {
+  background: #232323;
+  border: 1px solid #1e1e1e;
+  color: #ddd;
+  font-size: 11px;
+  font-family: inherit;
+  padding: 1px 2px;
+  border-radius: 2px;
+  width: 100%;
+  min-width: 0;
+}
+.lay-dash:focus { outline: none; border-color: #4ea1ff; }
+
+/* Build senza Sketchup::LineStyles: la colonna Dashes sparisce del tutto */
+#layers-fieldset.no-dash .lay-head,
+#layers-fieldset.no-dash .lay-row {
+  grid-template-columns: 20px 22px 1fr 24px;
+}
+#layers-fieldset.no-dash .lay-h-dash,
+#layers-fieldset.no-dash .lay-dash { display: none; }
+
+.lay-note {
+  color: #888;
+  font-size: 10px;
+  font-style: italic;
+  line-height: 1.5;
+  margin-top: 6px;
+}
+.lay-empty {
+  color: #666;
+  font-size: 11px;
+  font-style: italic;
+  padding: 10px 4px;
+  text-align: center;
+}
+
 /* === Fog section ============================================ */
 #fog-fieldset { padding-top: 10px; }
 .fog-note {
