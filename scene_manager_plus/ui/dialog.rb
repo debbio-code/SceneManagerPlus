@@ -81,6 +81,9 @@ module SceneManagerPlus
           warn "[SM+] poll variant apply: #{e.class}: #{e.message}"
         end
         @dialog.execute_script("window.SM && SM.setActiveFromNative(#{uid.to_json});")
+        # Il Properties dialog mostra sempre la scena attiva: qui passa il
+        # cambio scena fatto dai tab nativi di SU.
+        PropertiesDialog.follow_active(uid)
       rescue => e
         warn "[SM+] poll_active_scene: #{e.class}: #{e.message}"
       end
@@ -238,6 +241,10 @@ module SceneManagerPlus
           unless Core::Buffer.deferred?
             data = parse(payload)
             Core::SceneModel.select_page(data['id'])
+            # Senza questo il Properties dialog si allineerebbe solo al giro
+            # successivo del polling (250ms) — o mai, se la scena era gia'
+            # quella attiva per SU ma non quella mostrata nel dialog.
+            PropertiesDialog.follow_active(data['id'])
           end
         end
 

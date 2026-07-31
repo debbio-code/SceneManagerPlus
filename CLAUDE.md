@@ -99,6 +99,7 @@ scene_manager_plus/
 └── ui/
     ├── dialog.rb                   # Main HtmlDialog + bridge + polling scene attiva
     ├── export_dialog.rb            # Dialog Export (scope picker + progress)
+    ├── layer_info_dialog.rb        # Contenuto di un layer (HTML generato, no asset)
     ├── properties_dialog.rb        # Dialog Properties singola scena (dblclick)
     ├── settings_dialog.rb          # Dialog Settings (naming + export + logo)
     ├── style_dialog.rb             # Mini Style Manager (click lettera badge)
@@ -1697,6 +1698,78 @@ elenca invece di promettere un'esclusivita' inesistente.
   `.body` dell'intero dialog.
 - Il markup di `SMColorPopup` e' stato duplicato anche in `properties.html`
   (in CEF non si includono fragment HTML).
+
+## Azioni sui layer + finestra contenuto (2026-07-31)
+
+Estensione della sezione Layers del Properties dialog. Tre controlli nuovi:
+`i` e `→` per-riga (stessa dimensione dello swatch colore, alla sinistra di
+quest'ultimo) e `C` in toolbar.
+
+| Controllo | Cosa fa |
+|---|---|
+| `→` per riga | Sposta la selezione del viewport su quel layer, **previa conferma OK/Cancel** con il riepilogo di cosa verrà spostato |
+| `i` per riga | Apre `UI::LayerInfoDialog` col contenuto del layer |
+| `C` in toolbar | Toggle `DisplayColorByLayer` (checkbox "Color by layer" nativa) |
+
+**La conferma sulla freccia non è negoziabile**: il bottone sta in una riga
+fitta, il click parte facile, e spostare geometria di layer si nota molto dopo
+(se il layer di destinazione è spento, la geometria "sparisce" — il messagebox
+lo avvisa esplicitamente). Semantica = Entity Info nativo: agisce sulle entità
+**selezionate**, senza scendere dentro gruppi/componenti.
+
+**`Core::Layers` ora ha un walker unico** `each_entity_on_layer(l)` che yielda
+`(entity, 'root'|'nested', owner_definition_name)`. Ci passano `stats_for`
+(conteggi) e `select_on_layer` (selezione): devono classificare allo stesso
+modo, altrimenti la finestra promette N e la selezione ne prende un altro
+numero. La classificazione sta in `category_of` — unica.
+
+### `UI::LayerInfoDialog` — dialog senza asset HTML
+
+Unico dialog del plugin che **non** ha file in `ui/html/`: il report è generato
+in Ruby e iniettato con `set_html`, e i refresh sostituiscono il body via
+`execute_script`. Conseguenze da rispettare se lo si tocca:
+
+- tutti i listener JS sono in **delegation su `document`**, definiti nell'
+  `<head>`: un listener agganciato alle righe morirebbe al primo refresh;
+- lo stato che il JS deve conoscere (isolamento attivo) viaggia come
+  **data-attribute nel body** (`data-iso`), non come variabile JS globale, per
+  lo stesso motivo;
+- `swap_body` confronta col body precedente e **non tocca il DOM se nulla è
+  cambiato** — vedi la regola sul click mangiato in `SU2019-LESSONS.md`.
+
+Il riquadro di stato è `position: sticky; bottom: 0`. Non è cosmetica: era in
+coda al report e su un layer con 250 definition finiva a schermate di distanza,
+quindi l'utente cliccava una riga e concludeva che non funzionasse nulla —
+segnalato come bug, era solo feedback fuori vista.
+
+### Selezione per categoria e vicolo cieco dei gruppi
+
+Click su una riga = seleziona quelle entità. Ma la selezione di SU vive nel
+contesto di editing aperto (dettagli e verifiche in `SU2019-LESSONS.md`,
+sezione "Selezione"), quindi su un layer come Layer0 — 300k entità di cui 2 al
+primo livello — la risposta onesta è "0 selezionate".
+
+Per non lasciare un vicolo cieco, il messaggio elenca **i contenitori** con i
+rispettivi conteggi (primi 12 + coda aggregata), e ogni riga dell'elenco è
+cliccabile: `select_containers_of` seleziona le istanze di quel gruppo/
+componente, risalendo la catena se anche quelle sono annidate.
+
+Tasto destro su una riga: **Select all** / **Select all and isolate the layer**
+/ **Restore layer visibility** (quest'ultima solo se un isolamento è ancora in
+piedi davvero — vedi la nota su `isolation_active?` in `SU2019-LESSONS.md`).
+
+### Il Properties dialog segue sempre la scena attiva
+
+`PropertiesDialog.follow_active(uid)`, chiamato da `Dialog#poll_active_scene`
+(tab nativi) e dal callback `sm_select_page` (click nella lista, che non deve
+aspettare i 250ms del polling). Mostrare le proprietà di una scena diversa da
+quella nel viewport è ambiguo, e rendeva la sezione Fog perennemente
+disabilitata. In defer mode resta ferma, coerentemente col resto.
+
+`push_state` ha ora anche il kwarg **`status:`** per l'esito di operazioni che
+non meritano un messagebox (es. quante entità sono finite sul layer): il JS lo
+mostra nella status bar per 4s. Ricorda la trappola dei campi top-level (vedi
+"Trappola push_state").
 
 ## Copia/incolla scene cross-file (Fase A+B implementate — 2026-05-31)
 

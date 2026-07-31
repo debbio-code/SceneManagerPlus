@@ -30,8 +30,24 @@
     { label: 'Axes Location',         keys: ['use_axes'] },
   ];
 
+  // === Anti "devo cliccare due volte" =======================================
+  // Ogni push_state ricostruisce interi blocchi di DOM via innerHTML. Quando la
+  // finestra non ha il fuoco, il primo mousedown la attiva -> parte
+  // debouncedPropsRefresh -> Ruby risponde con setState -> il DOM viene
+  // sostituito PRIMA del mouseup, e il browser non genera nessun `click`
+  // (richiede mousedown e mouseup sullo stesso elemento). Risultato: il primo
+  // click su un bottone "si perde", il secondo funziona.
+  //
+  // Rimedio: ridisegnare solo se i dati sono davvero cambiati. Le firme sono
+  // il JSON del payload di quella sezione.
+  var flagSig = null;
+  var laySig  = null;
+
   function renderFlags(flagKeys, flags, isMatchPhoto) {
     const el = $('#prop-flags');
+    var sig = JSON.stringify([flagKeys, flags, !!isMatchPhoto]);
+    if (sig === flagSig && el.querySelector('input')) return;
+    flagSig = sig;
     // Filtra agli item che hanno almeno una key presente in flagKeys (defensive)
     const items = FLAG_UI.filter(item => item.keys.some(k => flagKeys.indexOf(k) !== -1));
     el.innerHTML = items.map((item, idx) => {
@@ -87,9 +103,9 @@
     };
   }
 
-  function setStatus(msg) {
+  function setStatus(msg, ms) {
     $('#status').textContent = msg;
-    if (msg) setTimeout(() => { $('#status').textContent = ''; }, 1500);
+    if (msg) setTimeout(() => { $('#status').textContent = ''; }, ms || 1500);
   }
 
   function commit() {
@@ -138,6 +154,9 @@
     renderPreview(state.preview_url);
     renderLayers(state);
     renderFog(s.fog || {}, !!s.is_active);
+    // Esito di un'operazione Ruby che non merita un messagebox (es. quante
+    // entita' sono finite sul layer).
+    if (state.status) setStatus(state.status, 4000);
     SMP.applying = false;
   };
 
@@ -447,10 +466,21 @@
     var p = (state && state.scene && state.scene.layers) || null;
     if (!p) {
       list.innerHTML = '<div class="lay-empty">Layers unavailable.</div>';
+      laySig = null;
       if (note) note.textContent = '';
       if (cnt)  cnt.textContent = '';
       return;
     }
+
+    // Vedi il commento su flagSig: niente re-render se il payload dei layer e'
+    // identico, altrimenti un refresh su focus mangia il click in corso. Il
+    // layer appena creato (focus_layer) forza comunque il giro completo, perche'
+    // deve entrare in rename inline.
+    var sig = JSON.stringify(p);
+    if (sig === laySig && !(state && state.focus_layer) && list.querySelector('.lay-row')) {
+      return;
+    }
+    laySig = sig;
 
     // Se l'utente sta rinominando, non ridisegnare: il push_state arriva anche
     // per motivi scollegati (fog, focus della finestra) e cancellerebbe l'input
@@ -494,6 +524,8 @@
                '<input type="checkbox" class="lay-vis"' + (r.visible ? ' checked' : '') +
                  ' title="Visible in the model, exactly like the native Layers window. The scene captures it only with Update from view.">' +
                '<span class="lay-name" title="' + escapeHtml(nameTitle) + '">' + escapeHtml(n) + '</span>' +
+               '<button type="button" class="lay-info" title="Show what is on this layer: groups, components, faces, edges, guides&hellip;">i</button>' +
+               '<button type="button" class="lay-mv" title="Move the current model selection to this layer (like Entity Info: selected groups and components move as a whole)">&rarr;</button>' +
                '<button type="button" class="' + swCls + '"' + swSty + ' title="Layer color"></button>' +
                dash +
                '</div>';
@@ -509,6 +541,16 @@
     }
 
     bindLayerRows(rows);
+
+    // "Color by layer" e' una rendering option del modello: il bottone e' un
+    // toggle stateful, non un comando. Se la build non espone la chiave lo
+    // nascondiamo del tutto invece di lasciare un bottone che non fa nulla.
+    var cbl = $('#btn-lay-cbl');
+    if (cbl) {
+      var supported = p.supports_color_by_layer !== false;
+      cbl.style.display = supported ? '' : 'none';
+      cbl.classList.toggle('is-on', !!p.color_by_layer);
+    }
 
     if (cnt) {
       cnt.textContent = rows.length + ' of ' + (p.total_count || rows.length) + ' layers';
@@ -554,6 +596,24 @@
       if (vis) {
         vis.addEventListener('change', function () {
           layCall('visible', name, vis.checked);
+        });
+      }
+
+      var info = row.querySelector('.lay-info');
+      if (info) {
+        info.addEventListener('click', function (e) {
+          e.stopPropagation();
+          layCall('info', name);
+        });
+      }
+
+      // La selezione vive nel viewport, non nel dialog: nessun payload da
+      // costruire qui, Ruby legge model.selection al volo.
+      var mv = row.querySelector('.lay-mv');
+      if (mv) {
+        mv.addEventListener('click', function (e) {
+          e.stopPropagation();
+          layCall('assign_selection', name);
         });
       }
 
@@ -686,6 +746,15 @@
     var purge = $('#btn-lay-purge');
     if (purge) {
       purge.addEventListener('click', function () { layCall('purge'); });
+    }
+    var cbl = $('#btn-lay-cbl');
+    if (cbl) {
+      cbl.addEventListener('click', function () {
+        var on = cbl.classList.contains('is-on');
+        // Feedback immediato: lo state vero riarriva col push_state.
+        cbl.classList.toggle('is-on', !on);
+        layCall('color_by_layer', null, !on);
+      });
     }
     syncLayerToolbar();
   }

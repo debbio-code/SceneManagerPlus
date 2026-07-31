@@ -35,6 +35,7 @@
         <div class="lay-bar">
           <span id="lay-count" class="lay-count"></span>
           <span class="lay-spacer"></span>
+          <button type="button" id="btn-lay-cbl" class="lay-tool" title="Color by layer: paint the model with each layer's color instead of its materials (same checkbox as the native Layers window). It is a rendering option of the model, so scenes that save Style and Fog capture it.">C</button>
           <button type="button" id="btn-lay-add" class="lay-tool" title="Add a new layer (visible everywhere, like the native Layers window)">+</button>
           <button type="button" id="btn-lay-add-here" class="lay-tool lay-tool-wide" title="Add a new layer visible ONLY in this scene: hidden in every other scene, and hidden by default in scenes created later. Works even when this scene is not the active one.">+&#128065;</button>
           <button type="button" id="btn-lay-del" class="lay-tool" title="Delete the selected layer">&minus;</button>
@@ -44,6 +45,8 @@
           <span class="lay-h-cur" title="Current layer: new geometry goes here">Cur</span>
           <span class="lay-h-vis" title="Visible in the model (same as the native Layers window)">Vis</span>
           <span class="lay-h-name">Name</span>
+          <span class="lay-h-info" title="What is on this layer: groups, components, faces, edges…">Obj</span>
+          <span class="lay-h-mv" title="Move the current model selection to this layer">Sel</span>
           <span class="lay-h-col" title="Layer color">Col</span>
           <span class="lay-h-dash" title="Line style (dashes)">Dashes</span>
         </div>

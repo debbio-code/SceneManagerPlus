@@ -17,6 +17,7 @@ module SceneManagerPlus
   require File.join(PLUGIN_DIR, 'ui', 'dialog')
   require File.join(PLUGIN_DIR, 'ui', 'settings_dialog')
   require File.join(PLUGIN_DIR, 'ui', 'properties_dialog')
+  require File.join(PLUGIN_DIR, 'ui', 'layer_info_dialog')
   require File.join(PLUGIN_DIR, 'ui', 'export_dialog')
   require File.join(PLUGIN_DIR, 'ui', 'style_dialog')
   require File.join(PLUGIN_DIR, 'ui', 'variant_dialog')

@@ -57,6 +57,24 @@ module SceneManagerPlus
         @dialog
       end
 
+      # Il dialog segue SEMPRE la scena attiva nel viewport: mostrare le
+      # proprieta' di una scena diversa da quella che si sta guardando e'
+      # ambiguo (e la sezione Fog, che legge le rendering options del modello,
+      # sarebbe per forza disabilitata).
+      #
+      # Chiamato da `Dialog#poll_active_scene` (cambio scena dai tab nativi) e
+      # dal callback `sm_select_page` (click nella lista del plugin, che non
+      # aspetta il polling). No-op se il dialog e' chiuso o se la scena e' gia'
+      # quella mostrata.
+      def follow_active(uid)
+        return unless @dialog && (@dialog.visible? rescue false)
+        return if uid.nil? || uid == @scene_id
+        @scene_id = uid
+        push_state
+      rescue => e
+        warn "[SM+] properties follow_active: #{e.class}: #{e.message}"
+      end
+
       def register_callbacks(dlg)
         dlg.add_action_callback('sm_props_ready') do |_ctx|
           push_state
@@ -147,9 +165,10 @@ module SceneManagerPlus
       # Sono immediate anche in defer mode, come assign_style: toccano il
       # modello, non gli attributi di pagina bufferizzati.
       def handle_layer_op(data)
-        op    = data['op'].to_s
-        name  = data['name'].to_s
-        focus = nil
+        op     = data['op'].to_s
+        name   = data['name'].to_s
+        focus  = nil
+        status = nil
 
         case op
         when 'visible'
@@ -169,6 +188,12 @@ module SceneManagerPlus
           focus = Core::Layers.add_layer
         when 'add_scene_only'
           focus = add_layer_visible_only_in_scene
+        when 'color_by_layer'
+          Core::Layers.set_color_by_layer(data['value'])
+        when 'assign_selection'
+          status = assign_selection_status(name)
+        when 'info'
+          LayerInfoDialog.show_for(name)
         when 'delete'
           delete_layer_interactive(name)
         when 'purge'
@@ -179,7 +204,7 @@ module SceneManagerPlus
           )
         end
 
-        push_state(focus_layer: focus)
+        push_state(focus_layer: focus, status: status)
       rescue => e
         warn "[SM+] handle_layer_op failed: #{e.class}: #{e.message}"
       end
@@ -196,6 +221,48 @@ module SceneManagerPlus
         return nil unless res
         warn_unconstrained_scenes(res['unconstrained'])
         res['name']
+      end
+
+      # Sposta la selezione del viewport sul layer, previa conferma.
+      #
+      # La conferma non e' negoziabile: la freccia sta in una riga fitta di
+      # controlli, il click parte facile, e cambiare layer a geometria gia'
+      # modellata e' un'operazione che si nota solo molto dopo (specie se il
+      # layer di destinazione e' spento e la geometria "sparisce"). Il
+      # messagebox elenca cosa verra' spostato PRIMA di toccare il modello.
+      def assign_selection_status(name)
+        sum = Core::Layers.selection_summary(name)
+        return 'Layer not found' unless sum
+        return 'Select something in the model first' if sum['total'].to_i.zero?
+        return 'Move cancelled' unless confirm_assign_selection(name, sum)
+
+        res = Core::Layers.assign_selection(name)
+        return 'Layer not found' unless res
+        parts = ["#{res['moved']} moved to \"#{name}\""]
+        parts << "#{res['already']} already there" if res['already'].to_i > 0
+        parts << "#{res['skipped']} skipped"       if res['skipped'].to_i > 0
+        parts.join(', ')
+      end
+
+      def confirm_assign_selection(name, sum)
+        breakdown = (sum['counts'] || {})
+                    .sort_by { |k, v| [-v.to_i, k.to_s] }
+                    .map { |k, v| Core::Layers.count_label(v, k) }
+                    .join(', ')
+        msg = "Move the current selection to layer \"#{name}\"?\n\n" \
+              "#{sum['total']} selected: #{breakdown}"
+        if sum['already'].to_i > 0
+          msg += "\n#{sum['already']} of them are already on this layer."
+        end
+        # Spostare su un layer spento fa sparire la geometria dal viewport:
+        # senza questo avviso sembra di averla cancellata.
+        l = Core::Layers.find(name)
+        if l && !(l.visible? rescue true)
+          msg += "\n\nWarning: this layer is hidden in the model, so the moved " \
+                 'entities will disappear from the viewport.'
+        end
+        msg += "\n\nGroups and components move as a whole, like Entity Info."
+        ::UI.messagebox(msg, MB_OKCANCEL) == IDOK
       end
 
       def warn_unconstrained_scenes(names)
@@ -245,7 +312,7 @@ module SceneManagerPlus
 
       # `focus_layer`: nome del layer appena creato — il JS ci apre sopra il
       # rename inline, come fa il pannello nativo dopo il "+".
-      def push_state(focus_layer: nil)
+      def push_state(focus_layer: nil, status: nil)
         return unless @dialog && @dialog.visible?
         scene = scene_payload(@scene_id)
         preview = @scene_id ? Core::Previews.url_map[@scene_id] : nil
@@ -253,7 +320,8 @@ module SceneManagerPlus
           scene:       scene,
           flag_keys:   Core::SceneModel::FLAG_KEYS,
           preview_url: preview,
-          focus_layer: focus_layer
+          focus_layer: focus_layer,
+          status:      status
         }
         @dialog.execute_script("window.SMP && SMP.setState(#{state.to_json});")
       rescue => e

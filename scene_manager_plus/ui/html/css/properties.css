@@ -248,10 +248,13 @@ fieldset legend {
 .lay-tool:active { background: #2b5a86; color: #fff; }
 .lay-tool:disabled { opacity: 0.4; cursor: default; }
 .lay-tool:disabled:hover { background: #3a3a3a; border-color: #1e1e1e; }
+/* Toggle "Color by layer": acceso = stessa evidenza del pallino layer corrente */
+.lay-tool.is-on { background: #4ea1ff; border-color: #cfe6ff; color: #10222f; }
+.lay-tool.is-on:hover { background: #6cb4ff; }
 
 .lay-head, .lay-row {
   display: grid;
-  grid-template-columns: 20px 22px 1fr 24px 76px;
+  grid-template-columns: 20px 22px 1fr 22px 22px 24px 76px;
   align-items: center;
   gap: 4px;
 }
@@ -265,7 +268,7 @@ fieldset legend {
   user-select: none;
 }
 .lay-head span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.lay-h-cur, .lay-h-vis, .lay-h-col { text-align: center; }
+.lay-h-cur, .lay-h-vis, .lay-h-col, .lay-h-info, .lay-h-mv { text-align: center; }
 
 /* Nessuno scroll interno: il box cresce quanto serve e a scrollare e' semmai
    .body dell'intero dialog. Niente max-height/overflow qui — basta impostare
@@ -331,6 +334,29 @@ fieldset legend {
   display: block;
 }
 .lay-sw:hover { border-color: #4ea1ff; }
+
+/* Bottoni per-riga "contenuto del layer" e "sposta selezione qui": stessa
+   dimensione dello swatch colore, cosi le tre celle a destra del nome sono una
+   fila regolare. */
+.lay-info, .lay-mv {
+  width: 18px;
+  height: 15px;
+  margin: 0 auto;
+  border: 1px solid #1e1e1e;
+  border-radius: 2px;
+  background: #3a3a3a;
+  color: #ccc;
+  cursor: pointer;
+  padding: 0;
+  display: block;
+  font-size: 11px;
+  line-height: 13px;
+  font-family: inherit;
+  text-align: center;
+}
+.lay-info { font-family: Georgia, "Times New Roman", serif; font-style: italic; font-weight: bold; }
+.lay-info:hover, .lay-mv:hover { background: #4a4a4a; border-color: #4ea1ff; color: #fff; }
+.lay-info:active, .lay-mv:active { background: #2b5a86; }
 .lay-sw.is-empty {
   background-image:
     linear-gradient(45deg, #555 25%, transparent 25%, transparent 75%, #555 75%),
@@ -355,7 +381,7 @@ fieldset legend {
 /* Build senza Sketchup::LineStyles: la colonna Dashes sparisce del tutto */
 #layers-fieldset.no-dash .lay-head,
 #layers-fieldset.no-dash .lay-row {
-  grid-template-columns: 20px 22px 1fr 24px;
+  grid-template-columns: 20px 22px 1fr 22px 22px 24px;
 }
 #layers-fieldset.no-dash .lay-h-dash,
 #layers-fieldset.no-dash .lay-dash { display: none; }

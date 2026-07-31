@@ -205,6 +205,50 @@ snippet, usare `\n` per multi-statement). Per enumerare RO:
 `Sketchup.active_model.rendering_options.each_pair { |k,v| ... }` (in SU 2019
 sono **61** chiavi — vedi lista in CLAUDE.md sez. Match Photo).
 
+### Selezione: `Sketchup::Selection` vive nel contesto di editing (2026-07-31)
+
+Verificato su SU 19.3.253 su modello reale:
+
+- `model.selection.add(entita_dentro_un_gruppo)` **non solleva** e
+  `selection.count` sale a 1 — ma SketchUp non la evidenzia nel viewport e non
+  la tratta come selezionata. È una selezione fantasma: il valore di ritorno
+  NON è una prova che abbia funzionato.
+- `Sketchup::Model#active_path=` — l'unico modo di entrare in un contesto da
+  codice — **non esiste in SU 2019** (`respond_to?(:active_path=)` → false,
+  introdotto nel 2020). Quindi non c'è nessun workaround.
+
+**Regola**: selezionare solo entità presenti in `model.active_entities`
+(confronto per `entityID`, che è univoco in sessione) e **riportare** cosa è
+stato escluso. In `Core::Layers.select_on_layer` il walk restituisce anche il
+nome della definition che contiene ogni entità irraggiungibile, così la UI
+elenca i contenitori invece di dire genericamente "sono dentro dei gruppi".
+
+Via d'uscita utile (`Core::Layers.select_containers_of`): le **istanze** del
+contenitore sì che si selezionano. Se anche quelle sono annidate si risale la
+catena via `instance.parent` (una `ComponentDefinition` quando l'istanza è
+annidata, il `Model` quando è al primo livello) finché non si trova qualcosa in
+`active_entities`. Misurato sul modello dell'utente: `KLP_tex` sta 5 livelli
+sotto, e la risalita seleziona il componente di primo livello che lo contiene.
+
+### `DisplayColorByLayer` e la visibilità di Layer0 (2026-07-31)
+
+- **"Color by layer"** (la checkbox del pannello Layers nativo) è la
+  RenderingOption `DisplayColorByLayer` (bool). Esiste in SU 2019, verificata
+  in lettura e scrittura. Come tutte le RO viene catturata per-scena da
+  `use_rendering_options` e sporca lo stile attivo, quindi va scritta senza
+  `update_selected_style` (stesso trattamento della fog).
+- **Il layer di default NON si lascia nascondere**: `layer0.visible = false`
+  non solleva eccezione, semplicemente non ha effetto. Chi implementa un
+  "isolate layer" deve contare i layer effettivamente nascosti **a posteriori**
+  invece di fidarsi dei tentativi, e dirlo all'utente.
+- Un isolamento (spegnere tutti i layer tranne uno) viene **disfatto da
+  qualsiasi attivazione di scena** con "Visible Layers" acceso: SU riscrive la
+  visibilità di tutti i layer. Uno stato "isolamento attivo" tenuto in RAM va
+  quindi **validato contro il modello** prima di usarlo, altrimenti un
+  "ripristina" riverserebbe una fotografia vecchia sopra lo stato nuovo della
+  scena (`Core::Layers.isolation_active?` confronta con la mappa di visibilità
+  lasciata al momento dell'isolamento).
+
 ### `DisplaySketchAxes`: gli assi del modello SONO una RenderingOption (2026-05)
 
 Correzione di una conclusione errata precedente ("Model axes: niente API Ruby
@@ -451,6 +495,52 @@ sull'elemento "originale".
 **Pattern**: rilevamento manuale con timestamp + id. Se due mousedown
 sullo stesso id arrivano entro N ms (es. 400ms) senza modificatori,
 triggerare l'azione doppio-click.
+
+### Il re-render su focus MANGIA il click (bug "devo cliccare due volte")
+
+Parente stretto del `dblclick` qui sopra, ma su un click singolo e con una
+causa scatenante precisa: **la finestra che prende il fuoco**.
+
+Sequenza (osservata nel Properties dialog, sezione Layers, 2026-07-31):
+1. l'utente lavora nel viewport, la finestra CEF non ha il fuoco;
+2. clicca un bottone → il `mousedown` attiva la finestra → parte il listener
+   `window.addEventListener('focus', ...)` che chiede un refresh a Ruby;
+3. Ruby risponde con `execute_script("SM.setState(...)")` → il JS rifà
+   `container.innerHTML = ...`;
+4. l'utente rilascia il tasto: il `mouseup` cade su un elemento **nuovo** →
+   il browser NON genera `click` (richiede mousedown e mouseup sullo stesso
+   elemento) → il click si perde. Il secondo click funziona perché ormai la
+   finestra ha il fuoco e nessun refresh parte.
+
+Intermittente per natura: dipende dal rapporto tra il tempo di rilascio del
+tasto e il round-trip JS→Ruby→JS.
+
+**Regola**: qualunque render che ricostruisce DOM via `innerHTML` in risposta
+a `setState`/`push_state` deve essere **idempotente sul DOM** — calcolare una
+firma del payload di quella sezione (`JSON.stringify`) e saltare il render se
+è identica alla precedente. Vale sia lato JS (`properties.js`: `laySig`,
+`flagSig`) sia lato Ruby quando è Ruby a costruire l'HTML
+(`LayerInfoDialog.swap_body` confronta col body precedente).
+
+Corollario: vale a maggior ragione se aggiungi un refresh automatico su
+`focus`/`visibilitychange`, che è esattamente il momento in cui l'utente sta
+cliccando.
+
+### `add_action_callback` dopo il caricamento della pagina non arriva al JS
+
+Registrare un callback su un `HtmlDialog` **già mostrato** non espone
+`sketchup.<nome>` alla pagina: il binding viene fatto al load. Un tentativo di
+usarlo come canale di debug ad-hoc (JS che richiama Ruby per farsi leggere
+una variabile) fallisce silenziosamente — nessun errore, semplicemente non
+succede niente.
+
+Corollario dello stesso meccanismo: `execute_script` chiamato nello stesso
+turno di `dlg.show` viene **perso**, perché la pagina non è ancora caricata.
+Nei test via MCP servono due `eval_ruby` separati (show, poi script).
+
+Per ispezionare il DOM di un dialog CEF di SU non c'è console: conviene
+riprodurre la pagina nel browser (dove i valori di ritorno JS si leggono) e
+testare lì la logica di render.
 
 ### `STYLE_DIALOG` vs `STYLE_UTILITY` per persistenza posizione
 
