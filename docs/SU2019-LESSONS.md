@@ -461,6 +461,61 @@ Foo.respond_to?(:hello)  # => false  (perché module_function lo rende anche
 Non usare `Module.respond_to?(:metodo_module_function)` per gating —
 chiama direttamente.
 
+### `send_action` è ASINCRONO — non verificarlo subito dopo (2026-07-31)
+
+`Sketchup.send_action(id)` **accoda** il comando e ritorna `true`. Nella
+stessa chiamata Ruby il modello è ancora invariato. Misurato:
+`send_action(21067)` ha ritornato `true` con `pages.count` ancora a 31;
+la pagina è comparsa solo al giro successivo del message pump.
+
+Chi verifica in linea vede "non ha fatto niente" e conclude che l'API sia
+rotta. **È esattamente così che è nata la falsa certezza "Match Photo è
+un limite invalicabile"** (vedi `CLAUDE.md`), sopravvissuta mesi perché
+scritta come fatto acquisito invece che come misura.
+
+Regola: per leggere l'effetto di un `send_action`, passare da
+`UI.start_timer`. Per rilevare la pagina/entità nuova, fare il diff degli
+`object_id` **prima** e **dopo**: `Sketchup::Page#object_id` è stabile
+nella sessione (SU cachea i wrapper Ruby), verificato.
+
+### Iniettare comandi nativi via Win32: SU Pro 2019 è MFC (2026-07-31)
+
+SU Pro 2019 è un'applicazione **MFC** (il registro espone
+`HKCU\Software\SketchUp\SketchUp 2019\...\MFCToolBarParameters`). Ogni
+messaggio estratto dalla coda passa da `PreTranslateMessage`, quindi
+**accetta input iniettato**, non solo input fisico. Entrambe queste vie
+funzionano, e **senza rubare il focus** (testate con SketchUp non in
+primo piano e focus su un'altra applicazione):
+
+| Via | Target | Note |
+|---|---|---|
+| `PostMessage(WM_COMMAND=0x0111, id, 0)` | **frame** (`MainWindowHandle`) | equivale alla voce di menù |
+| `PostMessage(WM_KEYDOWN/UP)` | **view** `AfxFrameOrView140u` | fa scattare le scorciatoie da tastiera |
+
+Il tasto iniettato **deve andare alla view**, non al frame: sul frame non
+succede nulla. Trovarla enumerando i figli con `EnumChildWindows` e
+cercando la classe `AfxFrameOrView140u` (è quella grande quanto il
+viewport). Il class name del frame è dinamico (`Afx:00007FF7...`), quindi
+inutile per `FindWindow`: usare `EnumWindows` + `GetWindowThreadProcessId`.
+
+Da Ruby serve `fiddle` (o `Win32API`): **entrambi disponibili** in SU 2019.
+
+```ruby
+require 'fiddle'
+u    = Fiddle.dlopen('user32.dll')
+post = Fiddle::Function.new(u['PostMessageW'], [Fiddle::TYPE_LONG_LONG]*4, Fiddle::TYPE_INT)
+post.call(hwnd_frame, 0x0111, 21067, 0)   # WM_COMMAND
+```
+
+Caveat sulle scorciatoie: `TranslateAccelerator` legge i modificatori con
+`GetKeyState`, che riflette la tastiera **fisica** — un `WM_KEYDOWN`
+posticcio non setta Ctrl/Shift. Se serve questa via, usare una
+scorciatoia **senza modificatori** (tasto singolo o F-key).
+
+In pratica per SM+ non è servita (`send_action` basta), ma resta lo
+strumento generale per qualsiasi comando nativo non esposto all'API.
+Gli ID numerici si ricavano con `tools/dump-su-menu.ps1`.
+
 ---
 
 ## CEF / HtmlDialog

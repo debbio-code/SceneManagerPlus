@@ -447,12 +447,17 @@ module SceneManagerPlus
         end
 
         dlg.add_action_callback('sm_new_scene_from_view') do |_ctx|
-          page = Core::SceneModel.add_from_view
-          push_state
-          if page
-            uid = Core::SceneModel.page_id(page)
-            js_uid = uid.to_s.inspect
-            dlg.execute_script("window.SM && SM.selectId && SM.selectId(#{js_uid});")
+          # Il blocco puo' essere chiamato in linea (scena normale) oppure da
+          # un timer (scena Match Photo: passa dal comando nativo, che e'
+          # asincrono). Refresh e selezione stanno qui dentro per funzionare
+          # in entrambi i casi.
+          Core::SceneModel.add_from_view do |page|
+            push_state
+            if page
+              uid = Core::SceneModel.page_id(page)
+              js_uid = uid.to_s.inspect
+              dlg.execute_script("window.SM && SM.selectId && SM.selectId(#{js_uid});")
+            end
           end
         end
 

@@ -55,7 +55,7 @@ Feature aggiunte post-Fase 4:
 | UI | `UI::HtmlDialog` (CEF, SU 2017+) — niente WebDialog legacy |
 | Stile finestra principale | `STYLE_UTILITY` (palette sempre sopra viewport, posizione+dimensione persistite affidabilmente — `STYLE_DIALOG` non salva la posizione su SU 2019). Auto-riaprire all'avvio se era aperta (flag `main_dialog_open` via `write_default`, ri-show con timer 0.5s dopo `file_loaded`). Settings/Properties restano `STYLE_DIALOG` (sono modali-ish). |
 | Navigazione tastiera | `PageUp`/`PageDown`/`Home`/`End` scorrono la selezione lungo l'ordine logico visibile (cartelle chiuse saltate). `ArrowUp`/`ArrowDown` invece **spostano** la selezione (singola o multi-contigua sotto lo stesso parent) nell'ordine logico. Non c'è modo pulito in SU 2019 di hijacker i tasti globalmente, quindi fuori dal plugin resta il comportamento nativo. |
-| Nuova scena da vista | Icona toolbar (📷+) → `SceneModel.add_from_view`. Replica gli override di visibilità layer della pagina attiva (vedi sotto, "Add visible tag"). **Forza tutti gli 8 `FLAG_KEYS` (use_camera, use_style, ecc.) a `true`** dopo `pages.add`, così la nuova scena cattura sempre lo state completo del viewport — `pages.add` da solo rispetta i "Default Scene Properties" globali di SU e se l'utente li ha personalizzati (es. Style/Fog OFF) la scena nascerebbe monca. Scelta UX: il flusso del plugin è "scatta foto completa", non "rispetta i miei default SU". |
+| Nuova scena da vista | Icona toolbar (📷+) → `SceneModel.add_from_view`. Replica gli override di visibilità layer della pagina attiva (vedi sotto, "Add visible tag"). **Forza tutti gli 8 `FLAG_KEYS` (use_camera, use_style, ecc.) a `true`** dopo `pages.add`, così la nuova scena cattura sempre lo state completo del viewport — `pages.add` da solo rispetta i "Default Scene Properties" globali di SU e se l'utente li ha personalizzati (es. Style/Fog OFF) la scena nascerebbe monca. Scelta UX: il flusso del plugin è "scatta foto completa", non "rispetta i miei default SU". **Se la scena attiva è Match Photo** prende invece il ramo `add_from_view_native` (comando nativo via `send_action`, asincrono → post-processing in timer): vedi sezione "Match Photo". Da lì in poi `add_from_view` ritorna la Page solo nel ramo sincrono — **i chiamanti devono usare il blocco `on_created`**. |
 | Update da view (`⟳`) | `SceneModel.update_from_view(id)` costruisce una bitmask `PAGE_USE_*` con lookup difensivo (vedi `docs/SU2019-LESSONS.md`). Per `use_style?` tenta `PAGE_USE_STYLE` → `PAGE_USE_SKETCHCS` → `PAGE_USE_RENDERING_OPTIONS` (fallback piggyback). Per `use_axes?` tenta `PAGE_USE_AXES` → `PAGE_USE_CAMERA`. Script `tools/dump-page-use.rb` per verificare i nomi delle costanti effettivamente esposte dalla SU in uso. **Se lo stile attivo è dirty** (`styles.active_style_changed`), mostra un `UI.messagebox` 3-button YES/NO/CANCEL equivalente al "Warning - Scenes and Styles" nativo: YES → `update_selected_style` poi page.update; NO → mostra istruzioni per "Save as new" via browser (l'API Ruby SU 2019 non lo espone) e abort; CANCEL → toglie il bit style dal mask, salva il resto. Senza questo dialog le modifiche pending allo stile si perdono silenziosamente: `page.update(PAGE_USE_SKETCHCS)` lega la scena allo stile ma non lo flusha. UI: il trigger ⟳ vive nella toolbar (`btn-update`), opera su selezione (anche multipla con loop client-side). Niente più icona update per-row: quello slot è occupato dal badge lettera stile. |
 | Style letter badge | Sostituisce la vecchia ⟳ per-row. Mostra A,B,C... derivato da `SceneModel.styles_map` (ordine alfabetico su `model.styles.map(&:name)`, **tutti** gli stili, anche orfani). Per-scena `scene.style_name` da `page.style.name`. JS lookup via `letterForStyle()` → '?' se manca. Render solo (zero interazione di update): click sx apre mini Style Manager, click dx apre picker riassegna. |
 | Style assignment (click dx lettera) | `SceneModel.assign_style(uid, name)` attiva la target page, fa `styles.selected_style = X`, forza `use_style/use_rendering_options = true`, `page.update(STYLE_BIT \| RO_BIT)`, ripristina la scena attiva precedente. Tutto in una `start_operation` (1 Ctrl+Z). Immediato anche in defer mode (operazione viewport-dipendente, analoga a `update_from_view`). Side-effect noto: se lo stile precedente era dirty, le pending si perdono (come comportamento native SU). |
@@ -753,7 +753,7 @@ controls — niente più `Sketchup.send_action(10522)`, `WIN_AXES_CMD_ID` né ov
 `axes_cmd_id`. **Lezione di metodo**: il MCP eval_ruby chiude in un turno indagini
 API che prima richiedevano `tools/dump-*.rb` + copia/incolla dalla Ruby Console.
 
-## Match Photo: limite invalicabile dell'API Ruby SU 2019
+## Match Photo — cosa l'API non espone, e cosa invece si può fare
 
 > ⚠️ **Sibling repo accoppiato**: `3dg_photomatch` vive in
 > `C:\Claude\Sketchup Plugins\3dg_photomatch\` (remote
@@ -800,50 +800,99 @@ subsystem:
   archiviata come non fattibile.
 
 L'unica API esposta è `Sketchup::Pages#add_matchphoto_page(image_filename,
-camera, page_name)` ma richiede di passare il path della foto a mano —
-e non c'è verso di leggerlo dall'API Ruby.
+camera, page_name)`, che richiede il path della foto — non leggibile
+dall'API. (La foto però è recuperabile dal `.skp`: vedi più sotto.)
 
-**Code path nativi diversi — divergenza menu-vs-send_action**:
-- `pages.add(name)` (quello che usavamo) → NON copia Match Photo
-- `Sketchup.send_action(21067)` → NON copia, anche se 21067 è l'ID
-  riportato da `dump-su-menu.ps1` per "View → Animation → Add Scene"
-- **Click manuale sul menù "View → Animation → Add Scene"** → COPIA
-- **Click manuale su Window → Scenes inspector "+"** → COPIA
+### RISOLTO (2026-07-31): `pages.add` era l'unico colpevole
 
-Quindi SU ha letteralmente **due binari diversi** per la stessa command:
-quando l'utente clicca il menù a mano, SU esegue il vero handler C++ che
-ha accesso al Match Photo subsystem. Quando si invoca via
-`Sketchup.send_action` con lo stesso ID, SU instrada attraverso un
-handler separato (probabilmente legacy o "scripting-safe") che bypassa
-Match Photo. Comportamento non documentato Trimble ma riproducibile.
+**La vecchia teoria dei "due binari diversi" era sbagliata.** Sosteneva che
+solo il click manuale sul menù raggiungesse l'handler C++ con accesso al
+Match Photo, mentre `send_action(21067)` sarebbe stato instradato su un
+handler "scripting-safe" che lo bypassa. Non è così.
 
-Conseguenza: non c'è modo da Ruby di colpire il binario "menù manuale".
-Testato range `send_action` 21065..21077, 10530..10540, 10620..10630 —
-nessuno aggiunge scene preservando Match Photo.
+Verificato live su SU 19.3.253 (modello `Roman - Esecutivo.skp`):
 
-**Ipotesi non ancora testata**: simulare un WM_COMMAND Win32 al main
-window di SU con ID 21067 (via `user32!SendMessage`). Questo dovrebbe
-emulare un click di menù vero invece di passare per il routing
-`send_action`. Se funziona, automazione completa. Se no (probabile: SU
-potrebbe distinguere via stato/sender della command), torniamo qui.
+| Via | Foto nella scena creata |
+|---|---|
+| `pages.add(name)` | ❌ persa — **è l'unico percorso che la perde** |
+| `Sketchup.send_action(21067)` | ✅ **0 differenze su 47.000 campioni** |
+| `PostMessage(WM_COMMAND, 21067)` al frame Win32 | ✅ 0 differenze |
 
-**Workaround scartati**:
-- `add_matchphoto_page` programmatico — serve il path foto, non leggibile
-- Win32 UI scripting (simulare click sulla "+" dell'inspector) —
-  fragile, dipende da window class hierarchy non documentata
-- send_action range più ampio — improbabile, ID inspector privati
+**Come verificare** (usare questo, non le proprietà della pagina):
+attivare un'altra scena, tornare sulla nuova, `view.write_image` e
+**confrontare i pixel** con un render dell'originale. Leggere
+`aspect_ratio` / `is_2d?` NON basta — vedi falsi positivi più sotto.
 
-**Fix accettato** (in `SceneModel.add_from_view`):
-- Predicate `SceneModel.matchphoto?(page)` con euristica:
-  `page.camera.aspect_ratio != 0`. Verificato empiricamente: solo scene
-  Match Photo hanno aspect_ratio settato esplicitamente (matchando la
-  foto). Scene normali hanno 0.0 (= "usa aspect del viewport").
-- All'inizio di `add_from_view`, se `matchphoto?(active)` mostra
-  `UI.messagebox` YES/NO con spiegazione + suggerimento di usare la "+"
-  dell'inspector nativo. NO = abort.
+**Perché l'errore è sopravvissuto così a lungo**: `send_action` è
+**asincrono**. Accoda il comando e ritorna subito; nella stessa chiamata
+Ruby `pages.count` è ancora quello di prima e la pagina non esiste
+ancora. Chi controlla immediatamente dopo vede "non ha fatto niente" e
+conclude che non funziona. Quella misura fragile è finita in questo file
+promossa a *"limite invalicabile"*, e da lì nessuna sessione l'ha più
+rimessa in discussione. **Lezione di metodo: una misura negativa su
+un'API asincrona non è una prova.** (Trappola viva: è ricascato nello
+stesso errore anche chi ha scritto il fix, misurando il callback prima
+che il timer scattasse.)
 
-Se la heuristic si rivelasse insufficiente (false positive/negative su
-casi reali), valutare combinare con `camera.image_width` o altre signal.
+**Implementazione** (`SceneModel.add_from_view`, ramo `is_mp`):
+
+- `add_from_view_native` → `send_action(add_scene_cmd_id)`;
+- `await_native_page` → catena di `UI.start_timer(0.05)` (max 60 giri)
+  che rileva la pagina nuova per diff di `page.object_id` (**stabile in
+  sessione**, verificato);
+- `finalize_native_page` → nome, flag, override visibilità layer, uid,
+  dentro `start_operation(..., transparent=true)` così un solo Ctrl+Z
+  annulla scena + finalizzazione insieme;
+- `add_from_view` accetta un blocco `on_created`, chiamato in linea nel
+  ramo normale e **dal timer** nel ramo MP. Il valore di ritorno è la
+  Page solo nel ramo sincrono: **chi chiama deve usare il blocco**;
+- sulle scene MP la finalizzazione esclude `use_style` /
+  `use_rendering_options` e scrive un flag **solo se differisce** (le due
+  precauzioni anti-BugSplat già note), e il dialog dello stile dirty è
+  saltato di proposito: il ramo "Save as new style" cambierebbe
+  `selected_style` sostituendo lo stile che porta la foto;
+- command ID overridabile:
+  `Sketchup.write_default('SceneManagerPlus', 'add_scene_cmd_id', N)`.
+
+**Differenza visibile**: il comando nativo inserisce la scena **subito
+dopo quella attiva**, mentre `pages.add` accodava in fondo.
+
+### `matchphoto?` dà falsi positivi (2026-07-31)
+
+L'euristica resta `page.camera.aspect_ratio != 0`. Ma `pages.add` copiava
+la camera MP (aspect incluso) **senza** la foto: le scene create dal
+vecchio percorso restano quindi marcate come Match Photo pur non
+avendola. Col fix non se ne creano di nuove, ma i file esistenti ne
+contengono. L'unico segnale davvero affidabile trovato finora per
+distinguerle è renderizzare e guardare lo sfondo.
+
+### La foto Match Photo È dentro il `.skp` (2026-07-31)
+
+Non serve più per `add_from_view`, ma serve per la **clipboard
+cross-file**, dove oggi le scene MP sono escluse per principio.
+
+Nel binario del `.skp` c'è il path della foto come stringa **UTF-16**
+(relativo al modello, es. `.\Rilievo\Foto\2026-06-04 19.12.32.jpg`),
+subito dopo il blocco di geolocalizzazione della scena. **~90 byte più
+avanti inizia il JPEG completo**, a piena risoluzione (4096×3072 nel caso
+provato, aspect coincidente con `page.camera.aspect_ratio`).
+
+Note pratiche:
+- funziona anche quando il **file originale su disco non esiste più** —
+  ed era il caso reale;
+- serve il `.skp` **salvato**: il modello in RAM non basta;
+- per isolare il JPEG **non fidarsi del primo `FF D9`** (il thumbnail
+  EXIF ne ha uno suo, e si ottiene un file troncato): passare una coda
+  abbondante al decoder lasciandogli ignorare il resto, oppure cercare il
+  primo `FF D9` che produce un decode valido;
+- anche le texture dei materiali stanno nello stesso file con lo stesso
+  schema: distinguerle per path (quelle MP sono relative, `.\`) o per
+  aspect ratio.
+
+Con questo `add_matchphoto_page(foto_estratta, camera, nome)` torna
+percorribile. Incognita mai testata: se la calibrazione two-point
+sopravviva (`camera.is_2d?`) — vedi "Two Point Perspective" in
+`docs/SU2019-LESSONS.md`.
 
 Documentazione di partenza: `tools/dump-matchphoto-api.rb` (cosa l'API
 Ruby espone su Match Photo) e `tools/dump-matchphoto-attrs.rb` (cosa
@@ -1087,9 +1136,16 @@ Nessuno strettamente bloccante. Possibili miglioramenti futuri:
 - **Line scale multiplier su thumbnails**: ineffective in SU 2019 a
   300×150 (documentato come limite presunto in sezione "Line scale
   multiplier"). Da indagare se diventa fastidioso.
-- **WM_COMMAND Win32 per Match Photo**: tentativo non testato di
-  emulare un click di menù vero per clonare scene Match Photo. Esito
-  incerto. Vedi sezione "Match Photo" più sopra.
+- ~~**WM_COMMAND Win32 per Match Photo**~~: **risolto 2026-07-31**, e
+  senza Win32 — bastava `send_action`. Vedi sezione "Match Photo".
+- ⚠️ **`Sketchup::Style#name=` e `#description=` ESISTONO in SU 2019**
+  (letti nella lista metodi di `Sketchup::Style` su 19.3.253,
+  2026-07-31). Questo file afferma il contrario in più punti, ed è la
+  premessa su cui è costruito **tutto il pool dei 25 slot**. Non ancora
+  verificato se scrivano davvero o sollevino `NotImplementedError`: se
+  funzionassero, il pool sarebbe rimpiazzabile da una vera creazione di
+  stili con nome arbitrario, e i nickname diventerebbero superflui.
+  **Prima di rimettere mano al pool, testare questi due setter.**
 
 ## Performance su modelli con AttributeObserver di plugin terzi (2026-05)
 

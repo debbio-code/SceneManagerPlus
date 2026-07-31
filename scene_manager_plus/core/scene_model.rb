@@ -780,49 +780,62 @@ module SceneManagerPlus
         true
       end
 
+      # Command ID Windows di "View > Animation > Add Scene", individuato con
+      # tools/dump-su-menu.ps1. Override persistente:
+      #   Sketchup.write_default('SceneManagerPlus', 'add_scene_cmd_id', N)
+      WIN_ADD_SCENE_CMD_ID = 21067
+
+      # Polling per attendere la pagina creata dal comando nativo (async).
+      NATIVE_ADD_POLL_S    = 0.05
+      NATIVE_ADD_MAX_TRIES = 60
+
+      def add_scene_cmd_id
+        Sketchup.read_default(
+          'SceneManagerPlus', 'add_scene_cmd_id', WIN_ADD_SCENE_CMD_ID
+        ).to_i
+      end
+
       # Crea una nuova scena dalla vista corrente (come "Add Scene" nativo).
       # Anche in defer mode crea immediatamente: pages.add è un'operazione SU
       # che dipende dallo stato corrente del modello/camera.
-      def add_from_view(name = nil)
+      #
+      # Il blocco opzionale riceve la Page creata (o nil se abortito/fallito).
+      # Serve perche' il ramo Match Photo e' ASINCRONO: send_action accoda il
+      # comando e la pagina non esiste ancora al ritorno di questo metodo.
+      # Il valore di ritorno resta la Page solo nel ramo sincrono.
+      def add_from_view(name = nil, &on_created)
         m = model
-        return nil unless m
+        finish = lambda { |pg| on_created.call(pg) if on_created; pg }
+        return finish.call(nil) unless m
 
-        # === Match Photo warning ===
-        # SU 2019 Ruby API non espone Page#matchphoto, e pages.add() NON copia
-        # la foto Match Photo sulla nuova pagina. Anche send_action(21067)
-        # (View → Animation → Add Scene) ha lo stesso problema — solo la "+"
-        # nativa di Window → Scenes inspector preserva il Match Photo,
-        # tramite un C++ code path interno non esposto a Ruby. Quindi se
-        # l'utente è su una scena Match Photo e crea una nuova scena dal
-        # plugin, la foto sparirebbe silenziosamente.
+        # === Match Photo ===
+        # pages.add() NON copia la foto Match Photo sulla nuova pagina: e' il
+        # SOLO percorso che la perde. Il comando nativo "Add Scene" invece la
+        # conserva, e -- verificato live su SU 19.3.253 il 2026-07-31 --
+        # Sketchup.send_action(21067) colpisce lo stesso handler nativo del
+        # click a mano sul menu: scena clone pixel-identica all'originale
+        # (0 differenze su 47.000 campioni, foto ancora presente dopo essere
+        # usciti e rientrati nella scena). La vecchia teoria dei "due binari
+        # diversi" tra menu e send_action era sbagliata, e il messagebox di
+        # rinuncia che stava qui non aveva ragione di esistere.
+        # Vedi docs/SU2019-LESSONS.md, sezione "Match Photo".
+        #
         # Detection euristica via Page#camera#aspect_ratio (vedi matchphoto?).
         active = m.pages.selected_page
-        if matchphoto?(active)
-          mb_yesno = Object.const_defined?(:MB_YESNO) ? MB_YESNO : 4
-          id_yes   = Object.const_defined?(:IDYES)   ? IDYES   : 6
-          answer = ::UI.messagebox(
-            "Scene '#{active.name}' has a Match Photo background.\n\n" \
-            "Scene Manager+ cannot clone Match Photo scenes due to a\n" \
-            "SketchUp 2019 Ruby API limitation. To create a new scene\n" \
-            "that preserves the photo, please use the native menu:\n\n" \
-            "  View → Animation → Add Scene\n\n" \
-            "Continue creating a new scene WITHOUT the photo background?",
-            mb_yesno
-          )
-          if answer != id_yes
-            puts "[SM+] add_from_view: aborted by user (Match Photo source)"
-            return nil
-          end
-          puts "[SM+] add_from_view: user proceeded despite Match Photo loss"
-        end
+        is_mp  = matchphoto?(active)
 
         # === Style "dirty" handling ===
         # Stesso dialog di update_from_view: se lo stile attivo ha modifiche
         # pending, pages.add cattura il riferimento allo stile ma le pending
         # restano in memoria dirty (non vengono persistite). Diamo all'utente
         # la stessa scelta del flusso nativo "Warning - Scenes and Styles".
+        # Su scena Match Photo il dialog e' saltato di proposito: il ramo
+        # "Save as new style" chiama allocate_new_slot_from_viewport, che fa
+        # styles.selected_style = <nuovo slot> e cosi' sostituirebbe lo stile
+        # interno che porta la foto (stessa ragione per cui assign_style ha un
+        # guard MP). Il comando nativo gestisce lo stile MP per conto suo.
         styles = m.styles
-        if styles.respond_to?(:active_style_changed) && styles.active_style_changed
+        if !is_mp && styles.respond_to?(:active_style_changed) && styles.active_style_changed
           style_name = (styles.active_style.name rescue 'current')
           mb_const  = Object.const_defined?(:MB_YESNOCANCEL) ? MB_YESNOCANCEL : 3
           id_yes    = Object.const_defined?(:IDYES) ? IDYES : 6
@@ -850,14 +863,14 @@ module SceneManagerPlus
             )
             if result == :aborted
               puts "[SM+] add_from_view: save-as-new aborted by user"
-              return nil
+              return finish.call(nil)
             end
             new_style = Core::Styles.allocate_new_slot_from_viewport(
               nickname: (result.empty? ? nil : result)
             )
             unless new_style
               puts "[SM+] add_from_view: save-as-new failed (pool esaurito o errore)"
-              return nil
+              return finish.call(nil)
             end
             # Il nuovo slot è già selected_style (lo fa allocate_new_slot_from_viewport).
             # Procediamo con pages.add → la nuova page cattura selected_style =
@@ -880,6 +893,12 @@ module SceneManagerPlus
         # Vedi docs/SU2019-LESSONS.md, sezione "pages.add muta il model".
         pre_visible = {}
         m.layers.each { |l| pre_visible[l] = l.visible? }
+
+        # Ramo Match Photo: delega al comando nativo, che e' l'unico a portarsi
+        # dietro la foto. E' asincrono, quindi da qui in poi il lavoro prosegue
+        # nel timer di add_from_view_native e questo metodo ritorna nil: la
+        # Page arriva al chiamante solo attraverso il blocco on_created.
+        return add_from_view_native(name, pre_visible, &on_created) if is_mp
 
         m.start_operation('SM+ New scene', true)
         begin
@@ -919,11 +938,135 @@ module SceneManagerPlus
 
           page_id(page) # ensure uid attribute exists
           m.commit_operation
-          page
+          finish.call(page)
         rescue => e
           m.abort_operation
           warn "[SM+] add_from_view: #{e.class}: #{e.message}"
-          nil
+          finish.call(nil)
+        end
+      end
+
+      # Ramo Match Photo di add_from_view: invoca "View > Animation > Add
+      # Scene" nativo, che e' l'unico percorso che clona anche la foto.
+      #
+      # ATTENZIONE: send_action e' ASINCRONO. Accoda il comando e ritorna
+      # subito; nella stessa chiamata Ruby pages.count e' ancora quello di
+      # prima (verificato: send_action ha ritornato true con pages ancora a 31,
+      # la pagina e' comparsa solo al giro successivo del message pump). Per
+      # questo il post-processing vive in un timer e non qui in linea.
+      def add_from_view_native(name, pre_visible, &on_created)
+        m = model
+        unless m
+          on_created.call(nil) if on_created
+          return nil
+        end
+
+        before_ids = m.pages.map { |p| p.object_id }
+        ok = begin
+          ::Sketchup.send_action(add_scene_cmd_id)
+        rescue => e
+          warn "[SM+] add_from_view_native: send_action failed: #{e.class}: #{e.message}"
+          false
+        end
+
+        unless ok
+          warn "[SM+] add_from_view_native: send_action(#{add_scene_cmd_id}) refused"
+          on_created.call(nil) if on_created
+          return nil
+        end
+
+        await_native_page(before_ids, name, pre_visible, 0, &on_created)
+        nil
+      end
+
+      # Polling della pagina creata dal comando nativo. Catena di timer da
+      # NATIVE_ADD_POLL_S, come Previews.generate: un tick per tentativo, cosi'
+      # CEF resta reattivo. Nessuna scrittura finche' la pagina non c'e'.
+      def await_native_page(before_ids, name, pre_visible, attempt, &on_created)
+        m = model
+        fresh = m && m.pages.find { |p| !before_ids.include?(p.object_id) }
+
+        if fresh.nil?
+          if attempt >= NATIVE_ADD_MAX_TRIES
+            warn "[SM+] add_from_view_native: nessuna pagina dopo #{attempt} tentativi"
+            on_created.call(nil) if on_created
+            return
+          end
+          ::UI.start_timer(NATIVE_ADD_POLL_S, false) do
+            begin
+              await_native_page(before_ids, name, pre_visible, attempt + 1, &on_created)
+            rescue => e
+              warn "[SM+] await_native_page: #{e.class}: #{e.message}"
+            end
+          end
+          return
+        end
+
+        finalize_native_page(fresh, name, pre_visible)
+        on_created.call(fresh) if on_created
+      end
+
+      # Allinea la pagina nata dal comando nativo a quello che il plugin si
+      # aspetta da una scena creata da lui: nome, flag use_*, override di
+      # visibilita' layer, uid.
+      def finalize_native_page(page, name, pre_visible)
+        m = model
+        return unless m
+
+        # transparent=true -> si aggancia all'operazione nativa "Add Scene",
+        # cosi' un solo Ctrl+Z annulla scena e finalizzazione insieme.
+        m.start_operation('SM+ New scene (finalize)', true, false, true)
+        begin
+          unless name.to_s.strip.empty?
+            begin
+              page.name = name.to_s.strip
+            rescue => e
+              # SU rifiuta i nomi duplicati: teniamo quello autogenerato.
+              warn "[SM+] finalize_native_page: rename failed: #{e.message}"
+            end
+          end
+
+          # Due precauzioni Match Photo, entrambe documentate:
+          # 1) MAI scrivere un flag gia' allineato al valore corrente -> il
+          #    subsystem MP marca lo stato dirty e la successiva attivazione
+          #    della scena fa BugSplat (vedi CLAUDE.md, "Crash pattern");
+          # 2) use_style / use_rendering_options restano fuori: toccarli su
+          #    una scena MP sostituisce lo stile che porta la foto. Stessa
+          #    esclusione del comando "Save all properties" in main.rb.
+          keys = FLAG_KEYS - %w[use_style use_rendering_options]
+          keys.each do |k|
+            setter = "#{k}="
+            next unless page.respond_to?(setter)
+            current = page.send("#{k}?") ? true : false
+            next if current == true
+            begin
+              page.send(setter, true)
+            rescue => e
+              warn "[SM+] finalize_native_page: setting #{k}=true failed: #{e.message}"
+            end
+          end
+
+          # Stessa logica del ramo sincrono: la fonte di verita' e'
+          # layer.visible? PRIMA della creazione della pagina.
+          pre_visible.each do |layer, was_visible|
+            begin
+              layer.visible = was_visible if layer.visible? != was_visible
+            rescue
+              # ignore, best-effort
+            end
+            begin
+              page.set_visibility(layer, was_visible)
+            rescue => e
+              warn "[SM+] finalize_native_page: set_visibility failed for #{layer.name rescue '?'}: #{e.message}"
+            end
+          end
+
+          page_id(page) # ensure uid attribute exists
+          m.commit_operation
+          puts "[SM+] add_from_view_native: created '#{page.name}' (Match Photo preserved)"
+        rescue => e
+          m.abort_operation
+          warn "[SM+] finalize_native_page: #{e.class}: #{e.message}"
         end
       end
 

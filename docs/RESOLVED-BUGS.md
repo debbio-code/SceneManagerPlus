@@ -266,6 +266,40 @@ nascondere → risultato: nuova scena con tutti i layer ON tranne quelli
 calcolata dalla hidden-list. Vedi `SU2019-LESSONS.md` sezione
 `Sketchup::Page#layers` per la spiegazione completa.
 
+### Nuova scena da scena Match Photo: la foto spariva (2026-07-31)
+
+**Sintomo**: creando una nuova scena dal plugin mentre era attiva una
+scena Match Photo, la nuova nasceva senza foto di sfondo. Il plugin lo
+"gestiva" con un messagebox che rinunciava e rimandava al menù nativo.
+
+**Causa dichiarata (SBAGLIATA, durata mesi)**: si riteneva che SU avesse
+*"due binari diversi"* per lo stesso comando — click manuale sul menù =
+handler C++ con accesso al Match Photo, `send_action(21067)` = handler
+"scripting-safe" che lo bypassa. Da lì la conclusione "limite
+invalicabile dell'API".
+
+**Causa reale**: solo `pages.add(name)` perde la foto. `send_action(21067)`
+la conserva perfettamente. La falsa prova nasceva dal fatto che
+**`send_action` è asincrono**: chi lo chiama e verifica subito dopo vede
+il modello invariato e conclude che non abbia fatto nulla.
+
+**Fix**: in `SceneModel.add_from_view`, ramo `is_mp` → `send_action`
+(`add_from_view_native`) + catena `UI.start_timer` che attende la pagina
+(`await_native_page`, diff su `page.object_id`) + `finalize_native_page`
+per nome/flag/layer/uid in operazione `transparent`. Il messagebox di
+rinuncia è stato rimosso; `add_from_view` ora accetta un blocco
+`on_created` perché il ramo MP non può ritornare la Page.
+
+**Verifica** (metodo da riusare per qualsiasi dubbio su Match Photo):
+attivare un'altra scena, tornare sulla nuova, `view.write_image` e
+confrontare i pixel con un render dell'originale → 0 differenze su 47.000
+campioni. Le proprietà (`aspect_ratio`, `is_2d?`) NON sono una prova:
+sono identiche anche sulle scene senza foto prodotte da `pages.add`.
+
+**Da ricordare**: la teoria sbagliata era scritta in `CLAUDE.md` come
+fatto acquisito, e per questo non è stata più rimessa in discussione. Una
+misura negativa su un'API asincrona non è una prova.
+
 ---
 
 ## Potenziali bug aperti (osservati, non riproducibili in modo affidabile)
