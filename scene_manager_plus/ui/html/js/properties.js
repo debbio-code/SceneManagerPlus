@@ -446,7 +446,16 @@
   // nativo di SU: valgono per ogni scena e la scena le cattura solo con
   // "Update from view". I due assi sono indipendenti, quindi togliere la
   // spunta non fa sparire la riga dalla lista.
-  var laySel      = null;   // nome del layer selezionato (target di "-")
+  //
+  // Selezione multipla con le regole di sempre: click = una riga, Shift+click =
+  // intervallo dall'ancora, Ctrl+click = aggiungi/togli. Tasto destro sulla
+  // lista per Select all / Invert selection / Clear selection.
+  //
+  // La selezione vive SOLO qui nel JS: cambiarla non chiama Ruby e non
+  // ridisegna la lista (paintLaySel tocca la sola classe .is-sel), quindi resta
+  // istantanea anche sui modelli con AttributeObserver di plugin terzi.
+  var laySel      = [];     // nomi dei layer selezionati
+  var layAnchor   = null;   // ancora dello Shift+click
   var layRenaming = null;   // nome del layer in rename inline
 
   function layCall(op, name, value) {
@@ -454,6 +463,60 @@
     if (name  !== undefined && name  !== null) data.name  = name;
     if (value !== undefined) data.value = value;
     call('sm_props_layer_op', data);
+  }
+
+  // Operazioni che si propagano alla selezione (visibilita', colore, line
+  // style, delete, colori casuali): Ruby riceve la lista intera e la esegue in
+  // una sola start_operation, quindi un solo Ctrl+Z la annulla.
+  function layCallMany(op, names, value) {
+    var data = { op: op, names: names, name: names[0] || '' };
+    if (value !== undefined) data.value = value;
+    call('sm_props_layer_op', data);
+  }
+
+  function laySelected(n) { return laySel.indexOf(n) !== -1; }
+
+  // Bersagli di un controllo di riga: tutta la selezione se la riga ne fa
+  // parte, altrimenti la sola riga.
+  function layTargets(name) {
+    return (laySelected(name) && laySel.length > 1) ? laySel.slice() : [name];
+  }
+
+  // I nomi delle righe nell'ordine in cui sono a schermo: e' l'ordine su cui
+  // ragionano Shift+click e "Invert selection".
+  function layOrder() {
+    var out = [];
+    var list = $('#lay-list');
+    if (!list) return out;
+    list.querySelectorAll('.lay-row').forEach(function (r) { out.push(r.dataset.name); });
+    return out;
+  }
+
+  function paintLaySel() {
+    var list = $('#lay-list');
+    if (list) {
+      list.querySelectorAll('.lay-row').forEach(function (r) {
+        r.classList.toggle('is-sel', laySelected(r.dataset.name));
+      });
+    }
+    syncLayerToolbar();
+  }
+
+  function setLaySel(names) {
+    laySel = names.slice();
+    paintLaySel();
+  }
+
+  // Controlli interattivi di una riga: un click qui sopra NON deve collassare
+  // una selezione multipla, altrimenti la propagazione non avrebbe mai piu' di
+  // un bersaglio.
+  var ROW_CONTROLS = ['lay-vis', 'lay-sw', 'lay-dash', 'lay-cur', 'lay-info', 'lay-mv'];
+  function isRowControl(el) {
+    if (!el || !el.classList) return false;
+    for (var i = 0; i < ROW_CONTROLS.length; i++) {
+      if (el.classList.contains(ROW_CONTROLS[i])) return true;
+    }
+    return false;
   }
 
   function renderLayers(state) {
@@ -489,6 +552,15 @@
     if (editing && document.activeElement === editing) return;
 
     var rows = p.layers || [];
+
+    // Il payload e' cambiato: la selezione puo' contenere layer cancellati, o
+    // usciti dalla lista perche' la scena li nasconde. Ripulirla qui evita che
+    // "-" e i colori casuali restino abilitati su nomi che non esistono piu'.
+    var present = {};
+    rows.forEach(function (r) { present[r.name] = true; });
+    laySel = laySel.filter(function (n) { return present[n]; });
+    if (layAnchor && !present[layAnchor]) layAnchor = null;
+
     var supportsDash = !!p.supports_line_style;
     fs.classList.toggle('no-dash', !supportsDash);
 
@@ -502,7 +574,7 @@
     } else {
       list.innerHTML = rows.map(function (r) {
         var n     = r.name || '';
-        var sel   = (n === laySel) ? ' is-sel' : '';
+        var sel   = laySelected(n) ? ' is-sel' : '';
         // Layer elencato dalla scena ma spento nel modello: nome in grigio
         // corsivo. E' il "drift" fra stato scena e stato modello.
         var dim   = (r.visible === false) ? ' is-hiddenmodel' : '';
@@ -522,11 +594,12 @@
         return '<div class="lay-row' + sel + dim + '" data-name="' + escapeHtml(n) + '">' +
                '<button type="button" class="lay-cur' + curOn + '" title="Set as current layer"></button>' +
                '<input type="checkbox" class="lay-vis"' + (r.visible ? ' checked' : '') +
-                 ' title="Visible in the model, exactly like the native Layers window. The scene captures it only with Update from view.">' +
+                 ' title="Visible in the model, exactly like the native Layers window. The scene captures it only with Update from view. With several rows selected, the change applies to all of them.">' +
                '<span class="lay-name" title="' + escapeHtml(nameTitle) + '">' + escapeHtml(n) + '</span>' +
                '<button type="button" class="lay-info" title="Show what is on this layer: groups, components, faces, edges, guides&hellip;">i</button>' +
                '<button type="button" class="lay-mv" title="Move the current model selection to this layer (like Entity Info: selected groups and components move as a whole)">&rarr;</button>' +
-               '<button type="button" class="' + swCls + '"' + swSty + ' title="Layer color"></button>' +
+               '<button type="button" class="' + swCls + '"' + swSty +
+                 ' title="Layer color. With several rows selected, the color applies to all of them."></button>' +
                dash +
                '</div>';
       }).join('');
@@ -577,11 +650,40 @@
 
       row.addEventListener('mousedown', function (e) {
         if (e.target.classList.contains('lay-name-input')) return;
-        laySel = name;
-        list.querySelectorAll('.lay-row').forEach(function (r) {
-          r.classList.toggle('is-sel', r.dataset.name === laySel);
-        });
-        syncLayerToolbar();
+
+        // Tasto destro: seleziona la riga solo se non fa gia' parte della
+        // selezione. Altrimenti il menu contestuale lavorerebbe su una
+        // selezione appena distrutta dal click che lo ha aperto.
+        if (e.button === 2) {
+          if (!laySelected(name)) { setLaySel([name]); layAnchor = name; }
+          return;
+        }
+
+        if (e.shiftKey && layAnchor) {
+          // preventDefault solo fuori dai controlli: su una checkbox
+          // impedirebbe anche il toggle.
+          if (!isRowControl(e.target)) e.preventDefault(); // niente selezione di testo
+          var order = layOrder();
+          var a = order.indexOf(layAnchor);
+          var b = order.indexOf(name);
+          if (a === -1) a = b;
+          setLaySel(order.slice(Math.min(a, b), Math.max(a, b) + 1));
+          return;
+        }
+
+        if (e.ctrlKey || e.metaKey) {
+          var i = laySel.indexOf(name);
+          if (i === -1) laySel.push(name); else laySel.splice(i, 1);
+          layAnchor = name;
+          paintLaySel();
+          return;
+        }
+
+        layAnchor = name;
+        // Click su un controllo di una riga gia' selezionata: la selezione
+        // resta com'e' ed e' lei il bersaglio della propagazione.
+        if (isRowControl(e.target) && laySelected(name)) return;
+        setLaySel([name]);
       });
 
       var cur = row.querySelector('.lay-cur');
@@ -595,7 +697,7 @@
       var vis = row.querySelector('.lay-vis');
       if (vis) {
         vis.addEventListener('change', function () {
-          layCall('visible', name, vis.checked);
+          layCallMany('visible', layTargets(name), vis.checked);
         });
       }
 
@@ -628,7 +730,7 @@
           // risparmiamo una write a SU per ogni movimento del cursore.
           window.SMColorPopup.show(sw, curHex, function (hex) {
             if (!hex) return;
-            layCall('color', name, hex);
+            layCallMany('color', layTargets(name), hex);
           }, { commitOnEnd: true });
         });
       }
@@ -636,7 +738,7 @@
       var dash = row.querySelector('.lay-dash');
       if (dash) {
         dash.addEventListener('change', function () {
-          layCall('line_style', name, dash.value);
+          layCallMany('line_style', layTargets(name), dash.value);
         });
         dash.addEventListener('mousedown', function (e) { e.stopPropagation(); });
       }
@@ -668,9 +770,8 @@
       var all = list.querySelectorAll('.lay-row');
       for (var j = 0; j < all.length; j++) {
         if (all[j].dataset.name === focus) {
-          laySel = focus;
-          all[j].classList.add('is-sel');
-          syncLayerToolbar();
+          layAnchor = focus;
+          setLaySel([focus]);
           startLayerRename(all[j], focus);
           break;
         }
@@ -703,8 +804,10 @@
       try { input.blur(); } catch (e) {}
       if (commit && v.trim() && v !== name) {
         // La selezione segue il nuovo nome, altrimenti dopo il re-render
-        // nessuna riga combacia e il bottone "-" tornerebbe disabilitato.
-        if (laySel === name) laySel = v.trim();
+        // nessuna riga combacia e i bottoni di gruppo tornerebbero disabilitati.
+        var si = laySel.indexOf(name);
+        if (si !== -1) laySel[si] = v.trim();
+        if (layAnchor === name) layAnchor = v.trim();
         layCall('rename', name, v.trim());
       } else {
         // Nessuna modifica: ripristiniamo la riga senza disturbare Ruby.
@@ -718,9 +821,19 @@
     input.addEventListener('blur', function () { finish(true); });
   }
 
+  // I bottoni che lavorano sulla selezione sono disabilitati finche' non c'e'
+  // una selezione: e' l'unico modo per dire che "-" e i colori casuali non
+  // agiscono sull'intera lista.
   function syncLayerToolbar() {
+    var n   = laySel.length;
     var del = $('#btn-lay-del');
-    if (del) del.disabled = !laySel;
+    var rnd = $('#btn-lay-rand');
+    if (del) {
+      del.disabled = !n;
+      del.title = n > 1 ? ('Delete the ' + n + ' selected layers')
+                        : 'Delete the selected layer';
+    }
+    if (rnd) rnd.disabled = !n;
   }
 
   function bindLayers() {
@@ -737,10 +850,19 @@
     var del = $('#btn-lay-del');
     if (del) {
       del.addEventListener('click', function () {
-        if (!laySel) { setStatus('Select a layer first'); return; }
-        var target = laySel;
-        laySel = null;
-        layCall('delete', target);
+        if (!laySel.length) { setStatus('Select a layer first'); return; }
+        var targets = laySel.slice();
+        setLaySel([]);
+        layCallMany('delete', targets);
+      });
+    }
+    // Colore casuale diverso per ogni layer selezionato. Le tinte le sceglie
+    // Ruby (distribuite sul cerchio cromatico, una sola operazione).
+    var rnd = $('#btn-lay-rand');
+    if (rnd) {
+      rnd.addEventListener('click', function () {
+        if (!laySel.length) { setStatus('Select one or more layers first'); return; }
+        layCallMany('random_colors', laySel.slice());
       });
     }
     var purge = $('#btn-lay-purge');
@@ -756,6 +878,28 @@
         layCall('color_by_layer', null, !on);
       });
     }
+
+    // Tasto destro sulla lista: comandi di selezione. Il menu e' agganciato al
+    // contenitore, non alle righe, cosi' sopravvive ai re-render e funziona
+    // anche sullo spazio vuoto sotto l'ultima riga.
+    var list = $('#lay-list');
+    if (list) {
+      list.addEventListener('contextmenu', function (e) {
+        e.preventDefault();
+        var order = layOrder();
+        if (!order.length) return;
+        var inv = order.filter(function (n) { return !laySelected(n); });
+        showCtxMenu(e.clientX, e.clientY, 'Selection', [
+          { label: 'Select all (' + order.length + ')',
+            onPick: function () { layAnchor = order[0]; setLaySel(order); } },
+          { label: 'Invert selection (' + inv.length + ')',
+            onPick: function () { layAnchor = inv.length ? inv[0] : null; setLaySel(inv); } },
+          { label: 'Clear selection',
+            onPick: function () { layAnchor = null; setLaySel([]); } }
+        ]);
+      });
+    }
+
     syncLayerToolbar();
   }
 
@@ -850,21 +994,31 @@
   });
 
   function showPartialMenu(x, y, items, onPick) {
+    showCtxMenu(x, y, 'Update only…', items.map(function (item) {
+      return { label: item.label, onPick: function () { onPick(item.keys); } };
+    }));
+  }
+
+  // Menu contestuale generico: `entries` = [{ label, onPick }]. Ne vive uno
+  // solo alla volta (#smp-ctx-menu), quindi aprirne uno chiude il precedente.
+  function showCtxMenu(x, y, headerText, entries) {
     hidePartialMenu();
     const menu = document.createElement('div');
     menu.className = 'context-menu';
     menu.id = 'smp-ctx-menu';
-    const header = document.createElement('div');
-    header.className = 'ctx-header';
-    header.textContent = 'Update only…';
-    menu.appendChild(header);
-    items.forEach(item => {
+    if (headerText) {
+      const header = document.createElement('div');
+      header.className = 'ctx-header';
+      header.textContent = headerText;
+      menu.appendChild(header);
+    }
+    entries.forEach(entry => {
       const row = document.createElement('div');
       row.className = 'ctx-item';
-      row.textContent = item.label;
+      row.textContent = entry.label;
       row.addEventListener('click', () => {
         hidePartialMenu();
-        onPick(item.keys);
+        entry.onPick();
       });
       menu.appendChild(row);
     });

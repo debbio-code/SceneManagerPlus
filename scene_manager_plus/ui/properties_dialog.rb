@@ -169,10 +169,14 @@ module SceneManagerPlus
         name   = data['name'].to_s
         focus  = nil
         status = nil
+        # Visibilita', colore e line style si propagano a tutta la selezione:
+        # `names` arriva dalla UI quando le righe selezionate sono piu' di una
+        # (shift/ctrl-click), altrimenti si lavora sul solo `name`.
+        targets = data['names'].is_a?(Array) && !data['names'].empty? ? data['names'] : [name]
 
         case op
         when 'visible'
-          Core::Layers.set_visible(name, data['value'])
+          Core::Layers.set_visible(targets, data['value'])
         when 'current'
           Core::Layers.set_current(name)
         when 'rename'
@@ -181,9 +185,11 @@ module SceneManagerPlus
             ::UI.messagebox(rename_error_message(err, data['value']))
           end
         when 'color'
-          Core::Layers.set_color(name, data['value'])
+          Core::Layers.set_color(targets, data['value'])
+        when 'random_colors'
+          status = randomize_colors_status(targets)
         when 'line_style'
-          Core::Layers.set_line_style(name, data['value'])
+          Core::Layers.set_line_style(targets, data['value'])
         when 'add'
           focus = Core::Layers.add_layer
         when 'add_scene_only'
@@ -195,7 +201,7 @@ module SceneManagerPlus
         when 'info'
           LayerInfoDialog.show_for(name)
         when 'delete'
-          delete_layer_interactive(name)
+          delete_layers_interactive(targets)
         when 'purge'
           n = Core::Layers.purge_unused
           ::UI.messagebox(
@@ -286,28 +292,72 @@ module SceneManagerPlus
         end
       end
 
+      # Colore casuale per ogni layer della selezione. Nessuna conferma: e'
+      # un'operazione puramente cosmetica, evidente a schermo e in un solo
+      # Ctrl+Z (Core::Layers.randomize_colors usa una sola start_operation).
+      def randomize_colors_status(names)
+        list = clean_names(names)
+        return 'Select one or more layers first' if list.empty?
+        n = Core::Layers.randomize_colors(list)
+        return 'Layer not found' if n.zero?
+        "Random color assigned to #{n} layer#{n == 1 ? '' : 's'} (Ctrl+Z to undo)"
+      end
+
+      def clean_names(names)
+        Array(names).map { |n| n.to_s }.reject { |n| n.empty? }.uniq
+      end
+
       # Replica la domanda del pannello nativo su cosa fare della geometria.
       # UI.messagebox espone solo YES/NO/CANCEL, quindi mappiamo i due esiti
       # utili del nativo (sposta / cancella) su YES e NO.
-      def delete_layer_interactive(name)
-        return if name.empty?
-        res = ::UI.messagebox(
-          "Delete layer \"#{name}\"?\n\n" \
+      #
+      # Una sola domanda per l'intera selezione (e una sola operazione lato
+      # Core): con 5 layer selezionati, 5 messagebox in fila sarebbero solo un
+      # modo per farli confermare senza leggere.
+      def delete_layers_interactive(names)
+        list = clean_names(names)
+        return if list.empty?
+        res = ::UI.messagebox(delete_layers_question(list), MB_YESNOCANCEL)
+        return if res == IDCANCEL
+        out = Core::Layers.delete_layers(list, res == IDYES ? 'move' : 'erase')
+        report_delete_errors(out)
+      end
+
+      def delete_layers_question(list)
+        if list.size == 1
+          "Delete layer \"#{list.first}\"?\n\n" \
           "YES — delete the layer, KEEP its entities (moved to Layer0)\n" \
           "NO — delete the layer AND all entities on it\n" \
-          "CANCEL — do nothing",
-          MB_YESNOCANCEL
-        )
-        return if res == IDCANCEL
-        ok, err = Core::Layers.delete_layer(name, res == IDYES ? 'move' : 'erase')
-        return if ok
-        msg = case err
-              when 'default'   then 'The default layer (Layer0) cannot be deleted.'
-              when 'last'      then 'Cannot delete the only layer in the model.'
-              when 'not_found' then 'Layer not found (it may have been deleted).'
-              else                  'Delete failed.'
-              end
-        ::UI.messagebox(msg)
+          "CANCEL — do nothing"
+        else
+          shown = list.first(12).join(', ')
+          more  = list.size > 12 ? " (and #{list.size - 12} more)" : ''
+          "Delete #{list.size} layers?\n\n#{shown}#{more}\n\n" \
+          "YES — delete them, KEEP their entities (moved to Layer0)\n" \
+          "NO — delete them AND all entities on them\n" \
+          "CANCEL — do nothing"
+        end
+      end
+
+      # Un layer per riga: i motivi di scarto sono diversi fra loro (default,
+      # sparito, rifiutato) e un messaggio unico non direbbe quale layer e' quale.
+      def report_delete_errors(out)
+        errs = out['errors'] || {}
+        return if errs.empty?
+        done  = (out['deleted'] || []).size
+        head  = done.zero? ? 'Nothing was deleted.'
+                           : "#{done} layer(s) deleted. The rest was skipped:"
+        lines = errs.map { |n, k| "- #{n}: #{delete_error_text(k)}" }
+        ::UI.messagebox("#{head}\n\n#{lines.join("\n")}")
+      end
+
+      def delete_error_text(err)
+        case err
+        when 'default'   then 'the default layer (Layer0) cannot be deleted'
+        when 'last'      then 'cannot delete the only layer in the model'
+        when 'not_found' then 'not found (it may have been deleted already)'
+        else                  'delete failed'
+        end
       end
 
       # `focus_layer`: nome del layer appena creato — il JS ci apre sopra il

@@ -278,6 +278,10 @@ fieldset legend {
   padding: 2px 4px;
   border-radius: 2px;
   cursor: default;
+  /* Shift+click su una lista selezionabile trascinerebbe una selezione di
+     testo attraverso le righe: qui i nomi non si copiano, si rinominano. */
+  user-select: none;
+  -webkit-user-select: none;
 }
 .lay-row:hover { background: #383838; }
 .lay-row.is-sel { background: #2b5a86; }
@@ -310,6 +314,10 @@ fieldset legend {
 }
 .lay-row.is-hiddenmodel .lay-name { color: #777; font-style: italic; }
 .lay-name-input {
+  /* La riga e' user-select:none, ma dentro il campo di rename il testo deve
+     restare selezionabile (l'input parte proprio con .select()). */
+  user-select: text;
+  -webkit-user-select: text;
   width: 100%;
   background: #232323;
   border: 1px solid #4ea1ff;

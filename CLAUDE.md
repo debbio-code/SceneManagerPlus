@@ -1771,6 +1771,72 @@ non meritano un messagebox (es. quante entità sono finite sul layer): il JS lo
 mostra nella status bar per 4s. Ricorda la trappola dei campi top-level (vedi
 "Trappola push_state").
 
+## Selezione multipla dei layer + propagazione (2026-07-31)
+
+Shift+click (intervallo), Ctrl+click (aggiungi/togli), tasto destro sulla lista
+→ Select all / Invert selection / Clear selection. `laySel` in `properties.js`
+è passato da stringa singola ad **array**.
+
+**Il punto non ovvio è il mousedown della riga.** Se un click su un controllo
+(spunta, swatch, dash, radio Cur, `i`, `→`) collassasse sempre la selezione
+alla riga cliccata, la propagazione non avrebbe MAI più di un bersaglio: la
+selezione verrebbe distrutta un istante prima che parta il `change`. Regola
+implementata in `bindLayerRows`: click semplice su un controllo di una riga
+**già selezionata** → la selezione resta com'è; su una riga fuori selezione →
+collassa a quella riga (comportamento classico). Stessa logica per il tasto
+destro, altrimenti il menu contestuale lavorerebbe su una selezione appena
+distrutta dal click che lo ha aperto.
+
+Altri vincoli emersi, da rispettare se si tocca la sezione:
+
+- **La selezione non passa da Ruby**: `paintLaySel` tocca la sola classe
+  `.is-sel`, nessun `push_state`, nessun re-render. È l'unico modo perché
+  shift-click su 20 righe resti istantaneo sui modelli con AttributeObserver
+  di plugin terzi.
+- **Prune a ogni render**: `renderLayers` filtra `laySel` contro le righe del
+  payload. Senza, dopo un delete/rename (o quando la scena nasconde un layer)
+  restano nomi fantasma e i bottoni di gruppo agiscono su layer inesistenti.
+  Il rename inline aggiorna `laySel[i]` e `layAnchor` col nuovo nome per lo
+  stesso motivo.
+- **`user-select: none` su `.lay-row`** (shift+click su una lista trascina una
+  selezione di testo), con `user-select: text` rimesso su `.lay-name-input`
+  perché il campo di rename parte con `.select()`.
+- Restano **single-target** per natura: `Cur` (radio), `i`, `→` (spostare la
+  selezione del viewport su N layer non significa niente).
+
+**Lato Ruby i setter accettano nome O array** (`Core::Layers.layers_for`), e
+il batch gira in **una sola `op`** → un solo Ctrl+Z anche cambiando 20 layer
+insieme. Vale anche per `delete_layers`, che fa **una sola** domanda
+YES/NO/CANCEL per l'intera selezione (N messagebox in fila sono solo un modo
+per farle confermare senza leggere) e non fa fallire il gruppo per un layer
+non cancellabile: Layer0/spariti finiscono in `errors` e vengono riportati a
+fine operazione. `delete_layer` singolo è rimasto come wrapper.
+
+**Bottone 🎨 (colori casuali)**: le tinte sono **distribuite sul cerchio
+cromatico** (`offset casuale + i × 360/n`, slot mescolati), non estratte a caso
+una per una — con 5-6 layer il random puro produce quasi sempre due tinte
+gemelle, che è esattamente ciò che la feature deve evitare. Saturazione 0.45-0.80
+e valore 0.70-0.95: i colori si vedono con "Color by layer" acceso, e un giallo
+fluo o un blu notte rendono la geometria illeggibile. `Core::Layers.hsv_color`
+è l'unico convertitore HSV→`Sketchup::Color` del progetto (verificato live:
+h=0 rosso, 120 verde, 300 magenta).
+
+**`showCtxMenu(x, y, header, entries)`** in `properties.js` è ora il costruttore
+generico di menu contestuali del dialog (`entries = [{label, onPick}]`);
+`showPartialMenu` (update parziale) gli delega. Ne vive uno solo alla volta
+(`#smp-ctx-menu`).
+
+### Verificare il JS di un dialog senza SketchUp
+
+`properties.html` si apre in un browser normale (file://) e il JS gira: le
+chiamate a Ruby passano da `window.sketchup`, che basta rimpiazzare con un
+Proxy che registra i payload. Poi si inietta uno state finto con
+`SMP.setState({...})` e si simulano i click con `dispatchEvent(new MouseEvent(...))`.
+Così shift/ctrl/invert e i payload di propagazione si verificano **prima** di
+aprire SketchUp, senza toccare il modello dell'utente. Nota: `.click()` su una
+checkbox NON genera il `mousedown` — vanno dispatchati entrambi, o la logica di
+selezione non viene esercitata.
+
 ## Copia/incolla scene cross-file (Fase A+B implementate — 2026-05-31)
 
 > ✅ **Fase A (Copy) + Fase B (Paste base) IMPLEMENTATE.** Fase C (layer

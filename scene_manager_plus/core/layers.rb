@@ -228,14 +228,23 @@ module SceneManagerPlus
         end
       end
 
-      def set_visible(name, value)
-        l = find(name)
-        return false unless l
+      # I setter accettano indifferentemente un nome o un ARRAY di nomi: la UI
+      # propaga l'operazione a tutta la selezione (shift/ctrl-click), e un solo
+      # `op` per l'intero gruppo significa un solo Ctrl+Z — oltre a un solo
+      # refresh su modelli con AttributeObserver di plugin terzi.
+      def layers_for(names)
+        Array(names).map { |n| find(n) }.compact.uniq
+      end
+
+      def set_visible(names, value)
+        list = layers_for(names)
+        return false if list.empty?
         v = value ? true : false
         # Diff prima del setter: regola generale del progetto, meno write =
         # meno freeze sui modelli con observer terzi.
-        return true if (l.visible? rescue nil) == v
-        op('SM+ Layer visibility') { l.visible = v }
+        todo = list.reject { |l| (l.visible? rescue nil) == v }
+        return true if todo.empty?
+        op('SM+ Layer visibility') { todo.each { |l| l.visible = v } }
         true
       end
 
@@ -269,27 +278,70 @@ module SceneManagerPlus
         [true, nil]
       end
 
-      def set_color(name, hex)
-        l = find(name)
-        return false unless l
+      def set_color(names, hex)
         c = Styles.hex_to_color(hex)
         return false unless c
-        op('SM+ Layer color') { l.color = c }
+        list = layers_for(names)
+        return false if list.empty?
+        op('SM+ Layer color') { list.each { |l| l.color = c } }
         true
       end
 
+      # Un colore diverso per ogni layer, distinguibile a colpo d'occhio: le
+      # tinte sono distribuite sul cerchio cromatico (non estratte a caso una per
+      # una, che a 5-6 layer produce quasi sempre due tinte gemelle), con offset
+      # casuale e ordine mescolato perche' due chiamate successive sulla stessa
+      # selezione non diano la stessa palette. Saturazione e luminosita' restano
+      # in una fascia media: i colori dei layer si vedono con "Color by layer",
+      # e un giallo fluo o un blu notte rendono la geometria illeggibile.
+      #
+      # Ritorna il numero di layer ricolorati.
+      def randomize_colors(names)
+        list = layers_for(names)
+        return 0 if list.empty?
+        n      = list.size
+        offset = rand * 360.0
+        slots  = (0...n).to_a.shuffle
+        op('SM+ Random layer colors') do
+          list.each_with_index do |l, i|
+            h = (offset + slots[i] * (360.0 / n)) % 360.0
+            l.color = hsv_color(h, 0.45 + rand * 0.35, 0.70 + rand * 0.25)
+          end
+        end
+        n
+      end
+
+      # HSV → Sketchup::Color. `h` in gradi 0..360, `s`/`v` in 0..1.
+      def hsv_color(h, s, v)
+        c = v * s
+        x = c * (1 - (((h / 60.0) % 2) - 1).abs)
+        m = v - c
+        r, g, b = case (h / 60.0).floor % 6
+                  when 0 then [c, x, 0]
+                  when 1 then [x, c, 0]
+                  when 2 then [0, c, x]
+                  when 3 then [0, x, c]
+                  when 4 then [x, 0, c]
+                  else        [c, 0, x]
+                  end
+        Sketchup::Color.new(((r + m) * 255).round,
+                            ((g + m) * 255).round,
+                            ((b + m) * 255).round)
+      end
+
       # `ls_name` vuoto = torna al line style di default (nil).
-      def set_line_style(name, ls_name)
+      def set_line_style(names, ls_name)
         m = model
-        l = find(name)
-        return false unless m && l && l.respond_to?(:line_style=)
+        return false unless m
+        list = layers_for(names).select { |l| l.respond_to?(:line_style=) }
+        return false if list.empty?
         s = ls_name.to_s
         target = nil
         unless s.empty?
           target = (m.line_styles[s] rescue nil)
           return false unless target
         end
-        op('SM+ Layer line style') { l.line_style = target }
+        op('SM+ Layer line style') { list.each { |l| l.line_style = target } }
         true
       end
 
@@ -756,29 +808,68 @@ module SceneManagerPlus
         { 'name' => name, 'unconstrained' => unconstrained }
       end
 
-      # mode: 'move' = cancella il layer e sposta la geometria su Layer0
-      #       'erase' = cancella il layer E la sua geometria
-      # Ritorna [ok, error_key].
-      def delete_layer(name, mode)
+      # mode: 'move' = cancella i layer e sposta la geometria su Layer0
+      #       'erase' = cancella i layer E la loro geometria
+      #
+      # Tutti i layer in una sola operazione: cancellandone 5 dalla selezione
+      # multipla, un solo Ctrl+Z li riporta indietro tutti. I layer non
+      # cancellabili (default, inesistenti) non fanno fallire il gruppo: finiscono
+      # in `errors` e il chiamante decide se e come segnalarli.
+      #
+      # Ritorna { 'deleted' => [nomi], 'errors' => { nome => error_key } }.
+      def delete_layers(names, mode)
         m = model
-        l = find(name)
-        return [false, 'not_found'] unless m && l
-        return [false, 'default'] if default?(l)
-        return [false, 'last'] if m.layers.count <= 1
-        erase = (mode.to_s == 'erase')
-        # Se e' il layer corrente SU rifiuta la remove: riportiamo il corrente
-        # sul default prima di cancellare.
-        m.active_layer = m.layers[0] if m.active_layer == l
-        op('SM+ Delete layer') do
-          begin
-            m.layers.remove(l, erase)
-          rescue ArgumentError
-            # Build senza il secondo parametro: rimuove il layer preservando
-            # la geometria (che finisce su Layer0).
-            m.layers.remove(l)
+        wanted = Array(names).map { |n| n.to_s }.reject { |n| n.empty? }.uniq
+        res = { 'deleted' => [], 'errors' => {} }
+        return res if wanted.empty?
+        unless m
+          wanted.each { |n| res['errors'][n] = 'not_found' }
+          return res
+        end
+        if m.layers.count <= 1
+          wanted.each { |n| res['errors'][n] = 'last' }
+          return res
+        end
+
+        erase   = (mode.to_s == 'erase')
+        targets = []
+        wanted.each do |n|
+          l = find(n)
+          if l.nil?         then res['errors'][n] = 'not_found'
+          elsif default?(l) then res['errors'][n] = 'default'
+          else                   targets << [n, l]
           end
         end
-        [true, nil]
+        return res if targets.empty?
+
+        op('SM+ Delete layers') do
+          targets.each do |n, l|
+            begin
+              # Se e' il layer corrente SU rifiuta la remove: riportiamo il
+              # corrente sul default prima di cancellare.
+              m.active_layer = m.layers[0] if m.active_layer == l
+              begin
+                m.layers.remove(l, erase)
+              rescue ArgumentError
+                # Build senza il secondo parametro: rimuove il layer preservando
+                # la geometria (che finisce su Layer0).
+                m.layers.remove(l)
+              end
+              res['deleted'] << n
+            rescue => e
+              warn "[SM+] delete layer #{n}: #{e.class}: #{e.message}"
+              res['errors'][n] = 'failed'
+            end
+          end
+        end
+        res
+      end
+
+      # Ritorna [ok, error_key].
+      def delete_layer(name, mode)
+        res = delete_layers([name], mode)
+        return [true, nil] unless res['deleted'].empty?
+        [false, (res['errors'][name.to_s] || 'failed')]
       end
 
       # Ritorna il numero di layer rimossi.
