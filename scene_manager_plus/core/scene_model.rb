@@ -270,6 +270,54 @@ module SceneManagerPlus
         false
       end
 
+      # Flag "l'utente sa cosa comporta cambiare stile a una scena Match
+      # Photo". GLOBALE per-macchina (write_default), non per-file: è una
+      # spiegazione, non una preferenza del modello. Per rivedere l'avviso:
+      #   Sketchup.write_default('SceneManagerPlus', 'mp_style_change_ack', false)
+      MP_STYLE_ACK_KEY = 'mp_style_change_ack'.freeze
+
+      def mp_style_change_acknowledged?
+        Sketchup.read_default('SceneManagerPlus', MP_STYLE_ACK_KEY, false) ? true : false
+      end
+
+      # Conferma una-tantum prima di cambiare stile a una scena Match Photo.
+      #
+      # Storicamente qui c'era un DIVIETO, motivato con "page.update(STYLE|RO)
+      # su scena MP corrompe lo stile interno e toglie la foto". Rimisurato il
+      # 2026-08-01 su 19.3.253, un passo per volta e con confronto di render:
+      # cambio stile → page.update → uscita e rientro nella scena → salvataggio
+      # e rilettura da disco. Nessun crash, **foto sempre presente**,
+      # `camera.is_2d?` sempre true, e rimettendo lo stile originale la scena
+      # torna pixel-identica. La foto NON è agganciata allo stile: cambia solo
+      # il modo in cui è disegnata la geometria.
+      #
+      # Il crash storico si spiega col null-deref di `page.style == nil` (vedi
+      # capture_style!), che sulle scene MP di plugin terzi è la norma — non
+      # con una fragilità del Match Photo in quanto tale. Stessa correzione
+      # già fatta per "Style and Fog".
+      #
+      # Resta la conferma perché l'operazione cambia visibilmente il disegno e
+      # può partire da un clic destro di striscio.
+      def confirm_mp_style_change(page)
+        return true if mp_style_change_acknowledged?
+        mb    = Object.const_defined?(:MB_OKCANCEL) ? MB_OKCANCEL : 1
+        id_ok = Object.const_defined?(:IDOK) ? IDOK : 1
+        answer = ::UI.messagebox(
+          "Scene '#{page.name}' is a Match Photo scene.\n\n" \
+          "Changing its style is allowed: the background photo stays and the " \
+          "two-point perspective is preserved. What changes is how the model " \
+          "geometry itself is drawn.\n\n" \
+          "This warning is shown only once.",
+          mb
+        )
+        return false unless answer == id_ok
+        Sketchup.write_default('SceneManagerPlus', MP_STYLE_ACK_KEY, true)
+        true
+      rescue => e
+        warn "[SM+] confirm_mp_style_change: #{e.class}: #{e.message}"
+        false
+      end
+
       # Sposta la pagina con uid `id` all'indice `target_index` (0-based).
       # Usa l'API ufficiale: pages.add_matchphoto/erase non vanno bene,
       # usiamo invece swap iterativo perché Pages non ha move diretto.
@@ -783,7 +831,7 @@ module SceneManagerPlus
           choice = ::UI.messagebox(
             "Style '#{style_name}' has unsaved changes.\n\n" \
             "YES = Update the selected style with the current modifications.\n" \
-            "NO  = Save as a new style (you'll be prompted for a nickname).\n" \
+            "NO  = Save as a new style (you'll be prompted for a name).\n" \
             "CANCEL = Don't touch the style (scene captures other properties only).",
             mb_const
           )
@@ -797,19 +845,18 @@ module SceneManagerPlus
             end
           when id_no
             puts "[SM+] update_from_view: user chose 'Save as new style' for '#{style_name}'"
-            result = Core::Styles.prompt_nickname_loop(
+            result = Core::Styles.prompt_style_name_loop(
               title: 'Scene Manager+ — Save as new style',
-              label: 'Nickname (vuoto = usa nome nativo "SM+ Slot NN"):'
+              label: 'Style name:',
+              default: "#{style_name} copy"
             )
             if result == :aborted
               puts "[SM+] update_from_view: save-as-new aborted by user"
               return false
             end
-            new_style = Core::Styles.allocate_new_slot_from_viewport(
-              nickname: (result.empty? ? nil : result)
-            )
+            new_style = Core::Styles.create_style_from_viewport(name: result)
             unless new_style
-              puts "[SM+] update_from_view: save-as-new failed (pool esaurito o errore)"
+              puts "[SM+] update_from_view: save-as-new failed"
               return false
             end
             # Riassegna la scena al nuovo stile. assign_style già forza
@@ -885,11 +932,14 @@ module SceneManagerPlus
         # pending, pages.add cattura il riferimento allo stile ma le pending
         # restano in memoria dirty (non vengono persistite). Diamo all'utente
         # la stessa scelta del flusso nativo "Warning - Scenes and Styles".
-        # Su scena Match Photo il dialog e' saltato di proposito: il ramo
-        # "Save as new style" chiama allocate_new_slot_from_viewport, che fa
-        # styles.selected_style = <nuovo slot> e cosi' sostituirebbe lo stile
-        # interno che porta la foto (stessa ragione per cui assign_style ha un
-        # guard MP). Il comando nativo gestisce lo stile MP per conto suo.
+        # Su scena Match Photo il dialog e' saltato di proposito, ma NON per
+        # la vecchia ragione ("cambiare stile toglie la foto": smentita il
+        # 2026-08-01, vedi sezione Match Photo nel CLAUDE.md). Il motivo vero
+        # e' di sequenza: qui sotto si prosegue con send_action(Add Scene), e
+        # il comando nativo copia lo stile ATTUALMENTE selezionato. Il ramo
+        # "Save as new style" farebbe styles.selected_style = <nuovo stile>,
+        # quindi la scena nascerebbe legata a quello invece che allo stile MP
+        # che porta la foto.
         styles = m.styles
         if !is_mp && styles.respond_to?(:active_style_changed) && styles.active_style_changed
           style_name = (styles.active_style.name rescue 'current')
@@ -899,7 +949,7 @@ module SceneManagerPlus
           choice = ::UI.messagebox(
             "Style '#{style_name}' has unsaved changes.\n\n" \
             "YES = Update the selected style with the current modifications.\n" \
-            "NO  = Save as a new style (you'll be prompted for a nickname).\n" \
+            "NO  = Save as a new style (you'll be prompted for a name).\n" \
             "CANCEL = Don't touch the style (new scene captures the saved style only).",
             mb_const
           )
@@ -913,22 +963,21 @@ module SceneManagerPlus
             end
           when id_no
             puts "[SM+] add_from_view: user chose 'Save as new style' for '#{style_name}'"
-            result = Core::Styles.prompt_nickname_loop(
+            result = Core::Styles.prompt_style_name_loop(
               title: 'Scene Manager+ — Save as new style',
-              label: 'Nickname (vuoto = usa nome nativo "SM+ Slot NN"):'
+              label: 'Style name:',
+              default: "#{style_name} copy"
             )
             if result == :aborted
               puts "[SM+] add_from_view: save-as-new aborted by user"
               return finish.call(nil)
             end
-            new_style = Core::Styles.allocate_new_slot_from_viewport(
-              nickname: (result.empty? ? nil : result)
-            )
+            new_style = Core::Styles.create_style_from_viewport(name: result)
             unless new_style
-              puts "[SM+] add_from_view: save-as-new failed (pool esaurito o errore)"
+              puts "[SM+] add_from_view: save-as-new failed"
               return finish.call(nil)
             end
-            # Il nuovo slot è già selected_style (lo fa allocate_new_slot_from_viewport).
+            # Il nuovo stile è già selected_style (lo fa create_style_from_viewport).
             # Procediamo con pages.add → la nuova page cattura selected_style =
             # new_style, quindi nasce legata al nuovo stile pulito.
             puts "[SM+] add_from_view: continuing with new style #{new_style.name.inspect}"
@@ -1189,18 +1238,9 @@ module SceneManagerPlus
           warn "[SM+] assign_style: style '#{style_name}' not found in model"
           return false
         end
-        # Match Photo guard: page.update(STYLE|RO) su una scena MP corrompe
-        # lo stile interno MP (background foto) → BugSplat. Anche se non
-        # crashasse, sovrascrivere lo stile MP con uno normale toglie la
-        # foto di sfondo. Blocchiamo con messagebox esplicativo.
-        if matchphoto?(p)
-          ::UI.messagebox(
-            "Scene '#{p.name}' is a Match Photo scene.\n\n" \
-            "Reassigning a regular style would remove the photo background " \
-            "and can crash SketchUp. Operation cancelled."
-          )
-          return false
-        end
+        # Match Photo: NON è più un divieto (vedi confirm_mp_style_change).
+        # Solo una conferma, e una sola volta per macchina.
+        return false if matchphoto?(p) && !confirm_mp_style_change(p)
         # Costanti PAGE_USE_* — lookup difensivo come in update_from_view
         sc = lambda do |*names|
           names.each { |n| return Object.const_get(n) if Object.const_defined?(n) }
@@ -1213,6 +1253,14 @@ module SceneManagerPlus
         m.start_operation('SM+ Assign style', true)
         begin
           m.pages.selected_page = p
+          # Pagina senza stile salvato (scene MP di plugin terzi, o create
+          # dalle vecchie versioni di SM+): le si dà PRIMA uno stile, con la
+          # pagina già attiva. È il vero discrimine del BugSplat storico —
+          # non "essere Match Photo" — vedi capture_style!. Qui è difensivo:
+          # il p.update poco sotto salverebbe comunque uno stile, ma se
+          # quella riga fallisse la pagina resterebbe coi flag accesi e
+          # style == nil, cioè nello stato che splatta.
+          capture_style!(p) if style_missing?(p)
           m.styles.selected_style = target_style
           # Forza il flag use_style a true: senza, page.update con STYLE bit
           # non lega effettivamente lo stile alla scena (cfr. PAGE_USE_*).

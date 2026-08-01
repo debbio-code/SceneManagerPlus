@@ -947,15 +947,10 @@ window.SM = (function () {
       e.stopPropagation();
       var row = e.target.closest('.scene-row');
       if (!row || !row.dataset || !row.dataset.id) return;
-      var sc = sceneById(row.dataset.id);
-      // MP scenes: tutte le voci del picker sono comunque bloccate (assign,
-      // + New style…) perché la modifica via Ruby corrompe lo state MP.
-      // Apriamo l'inspector Styles nativo, stesso principio di "Style and Fog
-      // → Scenes panel" in Properties dialog.
-      if (sc && sc.is_matchphoto) {
-        SMBridge.openNativeStylesPanel(row.dataset.id);
-        return;
-      }
+      // Le scene Match Photo passano di qui come tutte le altre: cambiare
+      // stile e' permesso (la foto resta), Ruby chiede una conferma la prima
+      // volta. Fino al 2026-08-01 qui c'era una deviazione al pannello Styles
+      // nativo, basata su un divieto poi smentito dalle misure.
       showStylePickerMenu(e.clientX, e.clientY, row.dataset.id);
     }, true);
 

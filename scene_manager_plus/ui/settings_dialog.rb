@@ -153,6 +153,46 @@ module SceneManagerPlus
           puts "[SM+ Settings UI] #{msg}"
         end
 
+        # Migrazione dei nomi stile legacy: il nickname (etichetta visibile
+        # solo dentro il plugin) diventa il nome nativo dello stile, così
+        # anche Window → Styles di SketchUp mostra lo stesso nome.
+        # Mai in automatico all'apertura: rinominare stili dentro file già
+        # consegnati o condivisi è una decisione dell'utente.
+        dlg.add_action_callback('sm_settings_migrate_style_names') do |_ctx|
+          cands = Core::Styles.legacy_nickname_candidates
+          if cands.empty?
+            ::UI.messagebox(
+              "Nothing to update: no style in this file uses a legacy nickname.\n\n" \
+              "Style names in this file are already the real SketchUp names."
+            )
+            next
+          end
+          list = cands.map { |h| "  • #{h[:native]}  →  #{h[:nick]}" }.join("\n")
+          mb_yesno = Object.const_defined?(:MB_YESNO) ? MB_YESNO : 4
+          id_yes   = Object.const_defined?(:IDYES)   ? IDYES   : 6
+          answer = ::UI.messagebox(
+            "The following #{cands.size} style(s) will be renamed in SketchUp:\n\n" \
+            "#{list}\n\n" \
+            "Scenes keep their style (the scene-to-style link survives a rename).\n" \
+            "The new names will also show in Window → Styles.\n\n" \
+            "Continue?",
+            mb_yesno
+          )
+          unless answer == id_yes
+            puts '[SM+] migrate_style_names: aborted by user'
+            next
+          end
+          res = Core::Styles.migrate_legacy_nicknames!
+          puts "[SM+] migrate_style_names: renamed=#{res[:renamed].inspect} skipped=#{res[:skipped].inspect}"
+          msg = "Renamed #{res[:renamed].size} style(s)."
+          unless res[:skipped].empty?
+            skipped = res[:skipped].map { |(nat, nick, why)| "  • #{nat} (#{nick}): #{why}" }.join("\n")
+            msg += "\n\nSkipped #{res[:skipped].size}:\n#{skipped}"
+          end
+          ::UI.messagebox(msg)
+          Dialog.push_state if defined?(Dialog)
+        end
+
         # Purge degli stili non usati. SU 2019 non ha per-style delete via
         # Ruby — solo styles.purge_unused (model-wide). Quindi mostriamo
         # confirmation con lista degli stili che verranno cancellati

@@ -512,12 +512,20 @@
     const uiHideTabs = document.getElementById('ui-hide-scene-tabs-on-open');
     if (uiHideTabs) uiHideTabs.addEventListener('change', saveUiNow);
 
-    // Style pool: purge unused styles. UI a senso unico (Ruby fa il
-    // confirmation messagebox + purge_unused + cleanup nicknames).
+    // Styles: purge unused styles. UI a senso unico (Ruby fa il
+    // confirmation messagebox + purge_unused + cleanup metadata).
     const purgeBtn = document.getElementById('btn-purge-unused-styles');
     if (purgeBtn) {
       purgeBtn.addEventListener('click', () => {
         call('sm_settings_purge_unused_styles');
+      });
+    }
+
+    // Migrazione dei nomi stile legacy. Anche qui Ruby fa conferma + report.
+    const migrateBtn = document.getElementById('btn-migrate-style-names');
+    if (migrateBtn) {
+      migrateBtn.addEventListener('click', () => {
+        call('sm_settings_migrate_style_names');
       });
     }
 

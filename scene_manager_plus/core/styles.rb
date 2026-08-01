@@ -1,26 +1,37 @@
 module SceneManagerPlus
   module Core
-    # Gestione del pool di stili pre-bundlati + nickname per-modello.
+    # Creazione e rinomina di stili nativi.
     #
-    # Pool di slot (assets/styles/slot_NN.style):
-    #   25 file .style bundled, ciascuno con nome embedded "SM+ Slot NN".
-    #   Allocazione lazy: quando il plugin deve creare un nuovo stile, carica
-    #   il primo slot_NN.style il cui nome non è già presente in model.styles
-    #   (così supporta file legacy che hanno già usato il plugin, riempie i
-    #   buchi se l'utente ha cancellato a mano qualche slot, ecc.).
+    # Template unico (assets/styles/_template.style):
+    #   `Sketchup::Styles#add_style` accetta solo file .style da disco, ma
+    #   `Sketchup::Style#name=` FUNZIONA in SU 2019 (verificato 2026-08-01 su
+    #   19.3.253, persistenza su .skp salvato+riletto inclusa). Quindi basta
+    #   UN template importato N volte e rinominato subito dopo ogni import:
+    #   stili illimitati con nomi arbitrari. Sostituisce il vecchio pool di 25
+    #   slot pre-generati (`SM+ Slot NN`) + i nickname, che esistevano solo
+    #   perché si credeva `name=` non disponibile.
     #
-    # Nickname per-modello:
-    #   Mappa native_name → friendly_name salvata come attributo del modello
-    #   (dict 'SMP_style_nicks', chiavi = nome stile nativo). Il nickname vale
-    #   solo dentro il plugin: il native Styles browser di SU mostra sempre il
-    #   nome reale. Travels with the .skp.
+    # ⚠️ Unicità dei nomi: SU NON valida in sessione (due stili omonimi
+    #   convivono), ma AL SALVATAGGIO ne rinomina uno in silenzio aggiungendo
+    #   un suffisso numerico ("Foo" + "Foo" → "Foo" + "Foo1"), e non è
+    #   deterministico quale. Siccome i metadata del plugin (COLORS_DICT) sono
+    #   chiavati per nome, un duplicato lascerebbe appunti orfani dopo la
+    #   riapertura del file. Quindi l'unicità la impone il plugin, a monte:
+    #   vedi style_name_taken? / unique_style_name / rename_style.
+    #
+    # Nickname per-modello (LEGACY, in sola lettura + migrazione):
+    #   Mappa native_name → friendly_name nel dict 'SMP_style_nicks'. Era il
+    #   modo di dare un nome leggibile agli slot quando non si poteva
+    #   rinominare. I file già lavorati la contengono ancora: display_name la
+    #   rispetta, e migrate_legacy_nicknames! la converte in nomi veri
+    #   (bottone in Settings). Sui file nuovi non viene mai scritta.
     module Styles
       module_function
 
-      SLOT_PREFIX     = 'SM+ Slot '.freeze
       NICKNAMES_DICT  = 'SMP_style_nicks'.freeze
       COLORS_DICT     = 'SMP_style_colors'.freeze
-      MAX_SLOT_INDEX  = 25 # vedi tools/generate-slot-styles.rb
+      TEMPLATE_FILE   = '_template.style'.freeze
+      DEFAULT_NEW_NAME = 'New style'.freeze
 
       def model
         Sketchup.active_model
@@ -30,84 +41,68 @@ module SceneManagerPlus
         File.join(PLUGIN_DIR, 'assets', 'styles')
       end
 
-      def slot_filename(n)
-        format('slot_%02d.style', n)
+      def template_path
+        File.join(styles_dir, TEMPLATE_FILE)
       end
 
-      def slot_name(n)
-        format('%s%02d', SLOT_PREFIX, n)
-      end
-
-      def slot_path(n)
-        File.join(styles_dir, slot_filename(n))
-      end
-
-      # Primo indice NN (1..MAX_SLOT_INDEX) il cui name "SM+ Slot NN" non è
-      # già presente nel modello. Ritorna nil se il pool è esaurito.
-      def next_free_slot_index(m = model)
-        return nil unless m && m.respond_to?(:styles) && m.styles
-        present = m.styles.map { |s| s.name.to_s }
-        (1..MAX_SLOT_INDEX).each do |n|
-          return n unless present.include?(slot_name(n))
+      # Importa il template e ritorna il Sketchup::Style appena nato.
+      #
+      # L'identificazione è per IDENTITÀ del wrapper (`==` / object_id, stabili
+      # per tutta la sessione — verificato), NON per nome: il nome embedded nel
+      # template può già esistere nel modello (file legacy col vecchio pool) e
+      # un diff per nome fallirebbe silenziosamente. `Style#persistent_id` non
+      # è un'alternativa: in SU 2019 è uno stub che ritorna 0, come Material.
+      #
+      # Da chiamare dentro una start_operation del caller. Ritorna nil se il
+      # template manca o se add_style non ha aggiunto esattamente uno stile.
+      def import_template(m)
+        path = template_path
+        unless File.exist?(path)
+          ::UI.messagebox(
+            "Style template mancante:\n#{path}\n\n" \
+            "Asset .style bundled non trovato. Re-deploy del plugin."
+          )
+          return nil
         end
+        before = m.styles.to_a
+        # activate=false: l'attivazione la decide il caller (evita side-effect
+        # sulla scena attiva e sullo stile dirty pending).
+        m.styles.add_style(path, false)
+        fresh = m.styles.to_a.reject { |s| before.any? { |o| o == s } }
+        if fresh.size != 1
+          warn "[SM+] import_template: attesi 1 nuovo stile, trovati #{fresh.size}"
+          return nil
+        end
+        fresh[0]
+      rescue => e
+        warn "[SM+] import_template: #{e.class}: #{e.message}"
         nil
       end
 
-      # Carica il prossimo slot libero nel modello (styles.add_style).
-      # Ritorna il Sketchup::Style appena aggiunto, o nil se:
-      #   - pool esaurito (con messagebox di avviso)
-      #   - file .style mancante dal bundle
-      #   - add_style fallisce silenziosamente
-      # Opzionale: nickname = stringa friendly da associare allo stile appena
-      # creato (vedi set_nickname).
-      def allocate_new_slot(nickname: nil)
+      # Crea uno stile nuovo con le rendering options del template.
+      # name: nome desiderato (verrà reso unico); nil = DEFAULT_NEW_NAME.
+      # Ritorna il Sketchup::Style creato o nil.
+      def create_style(name: nil)
         m = model
         return nil unless m
-        n = next_free_slot_index(m)
-        unless n
-          ::UI.messagebox(
-            "Pool di stili esaurito (#{MAX_SLOT_INDEX} slot occupati).\n\n" \
-            "Per estendere il pool: rilancia tools/generate-slot-styles.rb\n" \
-            "su una postazione dev aumentando NUM_SLOTS, poi commit dei\n" \
-            "nuovi assets/styles/slot_NN.style."
-          )
-          return nil
-        end
-
-        path = slot_path(n)
-        unless File.exist?(path)
-          ::UI.messagebox(
-            "File slot mancante: #{path}\n\n" \
-            "Asset .style bundled non trovato. Riavvio plugin e/o re-deploy."
-          )
-          return nil
-        end
-
-        name = slot_name(n)
-        m.start_operation('SM+ Allocate style slot', true)
+        m.start_operation('SM+ New style', true)
         begin
-          # add_style(path, activate). Mettiamo activate=false: l'attivazione
-          # eventuale la decide il caller (es. assign_style farà il proprio
-          # selected_style=). Evitiamo side-effect non richiesti su scena
-          # attiva e su style dirty pending.
-          m.styles.add_style(path, false)
-          loaded = m.styles.find { |s| s.name == name }
-          unless loaded
+          st = import_template(m)
+          unless st
             m.abort_operation
-            warn "[SM+] allocate_new_slot: add_style non ha aggiunto '#{name}'"
             return nil
           end
-          set_nickname(name, nickname) if nickname && !nickname.to_s.strip.empty?
+          st.name = unique_style_name(name.to_s.strip.empty? ? DEFAULT_NEW_NAME : name)
           m.commit_operation
-          loaded
+          st
         rescue => e
           m.abort_operation
-          warn "[SM+] allocate_new_slot: #{e.class}: #{e.message}"
+          warn "[SM+] create_style: #{e.class}: #{e.message}"
           nil
         end
       end
 
-      # Variante "save as new style": alloca uno slot dal pool e ci committa
+      # Variante "save as new style": crea uno stile nuovo e ci committa
       # dentro le rendering options correnti del viewport. Il risultato è uno
       # stile che, quando applicato a una scena, riproduce esattamente la vista
       # corrente — comprese eventuali modifiche pending non ancora salvate
@@ -117,38 +112,21 @@ module SceneManagerPlus
       # Flusso:
       #   1. Snapshot di tutte le model.rendering_options (= ciò che il
       #      viewport mostra ora, dirty edit inclusi)
-      #   2. add_style(slot_path, false) — aggiunge lo slot al modello
-      #   3. styles.selected_style = nuovo slot — viewport ora mostra le RO
-      #      "template" dello slot; eventuali pending edit sullo stile
-      #      precedente vengono droppate silenziosamente (è OK: le abbiamo
-      #      nello snapshot e lo stile precedente torna pulito allo state
-      #      salvato, comportamento equivalente al "Don't save" nativo)
-      #   4. Riapplica snapshot su model.rendering_options
-      #   5. styles.update_selected_style — committa le RO restored allo
+      #   2. import_template — aggiunge lo stile nuovo al modello
+      #   3. rinomina subito col nome scelto (reso unico)
+      #   4. styles.selected_style = nuovo stile — viewport ora mostra le RO
+      #      del template; eventuali pending edit sullo stile precedente
+      #      vengono droppate silenziosamente (è OK: le abbiamo nello snapshot
+      #      e lo stile precedente torna pulito allo state salvato,
+      #      comportamento equivalente al "Don't save" nativo)
+      #   5. Riapplica snapshot su model.rendering_options
+      #   6. styles.update_selected_style — committa le RO restored allo
       #      stile nuovo
-      #   6. Set nickname
       #
       # Tutto in 1 start_operation = 1 Ctrl+Z.
-      def allocate_new_slot_from_viewport(nickname: nil)
+      def create_style_from_viewport(name: nil)
         m = model
         return nil unless m
-        n = next_free_slot_index(m)
-        unless n
-          ::UI.messagebox(
-            "Pool di stili esaurito (#{MAX_SLOT_INDEX} slot occupati).\n\n" \
-            "Per estendere il pool: rilancia tools/generate-slot-styles.rb\n" \
-            "su una postazione dev aumentando NUM_SLOTS, poi commit dei\n" \
-            "nuovi assets/styles/slot_NN.style."
-          )
-          return nil
-        end
-        path = slot_path(n)
-        unless File.exist?(path)
-          ::UI.messagebox("File slot mancante: #{path}")
-          return nil
-        end
-
-        name = slot_name(n)
 
         # Snapshot rendering options prima di toccare nulla.
         ro = m.rendering_options
@@ -157,15 +135,16 @@ module SceneManagerPlus
 
         m.start_operation('SM+ New style from viewport', true)
         begin
-          m.styles.add_style(path, false)
-          loaded = m.styles.find { |s| s.name == name }
+          loaded = import_template(m)
           unless loaded
             m.abort_operation
-            warn "[SM+] allocate_new_slot_from_viewport: add_style non ha aggiunto '#{name}'"
             return nil
           end
+          loaded.name = unique_style_name(
+            name.to_s.strip.empty? ? DEFAULT_NEW_NAME : name
+          )
 
-          # Switching active style: scrive le RO "template" dello slot su
+          # Switching active style: scrive le RO del template su
           # model.rendering_options (droppando dirty edit precedenti).
           m.styles.selected_style = loaded
 
@@ -180,26 +159,24 @@ module SceneManagerPlus
             end
           end
 
-          # Fix orizzonte nero del template slot (vedi normalize_horizon!).
+          # Fix orizzonte nero del template (vedi normalize_horizon!).
           normalize_horizon!(ro)
 
-          # Committa: lo slot 'name' ora contiene esattamente la vista
+          # Committa: il nuovo stile ora contiene esattamente la vista
           # catturata. È persistente sullo stile, non più "dirty".
           m.styles.update_selected_style
-
-          set_nickname(name, nickname) if nickname && !nickname.to_s.strip.empty?
 
           m.commit_operation
           loaded
         rescue => e
           m.abort_operation
-          warn "[SM+] allocate_new_slot_from_viewport: #{e.class}: #{e.message}"
+          warn "[SM+] create_style_from_viewport: #{e.class}: #{e.message}"
           warn e.backtrace.first(3).join("\n")
           nil
         end
       end
 
-      # Come allocate_new_slot_from_viewport ma applica uno snapshot di
+      # Come create_style_from_viewport ma applica uno snapshot di
       # rendering options ARBITRARIO invece di catturare il viewport corrente.
       # Usato dal paste cross-file (Core::Clipboard): lo snapshot RO arriva
       # dal clipboard.json del file sorgente, con i colori serializzati come
@@ -207,60 +184,44 @@ module SceneManagerPlus
       #
       # ro_hash: { 'BackgroundColor' => '#ffffff', 'EdgeColorMode' => 1, ... }
       #   I valori colore sono hex string; vengono convertiti in Sketchup::Color
-      #   inferendo il tipo dalla RO corrente dello slot template (se la chiave
-      #   è un colore nello slot, la stringa hex viene promossa a Color).
-      # nickname: stringa friendly opzionale (validazione unicità a monte).
+      #   inferendo il tipo dalla RO corrente del template (se la chiave è un
+      #   colore nel template, la stringa hex viene promossa a Color).
+      # name: nome desiderato per lo stile (reso unico automaticamente).
       #
-      # Ritorna il Sketchup::Style allocato o nil (pool esaurito / errore).
-      def allocate_new_slot_from_ro_hash(ro_hash, nickname: nil)
+      # Ritorna il Sketchup::Style creato o nil (errore).
+      def create_style_from_ro_hash(ro_hash, name: nil)
         m = model
         return nil unless m
         ro_hash ||= {}
-        n = next_free_slot_index(m)
-        unless n
-          ::UI.messagebox(
-            "Pool di stili esaurito (#{MAX_SLOT_INDEX} slot occupati).\n\n" \
-            "Per estendere il pool: rilancia tools/generate-slot-styles.rb\n" \
-            "su una postazione dev aumentando NUM_SLOTS, poi commit dei\n" \
-            "nuovi assets/styles/slot_NN.style."
-          )
-          return nil
-        end
-        path = slot_path(n)
-        unless File.exist?(path)
-          ::UI.messagebox("File slot mancante: #{path}")
-          return nil
-        end
-        name = slot_name(n)
 
         m.start_operation('SM+ New style from snapshot', true)
         begin
-          m.styles.add_style(path, false)
-          loaded = m.styles.find { |s| s.name == name }
+          loaded = import_template(m)
           unless loaded
             m.abort_operation
-            warn "[SM+] allocate_new_slot_from_ro_hash: add_style non ha aggiunto '#{name}'"
             return nil
           end
+          loaded.name = unique_style_name(
+            name.to_s.strip.empty? ? DEFAULT_NEW_NAME : name
+          )
 
-          # Attiva lo slot: model.rendering_options ora riflette il template.
+          # Attiva lo stile: model.rendering_options ora riflette il template.
           m.styles.selected_style = loaded
           ro = m.rendering_options
 
           # NB: niente normalize_horizon! qui. Il paste deve riprodurre
           # FEDELMENTE l'orizzonte sorgente (alpha preservato dal clipboard);
           # normalizzarlo a bianco falserebbe il transfer. normalize_horizon!
-          # resta solo in allocate_new_slot_from_viewport ("+ New style").
+          # resta solo in create_style_from_viewport ("+ New style").
           apply_ro_snapshot(ro, ro_hash)
 
           m.styles.update_selected_style
-          set_nickname(name, nickname) if nickname && !nickname.to_s.strip.empty?
 
           m.commit_operation
           loaded
         rescue => e
           m.abort_operation
-          warn "[SM+] allocate_new_slot_from_ro_hash: #{e.class}: #{e.message}"
+          warn "[SM+] create_style_from_ro_hash: #{e.class}: #{e.message}"
           warn e.backtrace.first(3).join("\n")
           nil
         end
@@ -338,7 +299,202 @@ module SceneManagerPlus
         format('#%02x%02x%02x%02x', color.red, color.green, color.blue, a)
       end
 
-      # ── Nickname API ──────────────────────────────────────────────────
+      # ── Nomi degli stili (nativi) ─────────────────────────────────────
+      # `Sketchup::Style#name=` funziona e persiste nel .skp. Il legame
+      # scena→stile è per riferimento, quindi rinominare NON stacca le scene
+      # (verificato anche dopo save + rilettura da disco). Rinominare non
+      # sporca lo stile (`active_style_changed` resta false).
+
+      def find_style(name)
+        m = model
+        return nil unless m && m.respond_to?(:styles) && m.styles && name
+        m.styles.find { |s| s.name.to_s == name.to_s }
+      rescue
+        nil
+      end
+
+      # True se `name` è già il nome nativo di uno stile diverso da `except`.
+      # Case-sensitive come SU. Serve a impedire i duplicati che SU accetta in
+      # sessione ma poi rinomina di nascosto al salvataggio.
+      def style_name_taken?(name, except: nil)
+        target = name.to_s.strip
+        return false if target.empty?
+        m = model
+        return false unless m && m.respond_to?(:styles) && m.styles
+        m.styles.any? do |s|
+          sname = s.name.to_s
+          next false if except && sname == except.to_s
+          sname == target
+        end
+      end
+
+      # Rende univoco un nome aggiungendo " 2", " 3", ... Non tocca il nome se
+      # è già libero.
+      def unique_style_name(base, except: nil)
+        b = base.to_s.strip
+        b = DEFAULT_NEW_NAME if b.empty?
+        return b unless style_name_taken?(b, except: except)
+        i = 2
+        i += 1 while style_name_taken?("#{b} #{i}", except: except)
+        "#{b} #{i}"
+      end
+
+      # Rinomina uno stile e sposta con lui i metadata del plugin chiavati per
+      # nome (badge color). Cancella anche l'eventuale nickname legacy: da qui
+      # in poi la verità è il nome nativo, non l'etichetta.
+      #
+      # Ritorna true se rinominato, false se il nome è già usato da un altro
+      # stile (il caller mostra il messaggio).
+      def rename_style(style_name, new_name)
+        st = find_style(style_name)
+        return false unless st
+        old = st.name.to_s
+        want = new_name.to_s.strip
+        return false if want.empty?
+        return true if want == old
+        return false if style_name_taken?(want, except: old)
+        m = model
+        m.start_operation('SM+ Rename style', true)
+        begin
+          st.name = want
+          rekey_metadata(old, want)
+          m.commit_operation
+          true
+        rescue => e
+          m.abort_operation
+          warn "[SM+] rename_style: #{e.class}: #{e.message}"
+          false
+        end
+      end
+
+      # Sposta badge color + nickname legacy dalla vecchia chiave alla nuova.
+      # Il nickname NON viene ricopiato: dopo un rename esplicito il nome
+      # nativo è il nome, e tenere l'etichetta sopra lo maschererebbe.
+      def rekey_metadata(old_name, new_name)
+        col = get_color(old_name)
+        remove_color_attr(old_name)
+        set_color(new_name, col) if col
+        remove_nickname_attr(old_name)
+        remove_nickname_attr(new_name)
+      end
+
+      # `Sketchup::Style#description=` esiste e persiste (verificato).
+      def set_description(style_name, text)
+        st = find_style(style_name)
+        return false unless st
+        m = model
+        m.start_operation('SM+ Style description', true)
+        begin
+          st.description = text.to_s
+          m.commit_operation
+          true
+        rescue => e
+          m.abort_operation
+          warn "[SM+] set_description: #{e.class}: #{e.message}"
+          false
+        end
+      end
+
+      def get_description(style_name)
+        st = find_style(style_name)
+        st ? st.description.to_s : nil
+      rescue
+        nil
+      end
+
+      # UI helper: prompt per un nome stile con retry su duplicato. Ritorna
+      # una stringa non vuota, oppure :aborted se l'utente annulla.
+      def prompt_style_name_loop(title: 'Scene Manager+', label: 'Style name:', default: nil)
+        val = (default.to_s.strip.empty? ? DEFAULT_NEW_NAME : default.to_s)
+        loop do
+          res = ::UI.inputbox([label], [val], title)
+          return :aborted if res == false
+          name = res[0].to_s.strip
+          if name.empty?
+            ::UI.messagebox('Please enter a name for the style.')
+            val = DEFAULT_NEW_NAME
+            next
+          end
+          if style_name_taken?(name)
+            ::UI.messagebox(
+              "A style named '#{name}' already exists.\n" \
+              "Please choose a different name."
+            )
+            val = name
+            next
+          end
+          return name
+        end
+      end
+
+      # ── Migrazione dei file legacy ────────────────────────────────────
+      # I file lavorati prima del 2026-08 hanno stili "SM+ Slot NN" con il
+      # nome leggibile parcheggiato nel dict dei nickname. Qui il nickname
+      # diventa il nome nativo vero, così anche Window → Styles di SketchUp
+      # mostra finalmente quello che l'utente vede nel plugin.
+      # Innescata da un bottone in Settings (mai in automatico: rinominare
+      # stili dentro file già consegnati è una decisione dell'utente).
+
+      # [{ native:, nick:, target: }, ...] per gli stili rinominabili.
+      def legacy_nickname_candidates
+        m = model
+        return [] unless m && m.respond_to?(:styles) && m.styles
+        d = m.attribute_dictionary(NICKNAMES_DICT, false)
+        return [] unless d
+        out = []
+        m.styles.each do |s|
+          native = s.name.to_s
+          nick   = d[native].to_s.strip
+          next if nick.empty? || nick == native
+          out << { native: native, nick: nick }
+        end
+        out
+      rescue => e
+        warn "[SM+] legacy_nickname_candidates: #{e.class}: #{e.message}"
+        []
+      end
+
+      # Applica la migrazione. Ritorna { renamed: [[old, new], ...],
+      # skipped: [[old, nick, reason], ...] }.
+      def migrate_legacy_nicknames!
+        renamed = []
+        skipped = []
+        m = model
+        return { renamed: renamed, skipped: skipped } unless m
+        cands = legacy_nickname_candidates
+        return { renamed: renamed, skipped: skipped } if cands.empty?
+        # Un'unica operazione: rekey_metadata scrive attributi di modello, e
+        # sui file con AttributeObserver di plugin terzi ogni write costa ~5s
+        # (vedi CLAUDE.md, sezione Performance). disable_ui evita i refresh
+        # sincroni degli inspector tra una scrittura e l'altra.
+        m.start_operation('SM+ Migrate style names', true)
+        begin
+          cands.each do |h|
+            st = find_style(h[:native])
+            unless st
+              skipped << [h[:native], h[:nick], 'style not found']
+              next
+            end
+            # Il nickname era garantito unico tra i display_name, ma può
+            # collidere con il nome nativo di un altro stile mai nicknameato.
+            target = unique_style_name(h[:nick], except: h[:native])
+            begin
+              st.name = target
+              rekey_metadata(h[:native], target)
+              renamed << [h[:native], target]
+            rescue => e
+              skipped << [h[:native], h[:nick], "#{e.class}: #{e.message}"]
+            end
+          end
+          m.commit_operation
+        rescue => e
+          m.abort_operation
+          warn "[SM+] migrate_legacy_nicknames!: #{e.class}: #{e.message}"
+        end
+        { renamed: renamed, skipped: skipped }
+      end
+
+      # ── Nickname API (legacy) ─────────────────────────────────────────
 
       def get_nickname(style_name)
         m = model
@@ -458,29 +614,6 @@ module SceneManagerPlus
         m.styles.reject { |s| used_names.include?(s.name.to_s) }
                 .map { |s| { name: s.name.to_s, display_name: display_name(s.name.to_s) } }
                 .sort_by { |h| h[:display_name].downcase }
-      end
-
-      # UI helper: prompt utente per nickname con retry su duplicato. Ritorna:
-      #   - una stringa (anche vuota = "no nickname")
-      #   - :aborted se l'utente cancella il dialog
-      # Usato da "+ New style" (picker), "Save as new" (dirty dialog branches).
-      def prompt_nickname_loop(title: 'Scene Manager+', label: 'Nickname:')
-        default = ''
-        loop do
-          res = ::UI.inputbox([label], [default], title)
-          return :aborted if res == false
-          nick = res[0].to_s.strip
-          return nick if nick.empty?
-          if display_name_taken?(nick)
-            ::UI.messagebox(
-              "Nickname '#{nick}' è già usato da un altro stile.\n" \
-              "Scegli un altro nome."
-            )
-            default = nick
-            next
-          end
-          return nick
-        end
       end
 
       # Purge degli unused via styles.purge_unused, + cleanup dei nickname

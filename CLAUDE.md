@@ -79,7 +79,8 @@ scene_manager_plus.rb               # loader, registra l'extension
 scene_manager_plus/
 ├── main.rb                         # entry point: menu + toolbar + comando
 ├── assets/default_logo.png         # logo bundled per watermark
-├── assets/styles/                  # pool slot_NN.style bundled (vedi sez. "Style pool + nickname")
+├── assets/styles/_template.style   # UNICO template per creare stili nuovi
+│                                   # (vedi sez. "Stili nativi: creazione + rinomina")
 ├── assets/titleblock/              # asset bundlati per il cartiglio
 │   ├── company.txt                 # 4 righe dati aziendali
 │   └── logo.jpg                    # logo aziendale per il cartiglio
@@ -1020,19 +1021,71 @@ rimisurato isolando le due ipotesi. La regola del diff **resta valida** per
 un'altra ragione, quella sì verificata: sui modelli con AttributeObserver di
 plugin terzi ogni write costa ~5s.
 
-### Crash pattern: `page.update(STYLE|RO)` su scena MP
+### RISOLTO (2026-08-01): cambiare stile a una scena MP si può — era lo stesso null-deref
 
-`SceneModel.assign_style` (e di riflesso "+ New style…") su scena MP
-crashava SU. Causa: `page.update` con bit STYLE+RO sovrascrive lo stile
-MP interno (background foto) → corruzione → splat. Anche se non crashasse,
-sostituire lo stile MP con uno normale toglie la foto di sfondo, che è
-l'opposto del comportamento atteso.
+**Storia**: `SceneModel.assign_style` (e di riflesso "+ New style…") era
+**vietato** sulle scene MP, con questa motivazione agli atti: *"`page.update`
+con bit STYLE+RO sovrascrive lo stile MP interno (background foto) →
+corruzione → splat; e comunque sostituire lo stile MP toglie la foto"*.
+Il click destro sul badge lettera deviava sul pannello Styles nativo.
 
-**Fix applicato**: guard in `SceneModel.assign_style` che usa `matchphoto?(p)`
-e mostra messagebox + abort. Aggiunta anche guard early in `sm_style_new`
-(`ui/dialog.rb`): senza, `allocate_new_slot_from_viewport` avrebbe già
-allocato uno slot del pool (con le RO MP catturate) prima del rifiuto di
-`assign_style` → slot orfano nel pool e RO inquinate.
+**Rimisurato**, un passo per volta, con **confronto di render** (non leggendo
+proprietà): scena MP reale su 19.3.253, `styles.selected_style = altro` →
+`page.update(8|2)` → uscita e rientro nella scena → `save` + rilettura da
+disco.
+
+| Passo | Esito |
+|---|---|
+| cambio stile attivo stando sulla scena MP | nessun crash, **foto presente** |
+| `page.update(STYLE\|RO)` per legare la scena | nessun crash |
+| esco e rientro (dove arrivava il BugSplat) | nessun crash, foto e `is_2d?` intatti |
+| rimetto lo stile MP originale | render **identico** alla partenza |
+| salvo, riapro da disco | foto presente, stile nuovo mantenuto |
+
+**Due affermazioni della vecchia motivazione erano false**:
+
+1. **La foto NON è agganciata allo stile.** Cambiando stile la foto resta;
+   cambia solo come è disegnata la geometria. Coerente col fatto, già noto,
+   che **nessuna delle 61 rendering options ha a che vedere con la foto**:
+   se la foto non è nelle RO, uno stile non può portarsela via.
+2. **Il crash non era del Match Photo.** È lo stesso null-deref di "Style and
+   Fog": quelle scene hanno `page.style == nil` (le MP di plugin terzi
+   nascono così) e accendere `use_style` su una pagina senza stile salvato
+   mette `selected_style` a `nil`. Le scene MP di questo test uno stile ce
+   l'avevano (`[Architectural Design Style]1`, il duplicato che SU crea da
+   sé) e infatti non è successo nulla.
+
+**Fix applicato**:
+- `assign_style`: il divieto è sostituito da `confirm_mp_style_change` —
+  `UI.messagebox` OK/Cancel mostrato **una sola volta per macchina**
+  (`Sketchup.write_default('SceneManagerPlus', 'mp_style_change_ack', true)`;
+  rimettere a `false` per rivederlo). Serve solo perché l'operazione cambia
+  visibilmente il disegno e può partire da un clic destro di striscio.
+- `assign_style` chiama `capture_style!(p) if style_missing?(p)` **con la
+  pagina già attiva**, prima di toccare `selected_style`. È il vero
+  discrimine, e copre le scene MP di `3dg_photomatch`.
+- `sm_style_new` (`ui/dialog.rb`) chiede la conferma **prima** di creare lo
+  stile: `assign_style` la chiederebbe da sé, ma a stile già creato, e un
+  annullamento lascerebbe uno stile orfano nel modello.
+- `app.js`: rimossa la deviazione `is_matchphoto → openNativeStylesPanel` nel
+  `contextmenu` del badge. Il callback `sm_open_native_styles` e
+  `SMBridge.openNativeStylesPanel` restano (non più chiamati da lì).
+
+**NON verificato** (da fare quando capita sotto mano un file adatto): il ramo
+`capture_style!(p) if style_missing?(p)` dentro `assign_style` è stato scritto
+per le scene MP di `3dg_photomatch` (`page.style == nil`) ma **collaudato solo
+su scene MP che uno stile ce l'avevano già** — nel file di prova non c'erano
+scene senza stile. Il ramo è difensivo e replica una sequenza già verificata
+altrove (il fix "Style and Fog"), ma non è stato esercitato in quella
+condizione. Se un domani riappare un BugSplat assegnando uno stile a una scena
+MP, **è il primo posto da guardare**.
+
+⚠️ **Terza volta che la stessa diagnosi sbagliata viene smontata** (dopo
+`send_action` e "Style and Fog"). Il pattern è sempre lo stesso: un crash
+osservato una volta su una scena MP, promosso a proprietà del Match Photo,
+e da lì mai più rimesso in discussione. Se in questo file trovi un'altra
+frase del tipo "su Match Photo non si può X", **prima di costruirci sopra un
+ripiego, misura quale stato il crash trova** — di solito è `page.style`.
 
 ### Letter badge "?" = scena MP (sintomo diagnostico)
 
@@ -1153,13 +1206,106 @@ serve salvare e rileggere da disco. Nota però che stiamo pilotando **lo stesso
 identico controllo** dello slider nativo, quindi il comportamento è per
 costruzione quello di SketchUp.
 
-## Style pool + nickname per-modello (Fase 1A — "+ New style…")
+## Stili nativi: creazione + rinomina (2026-08-01 — sostituisce il pool)
 
-**Problema risolto**: SU 2019 Ruby API non permette di:
+> ⚠️ **Il pool dei 25 slot e i nickname NON esistono più.** Le sezioni
+> "Fase 1A…1E" più sotto sono conservate come storia del perché il codice
+> ha avuto quella forma, ma descrivono API rimosse
+> (`allocate_new_slot*`, `prompt_nickname_loop`, `next_free_slot_index`).
+> Il riferimento attuale è questa sezione.
+
+### Cosa era sbagliato
+
+Tutta l'architettura precedente poggiava su "`Sketchup::Style#name=` non
+esiste in SU 2019". **È falso.** `name=` e `description=` esistono,
+funzionano, e **persistono nel `.skp` salvato e riletto da disco**
+(verificato 2026-08-01 su 19.3.253 — vedi tabella sotto). Da lì:
+
+- **un solo template** (`assets/styles/_template.style`) importato N volte e
+  rinominato subito dopo ogni import ⇒ stili illimitati con nomi arbitrari.
+  I 25 `slot_NN.style` sono stati cancellati;
+- **i nickname erano una finzione resa necessaria dal nome non scrivibile**.
+  Ora il nome nativo è il nome: Window → Styles di SketchUp mostra finalmente
+  la stessa cosa che mostra il plugin.
+
+### Fatti verificati (19.3.253, 2026-08-01)
+
+| Verifica | Esito |
+|---|---|
+| `style.name=` / `description=` dopo save + rilettura da disco | ✅ persistono |
+| Legame scena→stile dopo rename | ✅ regge — è **per riferimento**, non per nome (come le istanze di un componente rinominato). Vale anche dopo reload |
+| Rename sporca lo stile | ✅ no, `active_style_changed` resta `false` |
+| `add_style` dello stesso file N volte | ✅ crea N stili distinti |
+| `Style#persistent_id` | ❌ **stub, ritorna 0** (come `Material`) — inutilizzabile come chiave |
+| Identità wrapper `Style` (`==` / `object_id`) | ✅ stabile in sessione |
+
+### ⚠️ Unicità dei nomi: la trappola che obbliga a validare
+
+SU **non valida l'unicità in sessione** (due stili omonimi convivono
+tranquillamente), ma **al salvataggio ne rinomina uno in silenzio** con un
+suffisso numerico (`"Foo"` + `"Foo"` → `"Foo"` + `"Foo1"`), e **non è
+deterministico quale** dei due lo prenda. Siccome i metadata del plugin
+(`SMP_style_colors`) sono chiavati per nome, un duplicato lascerebbe appunti
+orfani **dopo la riapertura del file**, quando la causa non è più visibile.
+
+Quindi l'unicità la impone il plugin, a monte: `style_name_taken?`,
+`unique_style_name` (suffisso " 2", " 3"…), `rename_style` che rifiuta i
+duplicati. Non è una rifinitura: è il requisito che tiene in piedi il resto.
+
+### API `Core::Styles` attuale
+
+| Funzione | Note |
+|---|---|
+| `import_template(m)` | Importa `_template.style` e ritorna lo Style nuovo. Identificazione **per identità wrapper** (`before`/`after` diff con `==`), NON per nome: il nome embedded può già esistere nel modello (file legacy) e un diff per nome fallirebbe in silenzio |
+| `create_style(name:)` | Stile nuovo con le RO del template |
+| `create_style_from_viewport(name:)` | Cattura le RO correnti (dirty edit inclusi) — usato da "+ New style…" e dal ramo "Save as new" del dirty-style dialog |
+| `create_style_from_ro_hash(ro, name:)` | Snapshot RO arbitrario — usato dal paste cross-file |
+| `rename_style(old, new)` | Rinomina + `rekey_metadata`. `false` se il nome è occupato |
+| `rekey_metadata(old, new)` | Sposta il badge color; **cancella** il nickname legacy (dopo un rename esplicito il nome nativo è la verità) |
+| `set_description` / `get_description` | Campo nativo SU |
+| `prompt_style_name_loop(title:, label:, default:)` | Sostituisce `prompt_nickname_loop`. Ritorna stringa non vuota o `:aborted` |
+| `legacy_nickname_candidates` / `migrate_legacy_nicknames!` | Migrazione (sotto) |
+
+`display_name(name)` **resta** e rispetta ancora il nickname: serve ai file
+legacy non ancora migrati, che devono continuare a funzionare come prima.
+
+### Migrazione dei file legacy — bottone, mai automatica
+
+Settings → Styles → **"Update legacy style names…"**
+(`sm_settings_migrate_style_names`): per ogni stile con nickname, il nickname
+diventa il nome nativo, il badge color lo segue, la entry del dict sparisce.
+Collisioni risolte con `unique_style_name`. Tutto in **una sola
+`start_operation`** (i write di attributi costano ~5s l'uno sui modelli con
+AttributeObserver di plugin terzi).
+
+**Scelta esplicita dell'utente (2026-08-01): mai in automatico all'apertura.**
+Rinominare stili dentro file già consegnati o condivisi (vedi la nota su
+Version Control X) è una decisione sua, non un effetto collaterale.
+
+Migrazione "opportunistica" gratuita: nel Mini Style Manager il campo **Name**
+mostra il `display_name`, quindi su un file legacy mostra il nickname —
+committarlo rinomina lo stile nativo e butta via il nickname. Un singolo stile
+si migra da sé senza che l'utente debba saperlo.
+
+⚠️ **Dopo un rename, `StyleDialog` aggiorna `@style_name`**: senza,
+`select_style!` / `apply_changes` dei callback successivi cercherebbero un
+nome che non esiste più.
+
+### Storia (obsoleta, per contesto)
+
+Le sottosezioni "Fase 1A…1E" seguenti descrivono il pool. Conservate perché
+spiegano perché esistevano `SMP_style_nicks`, la validazione sui display_name
+e il messagebox "pool esaurito" — non perché siano ancora vere.
+
+## Style pool + nickname per-modello (Fase 1A — "+ New style…") — RIMOSSO
+
+**Problema che si credeva irrisolvibile**: SU 2019 Ruby API non permette di:
 - creare programmaticamente un nuovo stile da zero (`Styles#add_style`
-  accetta solo `.style` file da disco),
-- rinominare uno stile esistente (`Sketchup::Style#name=` non esiste),
-- clonare uno stile (no `Style#save_as`, no `Style#duplicate`).
+  accetta solo `.style` file da disco) — ✅ vero,
+- rinominare uno stile esistente (`Sketchup::Style#name=` non esiste) —
+  ❌ **FALSO**, vedi sezione sopra,
+- clonare uno stile (no `Style#save_as`, no `Style#duplicate`) — ✅ vero,
+  ma irrilevante una volta che si può rinominare.
 
 **Soluzione architetturale**: due meccanismi disaccoppiati che insieme
 emulano la creazione di stili nuovi con nomi arbitrari.
@@ -1336,26 +1482,10 @@ Nessuno strettamente bloccante. Possibili miglioramenti futuri:
   multiplier"). Da indagare se diventa fastidioso.
 - ~~**WM_COMMAND Win32 per Match Photo**~~: **risolto 2026-07-31**, e
   senza Win32 — bastava `send_action`. Vedi sezione "Match Photo".
-- ⚠️ **`Sketchup::Style#name=` e `#description=` FUNZIONANO in SU 2019**
-  — non sollevano, scrivono davvero (verificato 2026-08-01 su 19.3.253
-  con rename + ripristino): `style.name` rilegge il nuovo valore,
-  `model.styles.map(&:name)` lo mostra, `model.styles["nuovo nome"]` lo
-  trova, e **rinominare NON sporca lo stile** (`active_style_changed`
-  resta false). Questo file afferma il contrario in più punti ed è la
-  premessa su cui è costruito **tutto il pool dei 25 slot**: con
-  `add_style(template, false)` + `name=` basterebbe **un solo**
-  `_template.style` riusato all'infinito, e i nickname diventerebbero
-  superflui. Due cose però non lo rendono uno swap banale:
-  1. **SU non valida l'unicità**: rinominare uno stile col nome esatto di
-     un altro è accettato in silenzio (due stili omonimi in lista, nessun
-     suffisso automatico). La validazione oggi sui nickname andrebbe
-     spostata sui nomi reali, perché tutto ciò che è chiavato per nome
-     (`SMP_style_nicks`, `SMP_style_colors`, `styles_map`, `assign_style`,
-     `scenes_using_style`, la clipboard) diventerebbe ambiguo.
-  2. **Persistenza su disco non verificata**: serve salvare e rileggere
-     davvero il `.skp` — è il controllo che ha fatto la differenza sul fix
-     "Style and Fog". Farlo PRIMA di toccare il pool.
-  **Prima di rimettere mano al pool, testare questi due setter.**
+- ~~**`Sketchup::Style#name=` e `#description=`**~~: **chiuso 2026-08-01.**
+  Entrambe le incognite verificate (persistenza su disco ✅, unicità: SU non
+  valida in sessione ma **rinomina in silenzio al salvataggio** ⚠️), pool e
+  nickname rimossi. Vedi "Stili nativi: creazione + rinomina".
 
 ## Performance su modelli con AttributeObserver di plugin terzi (2026-05)
 
@@ -2446,6 +2576,15 @@ Trappole ambiente (dev machine):
 
 - Lavoro condiviso tra postazioni → utente continuerà da un'altra macchina.
 - Lingua di interazione con l'utente: **italiano**.
+- **Stile dei report all'utente** (richiesta esplicita, 2026-08-01): l'utente è
+  un esperto di grafica 3D e conosce SketchUp a fondo, ma non è un
+  programmatore (zero Ruby). Quando gli si riporta cosa è stato fatto o gli si
+  propone un piano, spiegare in termini del SUO mondo: scene, stili, pannelli,
+  file .skp, componenti — con analogie da SketchUp/3D dove aiutano. Niente
+  gergo da codice (API, hash, callback, refactor...) senza una traduzione
+  immediata in linguaggio comune. I dettagli tecnici (nomi di funzioni, file,
+  costanti) vanno in coda o omessi, non nel corpo della spiegazione. Questo
+  vale per i riepiloghi, non per i commenti nel codice o per questo file.
 - L'utente preferisce sviluppo **per fasi con verifica intermedia**, non big-bang.
 - Niente preview scene nel pannello (esplicita richiesta per performance —
   ma esistono thumbnails inline come opt-in).

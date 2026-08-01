@@ -424,11 +424,21 @@
     </section>
 
     <section class="group" id="group-styles">
-      <h2>Style pool</h2>
+      <h2>Styles</h2>
 
       <div class="row">
         <small class="muted">
-          SketchUp 2019 Ruby API does not expose a per-style delete method. The button below uses SketchUp's native <code>styles.purge_unused</code>, which removes <strong>all</strong> styles not referenced by any scene — including non-SM+ styles you may have created but not yet assigned. A confirmation dialog will list every style about to be deleted.
+          <strong>Legacy style names.</strong> Files worked on before August 2026 contain styles named <code>SM+ Slot NN</code>, with the readable name stored as a plugin-only nickname &mdash; SketchUp's own Styles panel still shows <code>SM+ Slot NN</code>. The button below renames those styles for real, so both the plugin and <code>Window &rarr; Styles</code> show the same name. Scenes keep their style (the link survives renaming). This changes style names inside the current file, so run it when you are ready to update that file.
+        </small>
+      </div>
+
+      <div class="actions">
+        <button type="button" id="btn-migrate-style-names">Update legacy style names…</button>
+      </div>
+
+      <div class="row">
+        <small class="muted">
+          SketchUp 2019 Ruby API does not expose a per-style delete method. The button below uses SketchUp's native <code>styles.purge_unused</code>, which removes <strong>all</strong> styles not referenced by any scene &mdash; including non-SM+ styles you may have created but not yet assigned. A confirmation dialog will list every style about to be deleted.
         </small>
       </div>
 

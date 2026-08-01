@@ -7,9 +7,13 @@ module SceneManagerPlus
     #
     # Scope: gli edit modificano lo stile (styles.update_selected_style), quindi
     # tutte le scene che usano quello stile sono interessate. Per modificare
-    # solo una scena, l'utente deve prima duplicare lo stile via Window → Styles
-    # di SketchUp. Limite dell'API Ruby SU 2019: non c'è add_style/clone da
-    # memoria né style.name= per rinominare programmaticamente un duplicato.
+    # solo una scena, l'utente crea un nuovo stile ("+ New style…" nel picker
+    # del badge lettera) e glielo assegna.
+    #
+    # Nome e descrizione sono editabili: `Sketchup::Style#name=` e
+    # `#description=` funzionano in SU 2019 e persistono nel .skp (verificato
+    # 2026-08-01). Il rename passa da Core::Styles.rename_style, che sposta con
+    # sé i metadata chiavati per nome e rifiuta i duplicati.
     #
     # Settings esposti (chiavi rendering_options con lookup difensivo):
     #   FaceColorMode (0=All same, 1=By material, 2=By axis)
@@ -157,25 +161,44 @@ module SceneManagerPlus
           Dialog.push_state if defined?(Dialog)
         end
 
-        # Rinomina (nickname) lo stile correntemente in edit. Vuoto = clear.
-        # Il nickname vive solo come attributo di modello (vedi Core::Styles).
-        # Se conflict (display_name già usato da altro stile), set_nickname
-        # ritorna false → messagebox di avviso e push_state rimette il valore
-        # precedente nell'input (il JS rispetta setIfNotFocused).
-        dlg.add_action_callback('sm_style_set_nickname') do |_ctx, payload|
+        # Rinomina lo stile correntemente in edit (nome NATIVO: si vede anche
+        # in Window → Styles di SketchUp).
+        #
+        # Su un file legacy non ancora migrato l'input mostra il nickname:
+        # committarlo rinomina lo stile nativo e butta via il nickname, cioè
+        # migra quel singolo stile senza che l'utente debba saperlo.
+        #
+        # Nome vuoto o già usato da un altro stile → rifiutato con messagebox
+        # (SU accetterebbe il duplicato in sessione, salvo poi rinominarlo di
+        # nascosto al salvataggio — vedi Core::Styles). push_state rimette il
+        # valore precedente nell'input (il JS rispetta setIfNotFocused).
+        dlg.add_action_callback('sm_style_set_name') do |_ctx, payload|
           data = parse(payload)
-          nick = data['nickname'].to_s
-          ok = Core::Styles.set_nickname(@style_name, nick)
-          unless ok
+          want = data['name'].to_s.strip
+          if want.empty?
+            ::UI.messagebox('The style name cannot be empty.')
+          elsif Core::Styles.rename_style(@style_name, want)
+            # Il target di ogni callback successivo è cambiato: senza questo,
+            # select_style!/apply_changes cercherebbero un nome che non esiste più.
+            @style_name = want
+          else
             ::UI.messagebox(
-              "Nickname '#{nick.strip}' is already used by another style.\n" \
+              "A style named '#{want}' already exists.\n" \
               "Please choose a different name."
             )
           end
           push_state
           # Refresh main dialog: lettere + tooltip + picker label dipendono dal
-          # display_name calcolato sul nickname.
+          # nome dello stile.
           Dialog.push_state if defined?(Dialog)
+        end
+
+        # Descrizione dello stile (campo nativo SU, visibile anche nel
+        # pannello Styles). Commit su blur/Enter, come il nome.
+        dlg.add_action_callback('sm_style_set_description') do |_ctx, payload|
+          data = parse(payload)
+          Core::Styles.set_description(@style_name, data['description'].to_s)
+          push_state
         end
 
         # Set/clear del colore del badge associato allo stile. Stringa vuota
@@ -246,7 +269,12 @@ module SceneManagerPlus
         is_mp = ctx ? Core::SceneModel.matchphoto?(ctx) : false
         state = {
           style_name:   @style_name,
+          # Valore mostrato nell'input "Name": sui file già migrati coincide
+          # con style_name; sui legacy è ancora il nickname, e committarlo
+          # rinomina lo stile nativo (vedi sm_style_set_name).
+          display_name: Core::Styles.display_name(@style_name),
           nickname:     Core::Styles.get_nickname(@style_name),
+          description:  Core::Styles.get_description(@style_name),
           badge_color:  Core::Styles.get_color(@style_name),
           scene_id:     @scene_id,
           scenes_count: using.size,

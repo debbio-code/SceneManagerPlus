@@ -136,6 +136,12 @@ module SceneManagerPlus
             out << {
               'key'               => style_key_by_name[sn],
               'native_name'       => sn,
+              # Nome che l'utente vede: sui file nuovi è il nome nativo, sui
+              # legacy non ancora migrati è il nickname. In paste diventa il
+              # nome vero dello stile creato.
+              'style_name'        => Core::Styles.display_name(sn),
+              # 'nickname' resta per i clipboard.json scritti da versioni
+              # precedenti (letto in fallback dal paste).
               'nickname'          => (Core::Styles.get_nickname(sn) || ''),
               'badge_color'       => (Core::Styles.get_color(sn) || ''),
               'rendering_options' => ro_snapshot
@@ -265,20 +271,25 @@ module SceneManagerPlus
         scenes = Array(doc['scenes'])
         styles = Array(doc['styles'])
 
-        # 1) Alloca uno slot per ogni stile sorgente (dedup per key).
-        #    Ogni allocate apre la propria operazione (come "+ New style").
+        # 1) Crea uno stile nativo per ogni stile sorgente (dedup per key).
+        #    Ogni create apre la propria operazione (come "+ New style").
         style_map = {}   # key → Sketchup::Style
         styles.each do |sh|
           key = sh['key'].to_s
-          nick = sh['nickname'].to_s.strip
-          # Validazione unicità nickname: se collide, fallback nome nativo.
-          use_nick = (!nick.empty? && !Core::Styles.display_name_taken?(nick)) ? nick : nil
-          st = Core::Styles.allocate_new_slot_from_ro_hash(
-            sh['rendering_options'] || {}, nickname: use_nick
+          # 'style_name' è la chiave corrente; 'nickname'/'native_name' sono
+          # il fallback per i clipboard.json scritti da versioni precedenti.
+          want = sh['style_name'].to_s.strip
+          want = sh['nickname'].to_s.strip    if want.empty?
+          want = sh['native_name'].to_s.strip if want.empty?
+          # create_style_from_ro_hash rende il nome unico da solo (suffisso
+          # numerico), quindi qui non serve validare: incollare due volte lo
+          # stesso stile dà "Vista notturna" e "Vista notturna 2".
+          st = Core::Styles.create_style_from_ro_hash(
+            sh['rendering_options'] || {}, name: want
           )
           unless st
-            # pool esaurito o errore → la primitiva ha già mostrato il messagebox
-            ::UI.messagebox("Paste aborted: could not allocate a style slot.")
+            # errore → la primitiva ha già mostrato il messagebox se serviva
+            ::UI.messagebox("Paste aborted: could not create a style.")
             return nil
           end
           bc = sh['badge_color'].to_s.strip

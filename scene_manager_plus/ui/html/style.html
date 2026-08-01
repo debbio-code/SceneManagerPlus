@@ -10,9 +10,13 @@
   <div id="app">
     <header class="hdr">
       <div class="hdr-title">
-        <span class="hdr-label">Nickname:</span>
-        <input type="text" id="style-nickname" class="hdr-nick-input" placeholder="(none — uses native name)" autocomplete="off" spellcheck="false">
-        <button id="btn-open-native" class="hdr-icon-btn" title="Open native SketchUp Styles panel (Window → Styles)">⧉</button>
+        <span class="hdr-label">Name:</span>
+        <input type="text" id="style-nickname" class="hdr-nick-input" placeholder="Style name" autocomplete="off" spellcheck="false" title="Renames the style in SketchUp itself (Window &rarr; Styles shows the same name)">
+        <button id="btn-open-native" class="hdr-icon-btn" title="Open native SketchUp Styles panel (Window &rarr; Styles)">⧉</button>
+      </div>
+      <div class="hdr-title">
+        <span class="hdr-label">Description:</span>
+        <input type="text" id="style-description" class="hdr-nick-input" placeholder="(none)" autocomplete="off" spellcheck="false" title="Style description, as shown in the native SketchUp Styles panel">
       </div>
       <div class="hdr-title hdr-badgecolor">
         <span class="hdr-label">Badge color:</span>

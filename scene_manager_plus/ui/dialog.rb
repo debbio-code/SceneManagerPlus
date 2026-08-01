@@ -319,39 +319,35 @@ module SceneManagerPlus
           ::UI.show_inspector('Styles')
         end
 
-        # "Nuovo stile" da picker right-click. Alloca lo slot successivo
-        # dal pool, prompt per nickname (skippabile, retry su duplicato),
-        # poi assegna lo stile alla scena di contesto.
+        # "Nuovo stile" da picker right-click. Chiede il nome (con retry su
+        # duplicato), crea lo stile nativo dalle rendering options correnti,
+        # poi lo assegna alla scena di contesto.
         dlg.add_action_callback('sm_style_new') do |_ctx, payload|
           data = parse(payload)
           scene_id = data['id']
-          # Match Photo guard: evita di allocare uno slot (che catturerebbe
-          # le RO MP, inclusa la foto di sfondo) per poi non poterlo
-          # assegnare. assign_style rifiuta comunque le MP scene, ma senza
-          # questo guard lo slot resterebbe orfano nel pool.
+          # Match Photo: la conferma va chiesta PRIMA di creare lo stile.
+          # assign_style la chiederebbe da sé, ma a stile già creato: un
+          # annullamento lascerebbe uno stile orfano nel modello. Confermando
+          # qui si scrive il flag, quindi assign_style poi non richiede nulla.
           scene_page = scene_id ? Core::SceneModel.find_by_id(scene_id) : nil
-          if scene_page && Core::SceneModel.matchphoto?(scene_page)
-            ::UI.messagebox(
-              "Scene '#{scene_page.name}' is a Match Photo scene.\n\n" \
-              "Cannot assign a custom style to a Match Photo scene."
-            )
+          if scene_page && Core::SceneModel.matchphoto?(scene_page) &&
+             !Core::SceneModel.confirm_mp_style_change(scene_page)
             next
           end
-          result = Core::Styles.prompt_nickname_loop(
-            title: 'Scene Manager+ — Nuovo stile',
-            label: 'Nickname (vuoto = usa nome nativo "Slot NN"):'
+          result = Core::Styles.prompt_style_name_loop(
+            title: 'Scene Manager+ — New style',
+            label: 'Style name:'
           )
           if result == :aborted
             puts "[SM+] sm_style_new: aborted by user"
           else
-            nickname = result.empty? ? nil : result
             # Variante from_viewport: il nuovo stile cattura le rendering
-            # options correnti (dirty edit inclusi). Senza questo lo slot
-            # manterrebbe le RO del template generator (Architectural Design
-            # Style), non quelle che l'utente vede nel viewport.
-            style = Core::Styles.allocate_new_slot_from_viewport(nickname: nickname)
+            # options correnti (dirty edit inclusi). Senza questo manterrebbe
+            # le RO del template bundled (Architectural Design Style), non
+            # quelle che l'utente vede nel viewport.
+            style = Core::Styles.create_style_from_viewport(name: result)
             if style
-              puts "[SM+] sm_style_new: allocated #{style.name.inspect} from viewport (nick=#{nickname.inspect})"
+              puts "[SM+] sm_style_new: created #{style.name.inspect} from viewport"
               Core::SceneModel.assign_style(scene_id, style.name) if scene_id
             end
           end

@@ -174,6 +174,23 @@ function Invoke-SUEval {
 }
 ```
 
+⚠️ **`Sketchup.open_file` chiamato dentro `eval_ruby` si pianta** (2026-08-01).
+L'eval gira nel message loop di SU e il caricamento di un file non può
+rientrarci: la chiamata non ritorna mai (osservato: >120s, socket muto, poi il
+file non risulta nemmeno aperto). Non è un problema del server MCP — è la
+stessa famiglia di `file_new`, che infatti è **accodato**. Fix: differire fuori
+dal callback,
+
+```ruby
+UI.start_timer(0.1, false) { Sketchup.open_file(path) }
+```
+
+e verificare in una chiamata **successiva** (servono alcuni secondi: un primo
+controllo a 4s può ancora vedere il modello vecchio e far concludere a torto
+che non abbia funzionato — stesso errore di misura di `send_action`).
+Utile per i test di persistenza, che richiedono `save` → modello nuovo →
+riapertura da disco.
+
 ⚠️ **`eval_ruby` gira sul modello aperto IN QUEL MOMENTO.** Un check "il modello
 e' vuoto, posso testarci sopra" fatto a inizio sessione **non vale piu'** dopo
 che l'utente ha aperto un file: SU riusa la stessa istanza e `Sketchup.active_model`
@@ -183,6 +200,32 @@ lasciata `nil` e non ripristinabile). **Regola: ri-leggere `model.path` / `title
 `pages.count` nello stesso turno, subito prima di ogni snippet che SCRIVE** — non
 fidarsi di una verifica precedente. Per i test distruttivi chiedere all'utente un
 modello nuovo (Ctrl+N) e verificarlo.
+
+### `Sketchup::Style`: name= e description= esistono (19.3.253, 2026-08-01)
+
+Contro quanto si è creduto per mesi (e contro parte della doc Trimble):
+
+- **`style.name = "..."` e `style.description = "..."` funzionano** e
+  **persistono nel `.skp`** salvato e riletto da disco.
+- **Rinominare non sporca lo stile**: `styles.active_style_changed` resta
+  `false`. Nessun `update_selected_style` necessario.
+- **Il legame `Page` → `Style` è per riferimento**: dopo un rename
+  `page.style.name` restituisce il nome nuovo, anche dopo save + reload.
+  Nessuna scena si stacca.
+- `styles.add_style(path, false)` sullo **stesso** file N volte crea N stili
+  distinti ⇒ con `name=` basta un solo template per creare stili illimitati.
+
+⚠️ **Unicità: SU non valida in sessione ma dedupa al salvataggio.** Due stili
+possono avere lo stesso nome mentre lavori; al salvataggio SU ne rinomina uno
+aggiungendo un suffisso numerico (`"Foo"` → `"Foo1"`), **senza avvisare e senza
+che sia prevedibile quale**. Qualsiasi metadata chiavato per nome dello stile
+va quindi protetto validando l'unicità **a monte**, nel plugin.
+
+⚠️ **`Style#persistent_id` è uno stub: ritorna 0** (come `Material`, cfr.
+sezione varianti). Per identificare uno stile appena aggiunto **non** usare né
+il pid né il nome (può collidere): fare il diff `before`/`after` di
+`model.styles.to_a` per **identità del wrapper** — `==` e `object_id` sui
+wrapper `Style` sono stabili per tutta la sessione (verificato).
 
 ### API layer/tag disponibili in SU 2019 (verificate 19.3.253, 2026-07-30)
 
