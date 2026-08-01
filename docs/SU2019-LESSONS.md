@@ -201,6 +201,47 @@ lasciata `nil` e non ripristinabile). **Regola: ri-leggere `model.path` / `title
 fidarsi di una verifica precedente. Per i test distruttivi chiedere all'utente un
 modello nuovo (Ctrl+N) e verificarlo.
 
+### Leggere il DOM di un HtmlDialog vivo da `eval_ruby` (2026-08-01)
+
+`UI::HtmlDialog#execute_script` **non restituisce valori** e in SU 2019 non
+esiste `get_element_value` (c'era sulle vecchie WebDialog). Quindi da Ruby non
+si può interrogare direttamente lo stato della pagina — il che rende difficile
+verificare che il JS di un dialog funzioni davvero.
+
+Trucco: far **rimbalzare** il risultato attraverso un callback già registrato
+che produce un effetto leggibile da Ruby. Nel Mini Style Manager si usa
+`sm_style_set_description`, che scrive nella descrizione dello stile:
+
+```ruby
+d = SceneManagerPlus::UI::StyleDialog.instance_variable_get(:@dialog)
+d.execute_script(<<-'JS')
+  var s = document.getElementById('style-pick');
+  sketchup.sm_style_set_description(JSON.stringify({ description:
+    'TEST SMS=' + (typeof window.SMS) + ' opts=' + (s ? s.options.length : 'MANCA') }));
+JS
+```
+
+poi, **in una chiamata `eval_ruby` successiva** (il callback è asincrono, serve
+~1-2s), si legge `Core::Styles.get_description(nome)`. Ricordarsi di
+salvare/ripristinare il valore usato come canale.
+
+`typeof window.SMS` nel payload vale come test di integrità: se l'IIFE ha un
+SyntaxError (vedi la trappola delle smart quotes) risulta `undefined` e il
+dialog è "morto" senza che CEF mostri alcun errore.
+
+Stesso schema per **simulare l'interazione utente** e verificare il giro
+completo fino a Ruby:
+
+```js
+s.selectedIndex = i;
+var ev; try { ev = new Event('change'); }
+catch (e) { ev = document.createEvent('HTMLEvents'); ev.initEvent('change', true, true); }
+s.dispatchEvent(ev);
+```
+
+Preferire questo al collaudo in un browser esterno quando il dialog dipende da
+`window.sketchup`: è la pagina vera, dentro CEF, con lo stato vero.
+
 ### `Sketchup::Style`: name= e description= esistono (19.3.253, 2026-08-01)
 
 Contro quanto si è creduto per mesi (e contro parte della doc Trimble):

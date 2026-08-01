@@ -230,11 +230,41 @@ window.SMS = (function () {
   // ═════════════════════════════════════════════════════════════════════
   // Style dialog principale
   // ═════════════════════════════════════════════════════════════════════
+  // Selettore stile dell'header. Le lettere sono le stesse della finestra
+  // principale (stessa fonte lato Ruby), cosi' A resta A ovunque.
+  function renderStylePicker(styles, current) {
+    var sel = $('style-pick');
+    if (!sel) return;
+    // Non ricostruire mentre l'utente ci sta dentro: un push_state a tendina
+    // aperta la chiuderebbe di colpo.
+    if (document.activeElement === sel) return;
+    sel.innerHTML = '';
+    var found = false;
+    styles.forEach(function (s) {
+      var o = document.createElement('option');
+      o.value = s.name;
+      o.textContent = (s.letter ? s.letter + '   ' : '') + (s.display_name || s.name);
+      if (s.name === current) { o.selected = true; found = true; }
+      sel.appendChild(o);
+    });
+    // Stile non elencato (scene Match Photo con stile interno, o nessuno
+    // stile): voce segnaposto, altrimenti il select mostrerebbe il primo
+    // della lista facendo credere che sia quello in uso.
+    if (!found) {
+      var ph = document.createElement('option');
+      ph.value = '';
+      ph.textContent = current || '(no style)';
+      ph.selected = true;
+      sel.insertBefore(ph, sel.firstChild);
+    }
+  }
+
   function setState(newState) {
     state = newState || state;
     if (!state.values) state.values = {};
     if (!state.scenes_list) state.scenes_list = [];
     var shown = state.display_name || state.style_name || '';
+    renderStylePicker(state.styles || [], state.style_name || '');
     $('style-name').textContent = state.style_name || '—';
     // La riga "Native:" ha senso solo sui file legacy non ancora migrati,
     // dove il campo Name mostra il nickname e il nome vero e' un altro.
@@ -586,6 +616,20 @@ window.SMS = (function () {
     var btnNative = $('btn-open-native');
     if (btnNative) {
       btnNative.addEventListener('click', function () { call('sm_style_open_native'); });
+    }
+    // Selettore stile: assegna alla scena di contesto e ci passa in edit.
+    var pickEl = $('style-pick');
+    if (pickEl) {
+      pickEl.addEventListener('change', function () {
+        var v = pickEl.value;
+        if (!v || v === (state.style_name || '')) return;
+        call('sm_style_pick', { name: v });
+      });
+    }
+    // Purge: Ruby fa elenco + conferma + report.
+    var btnPurge = $('btn-purge-styles');
+    if (btnPurge) {
+      btnPurge.addEventListener('click', function () { call('sm_style_purge'); });
     }
     // Bottone "Profiles → 1": atomico DrawSilhouettes=true + ProfileWidth=1
     var btnProfilesDefault = $('btn-profiles-default');

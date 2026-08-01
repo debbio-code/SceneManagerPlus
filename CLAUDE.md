@@ -1843,6 +1843,43 @@ ri-applica camera/stile/layers (= clic sul nome scena).
 
 `cmd.set_shortcut("J")` non è stato testato; per ora si assegna a mano.
 
+## Mini Style Manager — header: selettore stile + purge (2026-08-01)
+
+Due controlli nell'header, richiesti dall'utente per non dover tornare alla
+finestra principale.
+
+**Selettore stile** (`<select id="style-pick">` + `sm_style_pick`). Scelta UX
+esplicita dell'utente: **assegna** lo stile alla scena di contesto e ci passa
+sopra in edit — non si limita a sfogliare. Cioè fa in un gesto quello che
+prima richiedeva il tasto destro sul badge lettera nella finestra principale.
+Senza scena di contesto degrada a semplice cambio dello stile in edit.
+`assign_style` gestisce da sé la conferma Match Photo: se l'utente annulla
+ritorna `false`, `@style_name` non cambia e il `push_state` rimette il select
+sul valore vero. Le lettere vengono da `SceneModel.styles_map`, la stessa
+fonte della finestra principale, così A resta A ovunque.
+
+**Purge** (`sm_style_purge`). È la risposta al fatto che SU 2019 **non espone
+un delete per-stile**: il modo di cancellare uno stile è smettere di usarlo e
+poi purgare. Averlo qui rende l'operazione praticabile senza aprire i Settings.
+
+⚠️ **La logica di purge vive in `Core::Styles.purge_unused_interactive`**
+(elenco + conferma + report), condivisa da questo bottone e da quello dei
+Settings: erano due copie da tenere allineate a mano, ora è una sola. Ritorna
+`nil` se non c'era nulla o se l'utente ha annullato.
+
+⚠️ **Dopo un purge lo stile aperto può non esistere più.** `StyleDialog`
+controlla se `@style_name` è tra i rimossi e ripiega con `fallback_style_name`
+(stile della scena di contesto → stile attivo nel viewport). Senza, la finestra
+resterebbe puntata a un nome inesistente e ogni edit successivo cadrebbe nel
+vuoto.
+
+`renderStylePicker` **non ricostruisce il select se ha il focus** (stesso
+principio del `setIfNotFocused` usato per gli input): un `push_state` a tendina
+aperta la chiuderebbe in faccia all'utente. E se lo stile corrente non è
+nell'elenco (scena MP con stile interno, o nessuno stile) inserisce una voce
+segnaposto: senza, il select mostrerebbe il primo della lista facendo credere
+che sia quello in uso.
+
 ## Mini Style Manager — extra buttons + Fog spostata fuori (2026-05)
 
 Tre estensioni allo Style dialog (`ui/style_dialog.rb` + `ui/html/style.*`):

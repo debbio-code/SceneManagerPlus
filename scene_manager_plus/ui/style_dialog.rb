@@ -193,6 +193,59 @@ module SceneManagerPlus
           Dialog.push_state if defined?(Dialog)
         end
 
+        # Selettore stile nell'header: passa a un altro stile senza chiudere
+        # la finestra.
+        #
+        # Scelta UX (2026-08-01, decisa dall'utente): NON si limita a
+        # sfogliare — **assegna** lo stile alla scena di contesto e poi ci
+        # passa sopra in edit. Cioè fa in un gesto quello che prima
+        # richiedeva di tornare alla finestra principale e usare il tasto
+        # destro sul badge lettera.
+        #
+        # Senza scena di contesto (finestra aperta slegata da una scena) si
+        # degrada a semplice cambio dello stile in edit.
+        dlg.add_action_callback('sm_style_pick') do |_ctx, payload|
+          data = parse(payload)
+          name = data['name'].to_s
+          if Core::Styles.find_style(name).nil?
+            ::UI.messagebox("Style '#{name}' not found.")
+          else
+            ok = true
+            if @scene_id && Core::SceneModel.find_by_id(@scene_id)
+              # assign_style gestisce da sé la conferma Match Photo: se
+              # l'utente annulla ritorna false e qui non cambiamo nulla,
+              # così il push_state rimette il selettore sul valore vero.
+              ok = Core::SceneModel.assign_style(@scene_id, name)
+            end
+            if ok
+              @style_name = name
+              select_style!(name)
+            end
+          end
+          push_state
+          Dialog.push_state if defined?(Dialog)
+        end
+
+        # Purge degli stili inutilizzati. Stessa identica logica del bottone
+        # nei Settings (vive in Core::Styles): qui è una scorciatoia, perché
+        # "smetto di usare uno stile e poi lo elimino" è il modo in cui si
+        # cancella un singolo stile in SU 2019 — l'API non espone un delete
+        # per-stile, solo purge_unused model-wide.
+        dlg.add_action_callback('sm_style_purge') do |_ctx|
+          removed = Core::Styles.purge_unused_interactive
+          if removed
+            # Lo stile aperto può essere finito nel purge: senza questo la
+            # finestra resterebbe puntata a un nome che non esiste più e ogni
+            # edit successivo cadrebbe nel vuoto.
+            if removed.include?(@style_name.to_s)
+              @style_name = fallback_style_name
+              select_style!(@style_name) if @style_name
+            end
+            push_state
+            Dialog.push_state if defined?(Dialog)
+          end
+        end
+
         # Descrizione dello stile (campo nativo SU, visibile anche nel
         # pannello Styles). Commit su blur/Enter, come il nome.
         dlg.add_action_callback('sm_style_set_description') do |_ctx, payload|
@@ -276,6 +329,9 @@ module SceneManagerPlus
           nickname:     Core::Styles.get_nickname(@style_name),
           description:  Core::Styles.get_description(@style_name),
           badge_color:  Core::Styles.get_color(@style_name),
+          # Elenco per il selettore dell'header. Stessa fonte delle lettere
+          # nella finestra principale, così le lettere coincidono.
+          styles:       Core::SceneModel.styles_map,
           scene_id:     @scene_id,
           scenes_count: using.size,
           scenes_list:  using.map { |p| p.name },
@@ -294,6 +350,17 @@ module SceneManagerPlus
       end
 
       # === Helpers ===
+
+      # Stile su cui ripiegare quando quello aperto sparisce (purge): prima
+      # quello della scena di contesto, poi quello attivo nel viewport.
+      def fallback_style_name
+        m = Sketchup.active_model
+        return nil unless m
+        ctx = (@scene_id ? Core::SceneModel.find_by_id(@scene_id) : nil) || m.pages.selected_page
+        n = (ctx && ctx.style ? ctx.style.name.to_s : nil) rescue nil
+        n ||= (m.styles.selected_style ? m.styles.selected_style.name.to_s : nil) rescue nil
+        n
+      end
 
       def select_style!(name)
         m = Sketchup.active_model

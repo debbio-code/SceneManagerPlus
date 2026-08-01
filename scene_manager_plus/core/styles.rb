@@ -616,6 +616,46 @@ module SceneManagerPlus
                 .sort_by { |h| h[:display_name].downcase }
       end
 
+      # Flusso completo del purge con conferma e report, condiviso tra il
+      # bottone dei Settings e quello nell'header del Mini Style Manager:
+      # devono comportarsi in modo identico, quindi la logica vive qui e non
+      # duplicata nei due dialog.
+      #
+      # Ritorna l'array dei nomi rimossi, oppure nil se non c'era nulla da
+      # rimuovere o se l'utente ha annullato (il caller distingue con .nil?).
+      def purge_unused_interactive
+        unused = unused_styles
+        if unused.empty?
+          ::UI.messagebox('All styles are in use by at least one scene. Nothing to purge.')
+          return nil
+        end
+        list = unused.map { |h|
+          if h[:display_name] != h[:name]
+            "  • #{h[:display_name]} (native: #{h[:name]})"
+          else
+            "  • #{h[:name]}"
+          end
+        }.join("\n")
+        mb_yesno = Object.const_defined?(:MB_YESNO) ? MB_YESNO : 4
+        id_yes   = Object.const_defined?(:IDYES)   ? IDYES   : 6
+        answer = ::UI.messagebox(
+          "The following #{unused.size} style(s) will be deleted:\n\n" \
+          "#{list}\n\n" \
+          "This action cannot be undone via Ctrl+Z (styles.purge_unused is\n" \
+          "not transactional in SU 2019 Ruby API).\n\n" \
+          "Continue?",
+          mb_yesno
+        )
+        unless answer == id_yes
+          puts '[SM+] purge_unused_styles: aborted by user'
+          return nil
+        end
+        removed = purge_unused_styles
+        puts "[SM+] purge_unused_styles: removed #{removed.size} style(s): #{removed.inspect}"
+        ::UI.messagebox("Purged #{removed.size} style(s).")
+        removed
+      end
+
       # Purge degli unused via styles.purge_unused, + cleanup dei nickname
       # orfani (cancella le entry del dict per gli stili rimossi).
       # Ritorna l'array di nomi rimossi (per messagebox finale).

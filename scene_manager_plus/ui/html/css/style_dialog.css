@@ -49,6 +49,20 @@ body {
 }
 .hdr-nick-input:focus { border-color: #2b5a86; }
 .hdr-nick-input::placeholder { color: #777; font-weight: normal; font-style: italic; }
+/* Selettore stile nell'header: cambia stile e lo assegna alla scena. */
+.hdr-pick {
+  flex: 1;
+  min-width: 0;
+  background: #2b2b2b;
+  color: #cfd8e3;
+  font-size: 12px;
+  border: 1px solid #1e1e1e;
+  border-radius: 2px;
+  padding: 3px 4px;
+  outline: none;
+  font-family: inherit;
+}
+.hdr-pick:focus { border-color: #2b5a86; }
 .hdr-native {
   margin-top: 4px;
   color: #888;
