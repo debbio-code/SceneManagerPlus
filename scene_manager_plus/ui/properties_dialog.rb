@@ -105,11 +105,10 @@ module SceneManagerPlus
           puts "[SM+ Props UI] #{msg}"
         end
 
-        # Click su "Style and Fog" per scena Match Photo: scrivere quei flag
-        # via setter Ruby corrompe lo state MP interno (BugSplat al successivo
-        # selected_page = page). L'inspector Scenes nativo invece li scrive
-        # in modo safe. Quindi: attiviamo la scena (così l'inspector mostra
-        # i suoi checkbox) e apriamo l'inspector via UI.show_inspector.
+        # Apre il pannello Scenes nativo sulla scena di contesto. Nato come
+        # ripiego per "Style and Fog" sulle scene Match Photo (quel checkbox
+        # ora funziona da qui — vedi SceneModel.capture_style!), resta come
+        # scorciatoia generica del bottone "⧉" nell'header.
         dlg.add_action_callback('sm_props_open_scenes_panel') do |_ctx, payload|
           data = parse(payload)
           id = data['id'] || @scene_id

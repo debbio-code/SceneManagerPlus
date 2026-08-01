@@ -765,8 +765,13 @@ API che prima richiedevano `tools/dump-*.rb` + copia/incolla dalla Ruby Console.
 >   chiamata `update_selected_style`, comportamento `add_matchphoto_page`),
 >   le guard di SM+ qui sotto potrebbero richiedere aggiornamento.
 > - Se cambia un guard di SM+ (es. block in `assign_style`, `update_page`,
->   Properties checkbox "Style and Fog ↗"), assicurarsi che il
->   comportamento atteso da 3dg_photomatch sia ancora coperto.
+>   `capture_style!`), assicurarsi che il comportamento atteso da
+>   3dg_photomatch sia ancora coperto. In particolare: le scene create da
+>   `add_matchphoto_page` nascono con `page.style == nil`, ed è quello che
+>   rende necessaria la cattura dello stile (vedi "Style and Fog" più sotto).
+>   Se un domani 3dg_photomatch salvasse uno stile alla creazione, la
+>   cattura diventerebbe un no-op — non un problema, ma sapendolo si evita
+>   di cercare un bug che non c'è.
 > - Il `CLAUDE.md` di 3dg_photomatch contiene la stessa storia da
 >   prospettiva opposta — leggi entrambi se devi toccare il dominio MP.
 
@@ -898,6 +903,65 @@ Documentazione di partenza: `tools/dump-matchphoto-api.rb` (cosa l'API
 Ruby espone su Match Photo) e `tools/dump-matchphoto-attrs.rb` (cosa
 salva negli attribute_dictionaries — niente di utile).
 
+### RISOLTO (2026-08-01): "Style and Fog" era un null-deref, non una maledizione MP
+
+**Sintomo storico**: accendere "Style and Fog" (`use_style` +
+`use_rendering_options`) su una scena Match Photo da SM+ portava al
+BugSplat alla successiva attivazione. Ripiego adottato per mesi: il
+checkbox non toggava, apriva il pannello **Scenes nativo** e l'utente
+metteva la spunta lì.
+
+**Causa reale** (misurata su 19.3.253 via MCP `eval_ruby`): non c'entrano
+né Match Photo né i setter Ruby. Quelle pagine hanno **`page.style == nil`**
+— non hanno MAI salvato uno stile, perché sono nate con i flag di stile
+spenti (`add_matchphoto_page` di plugin terzi, o il vecchio
+`pages.add` di SM+). Accendere `use_style` significa "all'attivazione
+ripristina lo stile salvato": se non ce n'è uno, `pages.selected_page = page`
+mette **`model.styles.selected_style` a `nil`** e da lì il modello è in uno
+stato dal quale qualunque operazione successiva può splattare.
+
+Sequenza verificata, con dentro il controllo negativo:
+
+| Passo | `page.style` | `styles.selected_style` |
+|---|---|---|
+| partenza (scena MP legacy) | `nil` | ok |
+| `use_style = true` (solo flag) | `nil` | ok |
+| → attivazione | `nil` | **`nil`** ← qui nasce lo splat |
+| `use_style = true` + `page.update(8\|2)` con la pagina attiva | lo stile corrente | ok |
+| → attivazione, ripetuta | stabile | ok, **foto intatta** |
+
+Il pannello nativo non usa un "pathway C++ pulito": fa esattamente
+flag + cattura, cioè quello che ora fa `SceneModel.capture_style!`.
+
+**Fix applicato** — `Core::SceneModel.capture_style!` / `style_missing?`,
+chiamati da `update_page`, `Buffer.flush!` e dal comando "Save all
+properties" in `main.rb`. Due vincoli d'ordine non negoziabili:
+
+1. la pagina va **attivata PRIMA** di scrivere i flag — attivarla dopo
+   significa attivare proprio la combinazione che azzera `selected_style`;
+2. `page.update` cattura ciò che il viewport mostra **adesso**, quindi la
+   pagina deve essere quella attiva (in `Buffer.flush!` le pagine da
+   catturare sono rimandate a un secondo passaggio per questo).
+
+La condizione è `page.style.nil?`, **non** `matchphoto?`: è generale, le
+scene MP sono solo il caso in cui capita in pratica. Una volta che una
+pagina ha uno stile salvato, spegnere e riaccendere il flag **non** lo
+perde (verificato) — il pericolo esiste solo alla prima accensione.
+
+**Persistenza verificata**, ed era la prova che contava di più: salvato il
+file e riletto davvero da disco, flag e stile ci sono ancora e le foto sono
+intatte. Se il flag persistesse e lo stile no, riaprire il file ricreerebbe
+lo stato che splatta — il fix sarebbe peggio del problema. Per forzare una
+rilettura di un file già aperto (serve per rifare questa prova) vedi
+`SU2019-LESSONS.md`: `open_file` sullo stesso path è un **no-op** che ritorna
+`true`, e `file_new` è **accodato** come `send_action`.
+
+**Lezione di metodo, la stessa di `send_action`**: "scrivere i flag su una
+scena MP crasha" era una correlazione osservata una volta e promossa a
+causa. La causa vera si vedeva leggendo `page.style` un istante prima
+dell'attivazione. Prima di aggirare un crash con un ripiego UI, misurare
+*quale stato* il crash trova.
+
 ### Crash pattern: write spuri sui flag `use_*` su scene MP (2026-05)
 
 Scoperto debuggando interazione con plugin terzo `3dg_photomatch`: scrivere
@@ -919,6 +983,15 @@ AttributeObserver di plugin terzi (meno write = meno freeze a 5s).
 su `Sketchup::Page` in loop, fare il diff `current_value != new_value` prima
 del setter. Non è solo questione di performance — è questione di stabilità.
 
+⚠️ **Questa diagnosi è probabilmente sbagliata nella parte "write spuri"**
+(vedi la sezione precedente, 2026-08-01). Il repro citato — "scrivere tutti
+gli 8 flag crasha, `p.use_axes = true` da solo no" — si spiega interamente col
+null-deref: fra gli 8 c'è `use_style = true`, e quelle pagine avevano
+`page.style == nil`; `use_axes` da solo non tocca lo stile. Non è stato
+rimisurato isolando le due ipotesi. La regola del diff **resta valida** per
+un'altra ragione, quella sì verificata: sui modelli con AttributeObserver di
+plugin terzi ogni write costa ~5s.
+
 ### Crash pattern: `page.update(STYLE|RO)` su scena MP
 
 `SceneModel.assign_style` (e di riflesso "+ New style…") su scena MP
@@ -936,10 +1009,17 @@ allocato uno slot del pool (con le RO MP catturate) prima del rifiuto di
 ### Letter badge "?" = scena MP (sintomo diagnostico)
 
 Se nel main dialog di SM+ il letter badge di una scena mostra `?`, significa
-che `page.style.name` non matcha nessuno stile in `model.styles`. Su scene
-Match Photo questo è normale: lo stile MP interno non è enumerato in
-`model.styles`. È un marker utile per identificare scene MP create da
-plugin terzi anche prima della heuristic `camera.aspect_ratio != 0`.
+che `page_style_name` ritorna nil.
+
+Causa misurata (2026-08-01, 19.3.253): quasi sempre **`page.style` è proprio
+`nil`** — la pagina non ha mai salvato uno stile. Non è che "lo stile MP non
+sia enumerato in `model.styles`": su un file MP reale il suo stile c'era
+eccome (`"[Architectural Design Style]1"`, il duplicato che SU crea per la
+scena MP). Il badge resta comunque un buon marker delle scene MP di plugin
+terzi, perché sono quelle che nascono senza stile salvato.
+
+Conseguenza del fix "Style and Fog" (sezione sopra): appena si accende quel
+flag la pagina acquisisce uno stile e **il `?` diventa una lettera**.
 
 ### `add_matchphoto_page` lascia lo selected_style dirty
 
@@ -1511,7 +1591,7 @@ Tre estensioni allo Style dialog (`ui/style_dialog.rb` + `ui/html/style.*`):
    `::UI.show_inspector('Styles')` — API Trimble cross-platform, niente
    command ID Windows da indovinare via `dump-su-menu.ps1`. Stesso pattern
    già usato in `dialog.rb` per il right-click su badge stile di scene MP
-   e in `properties_dialog.rb` per "Style and Fog ↗". **Regola futura**:
+   e in `properties_dialog.rb` (`sm_props_open_scenes_panel`). **Regola futura**:
    per qualsiasi necessità di aprire un pannello nativo SU dal plugin,
    provare PRIMA `UI.show_inspector('<NomePanel>')`, e solo se non esiste
    quel panel (raro) ricadere su `Sketchup.send_action` con numeric ID.

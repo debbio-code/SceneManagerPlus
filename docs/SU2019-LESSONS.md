@@ -478,6 +478,82 @@ Regola: per leggere l'effetto di un `send_action`, passare da
 `object_id` **prima** e **dopo**: `Sketchup::Page#object_id` è stabile
 nella sessione (SU cachea i wrapper Ruby), verificato.
 
+### `use_style = true` su pagina senza stile salvato azzera `selected_style` (2026-08-01)
+
+Verificato su 19.3.253, file Match Photo reale.
+
+`Sketchup::Page#style` ritorna **`nil`** finché la pagina non ha mai salvato
+uno stile — succede a ogni pagina nata con il bit di stile spento, es.
+`pages.add(name, PAGE_USE_CAMERA)` o `Pages#add_matchphoto_page` (che è come
+nascono le scene MP dei plugin terzi).
+
+Su una pagina così, `page.use_style = true` **riesce senza errori** ma non
+crea nessuno stile salvato: `page.style` resta `nil`. Alla successiva
+`pages.selected_page = page`, SU prova a ripristinare quello stile inesistente
+e mette **`model.styles.selected_style` a `nil`**. Da lì il modello è armato:
+qualunque codice (nostro o nativo) che dereferenzia `selected_style` splatta.
+Da Ruby si vede come `NoMethodError ... for nil:NilClass` invece del crash.
+
+```ruby
+p.style                     # => nil
+p.use_style = true
+p.style                     # => nil   <-- flag acceso, niente da ripristinare
+m.pages.selected_page = p
+m.styles.selected_style     # => nil   <-- modello corrotto
+```
+
+Rimedio, e **l'ordine è la parte importante**:
+
+```ruby
+m.pages.selected_page = page          # 1. PRIMA: attivarla dopo = attivare la bomba
+page.use_style = true
+page.use_rendering_options = true
+page.update(PAGE_USE_SKETCHCS | PAGE_USE_RENDERING_OPTIONS)  # 2. cattura lo stile del viewport
+```
+
+`page.update` cattura **ciò che il viewport mostra adesso**, quindi la pagina
+deve essere quella attiva o si salva lo stile sbagliato. È esattamente quello
+che fa il pannello **Scenes** nativo quando si spunta "Style and Fog": flag +
+cattura, non un misterioso "pathway C++ pulito".
+
+Riparazione di un modello già corrotto: `m.styles.selected_style = <uno stile>`
+e poi la cattura sulla pagina colpevole. Verificato: dopo il fix la scena MP
+sopravvive a navigazioni ripetute con **la foto intatta**.
+
+Corollari verificati:
+- una volta che la pagina ha uno stile salvato, spegnere e riaccendere
+  `use_style` **non** lo perde → il pericolo è solo la prima accensione;
+- la condizione da testare è `page.style.nil?`, **non** `matchphoto?`: le
+  scene MP sono solo il caso frequente, non la causa;
+- `Sketchup::Pages#add(name, flags)` accetta la bitmask `PAGE_USE_*` — è il
+  modo pulito per fabbricare una pagina "senza stile" a scopo di test;
+- **la cattura persiste**: salvato il file e riletto davvero da disco, le 4
+  scene MP di prova avevano ancora `use_style`/`use_rendering_options` a true
+  **e** lo stile salvato, `selected_style` non nil, foto di sfondo intatte su
+  due giri completi di navigazione. Era la verifica che contava di più: se il
+  flag persistesse e lo stile no, la riapertura ricreerebbe lo stato che
+  splatta.
+
+### Forzare la rilettura di un file già aperto (SU 2019 Windows)
+
+`Sketchup.open_file(path)` sul file **già aperto** è un **no-op** silenzioso
+che ritorna comunque `true`: non ricarica niente. Serve passare da un altro
+documento. `Sketchup.file_new` funziona ma è **accodato** come `send_action`
+(nel test è scattato ~10 minuti dopo, quando ormai lo si dava per inerte —
+stessa trappola dell'asincronia già documentata sopra).
+
+Ricetta affidabile e senza dialog modali:
+
+```ruby
+m.save                              # 1. niente prompt "Save changes?" dopo
+m.save_copy(File.join(ENV['TEMP'], 'probe.skp'))   # save_copy ESISTE in 2019
+Sketchup.open_file(copy)            # 2. cambia documento davvero
+Sketchup.open_file(originale)       # 3. ora è una rilettura vera da disco
+```
+
+Ogni `open_file` va lanciato da `UI.start_timer(0.1, false) { ... }` e
+verificato in una chiamata successiva, per gli stessi motivi.
+
 ### Iniettare comandi nativi via Win32: SU Pro 2019 è MFC (2026-07-31)
 
 SU Pro 2019 è un'applicazione **MFC** (il registro espone

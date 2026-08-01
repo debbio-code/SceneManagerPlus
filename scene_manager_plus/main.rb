@@ -67,9 +67,11 @@ module SceneManagerPlus
     # use_* della scena attualmente attiva (= equivalente a ticcare tutti i
     # checkbox "Properties to save" nel pannello Window → Scenes nativo).
     # Pensato per chi vuole rimuovere il pannello nativo dal workflow.
-    # Su scene Match Photo skippa use_style e use_rendering_options: il combo
-    # crasha SU all'attivazione successiva (vedi sezione Match Photo in
-    # CLAUDE.md). Su scene normali setta tutti 8.
+    # Se la scena non ha mai salvato uno stile (`page.style == nil`, tipico
+    # delle scene Match Photo di plugin terzi), accendere use_style da solo
+    # azzererebbe model.styles.selected_style alla prossima attivazione:
+    # serve catturare lo stile del viewport. La pagina qui è per definizione
+    # quella attiva, quindi basta la cattura dopo la scrittura dei flag.
     # Esposto come UI::Command → assegnabile shortcut via Window → Preferences
     # → Shortcuts.
     save_all_cmd = ::UI::Command.new("#{PLUGIN_NAME}: Save all properties on active scene") do
@@ -79,35 +81,29 @@ module SceneManagerPlus
         ::UI.beep
         next
       end
-      mp = SceneManagerPlus::Core::SceneModel.matchphoto?(page)
-      keys = SceneManagerPlus::Core::SceneModel::FLAG_KEYS.dup
-      if mp
-        keys -= %w[use_style use_rendering_options]
-      end
+      sm = SceneManagerPlus::Core::SceneModel
+      need_capture = sm.style_missing?(page)
       m.start_operation('SM+ Save all properties', true)
       begin
-        keys.each do |k|
+        sm::FLAG_KEYS.each do |k|
           setter = "#{k}="
           next unless page.respond_to?(setter)
           current = page.send("#{k}?") ? true : false
           page.send(setter, true) if current != true
         end
+        sm.capture_style!(page) if need_capture
         m.commit_operation
       rescue => e
         m.abort_operation
         warn "[SM+] save_all_cmd: #{e.class}: #{e.message}"
       end
-      if mp
-        Sketchup.status_text = "Saved all properties (6/8, Match Photo: Style/Fog skipped)"
-      else
-        Sketchup.status_text = "Saved all 8 properties on '#{page.name}'"
-      end
+      Sketchup.status_text = "Saved all 8 properties on '#{page.name}'"
       # Refresh state nelle dialog SM+ aperte
       SceneManagerPlus::UI::Dialog.push_state rescue nil
     end
     save_all_cmd.tooltip = 'Enable all "Properties to save" on the active scene'
     save_all_cmd.status_bar_text =
-      'Tick all Properties to save on the currently-active scene (skips Style/Fog on Match Photo)'
+      'Tick all Properties to save on the currently-active scene'
     save_all_cmd.menu_text = 'Save all properties on active scene'
     ::UI.menu('Plugins').add_item(save_all_cmd)
 

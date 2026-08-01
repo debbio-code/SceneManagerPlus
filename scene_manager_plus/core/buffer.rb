@@ -183,6 +183,11 @@ module SceneManagerPlus
         applied_edits   = 0
         applied_deletes = 0
 
+        # Pagine che chiedono "Style and Fog" ma non hanno mai salvato uno
+        # stile: i loro flag di stile NON vanno scritti qui, ma in un secondo
+        # passaggio con la pagina attiva (vedi SceneModel.capture_style!).
+        style_capture = []
+
         m.start_operation('SM+ Apply pending', true)
         begin
           # 1) edit nomi/desc/flag
@@ -196,26 +201,36 @@ module SceneManagerPlus
               page.description = attrs['description'].to_s
             end
             if attrs['flags'].is_a?(Hash)
-              mp = SceneModel.matchphoto?(page)
-              attrs['flags'].each do |k, v|
+              flags_in = attrs['flags']
+              need_capture = SceneModel::STYLE_FLAG_KEYS.any? { |k| flags_in[k] } &&
+                             SceneModel.style_missing?(page)
+              style_capture << page if need_capture
+              flags_in.each do |k, v|
                 next unless SceneModel::FLAG_KEYS.include?(k)
                 setter = "#{k}="
                 next unless page.respond_to?(setter)
+                # Rimandati al secondo passaggio: scriverli qui e attivare
+                # la pagina dopo azzererebbe model.styles.selected_style.
+                next if need_capture && SceneModel::STYLE_FLAG_KEYS.include?(k)
                 v_bool  = v ? true : false
                 current = page.send("#{k}?") ? true : false
-                # MP guard: vedi SceneModel.update_page. use_style /
-                # use_rendering_options = true su scena MP crasha
-                # all'attivazione successiva.
-                if mp && v_bool && %w[use_style use_rendering_options].include?(k)
-                  warn "[SM+] Buffer.flush!: skipping #{k}=true on MP scene '#{page.name}'"
-                  next
-                end
                 # Vedi SceneModel.update_page: writes spuri sui flag già
                 # allineati crashano le scene Match Photo.
                 page.send(setter, v_bool) if current != v_bool
               end
             end
             applied_edits += 1
+          end
+
+          # 1b) cattura stile per le pagine che ne erano prive: una alla
+          # volta, con la pagina attiva, dentro la stessa operazione.
+          unless style_capture.empty?
+            prev_page = m.pages.selected_page
+            style_capture.uniq.each do |page|
+              m.pages.selected_page = page
+              SceneModel.capture_style!(page)
+            end
+            m.pages.selected_page = prev_page if prev_page && prev_page.valid?
           end
 
           # 2) delete pagine

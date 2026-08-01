@@ -1,14 +1,5 @@
 * { box-sizing: border-box; }
 
-/* Style and Fog su scene Match Photo: cliccabile ma apre l'inspector nativo */
-.flag-mp-fog { opacity: 0.7; cursor: pointer; }
-.flag-mp-fog input { cursor: pointer; }
-.flag-mp-fog span::after {
-  content: " ↗";
-  opacity: 0.6;
-  font-size: 0.85em;
-}
-
 /* Context menu (right-click sul bottone Update from view) */
 .context-menu {
   position: fixed;

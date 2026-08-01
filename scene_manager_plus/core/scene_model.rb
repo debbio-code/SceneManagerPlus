@@ -216,6 +216,60 @@ module SceneManagerPlus
         false
       end
 
+      # I due flag che la UI (nostra e nativa) presenta come un unico
+      # "Style and Fog".
+      STYLE_FLAG_KEYS = %w[use_style use_rendering_options].freeze
+
+      # Maschera PAGE_USE_* per stile + rendering options, con lookup
+      # difensivo (le costanti cambiano nome tra versioni di SU).
+      def style_ro_mask
+        sc = lambda do |*names|
+          names.each { |n| return Object.const_get(n) if Object.const_defined?(n) }
+          0
+        end
+        sc.call('PAGE_USE_STYLE', 'PAGE_USE_SKETCHCS') |
+          sc.call('PAGE_USE_RENDERING_OPTIONS')
+      end
+
+      # True se la pagina non ha MAI salvato uno stile (`page.style == nil`).
+      # È lo stato in cui nascono le scene create con i flag di stile spenti —
+      # tipicamente le scene Match Photo di plugin terzi e quelle create dalle
+      # vecchie versioni di SM+ via `pages.add`.
+      def style_missing?(page)
+        return false unless page.respond_to?(:style)
+        page.style.nil?
+      rescue
+        false
+      end
+
+      # Salva nella pagina lo stile attualmente nel viewport, così che
+      # `use_style` abbia qualcosa da ripristinare.
+      #
+      # Accendere use_style/use_rendering_options su una pagina con
+      # `style == nil` è la causa REALE del BugSplat storicamente attribuito
+      # "alle scene Match Photo": alla successiva attivazione SU prova a
+      # ripristinare uno stile che non c'è e mette `model.styles.selected_style`
+      # a nil, lasciando il modello in uno stato dal quale qualunque
+      # operazione successiva può splattare. Verificato su 19.3.253.
+      #
+      # PRECONDIZIONE: `page` deve essere la pagina attiva — `page.update`
+      # cattura ciò che il viewport mostra adesso. Il chiamante deve averla
+      # attivata PRIMA di scrivere i flag (attivarla dopo significherebbe
+      # attivare proprio la combinazione che azzera selected_style).
+      def capture_style!(page)
+        if page.respond_to?(:use_style=) && !page.use_style?
+          page.use_style = true
+        end
+        if page.respond_to?(:use_rendering_options=) && !page.use_rendering_options?
+          page.use_rendering_options = true
+        end
+        page.update(style_ro_mask)
+        true
+      rescue => e
+        warn "[SM+] capture_style!: #{e.class}: #{e.message}"
+        false
+      end
+
       # Sposta la pagina con uid `id` all'indice `target_index` (0-based).
       # Usa l'API ufficiale: pages.add_matchphoto/erase non vanno bene,
       # usiamo invece swap iterativo perché Pages non ha move diretto.
@@ -595,38 +649,40 @@ module SceneManagerPlus
           return false
         end
         old_name = p.name.to_s
+        # "Style and Fog" acceso su una pagina che non ha mai salvato uno
+        # stile: serve catturarne uno, e la pagina va attivata PRIMA di
+        # scrivere i flag (vedi capture_style!).
+        flags_in     = attrs['flags'].is_a?(Hash) ? attrs['flags'] : nil
+        need_capture = flags_in &&
+                       STYLE_FLAG_KEYS.any? { |k| flags_in[k] } &&
+                       style_missing?(p)
+        prev_page = need_capture ? model.pages.selected_page : nil
         model.start_operation('SM+ Update scene', true)
         begin
+          model.pages.selected_page = p if need_capture && prev_page != p
           if attrs['name'] && !attrs['name'].to_s.empty? && attrs['name'].to_s != old_name
             p.name = attrs['name'].to_s
           end
           if attrs.key?('description')
             p.description = attrs['description'].to_s
           end
-          if attrs['flags'].is_a?(Hash)
-            mp = matchphoto?(p)
-            attrs['flags'].each do |k, v|
+          if flags_in
+            flags_in.each do |k, v|
               next unless FLAG_KEYS.include?(k)
               setter = "#{k}="
               next unless p.respond_to?(setter)
               v_bool  = v ? true : false
               current = p.send("#{k}?") ? true : false
-              # MP guard: enabling use_style/use_rendering_options ("Style
-              # and Fog") on a Match Photo scene puts MP into a state that
-              # crashes SU on the next pages.selected_page = page. MP scene
-              # owns its internal style (background photo) — toggling those
-              # flags means "use the saved style", which on MP means trying
-              # to override the MP style → corruption.
-              if mp && v_bool && %w[use_style use_rendering_options].include?(k)
-                warn "[SM+] update_page: skipping #{k}=true on Match Photo scene '#{p.name}' (would crash on activation)"
-                next
-              end
               # Scrivere flag già allineati corrompe le scene Match Photo
               # (writes spuri svegliano il subsystem C++; al successivo
               # pages.selected_page = page → BugSplat). Idem benefit lato
               # modelli con AttributeObserver di plugin terzi.
               p.send(setter, v_bool) if current != v_bool
             end
+          end
+          if need_capture
+            capture_style!(p)
+            model.pages.selected_page = prev_page if prev_page && prev_page != p
           end
           model.commit_operation
           true

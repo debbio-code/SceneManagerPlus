@@ -330,3 +330,53 @@ Fix candidato (alto costo, da fare solo se confermato):
 - Blendare solo nella bbox del logo senza copiare l'intera base
 - Aggiungere `GC.start` esplicito tra un'immagine e l'altra (workaround
   rapido ma freeza UI 200-500ms)
+
+---
+
+## Match Photo
+
+### BugSplat accendendo "Style and Fog" su scena Match Photo (risolto 2026-08-01)
+
+**Sintomo**: spuntare "Style and Fog" nel Properties dialog di SM+ su una
+scena Match Photo faceva splattare SketchUp al successivo click sulla scena.
+Il ripiego in vigore per mesi: il checkbox non toggava, apriva il pannello
+**Scenes nativo** e l'utente metteva la spunta lì (dove funzionava).
+
+**Causa attribuita (sbagliata)**: "scrivere i flag `use_*` via setter Ruby
+corrompe lo state interno del subsystem Match Photo; l'inspector nativo usa
+un pathway C++ pulito".
+
+**Causa reale** (misurata via MCP `eval_ruby` su 19.3.253): quelle pagine
+hanno `page.style == nil` — non hanno mai salvato uno stile, perché nascono
+con il bit di stile spento (`add_matchphoto_page` dei plugin terzi, o il
+vecchio `pages.add` di SM+). `use_style = true` accende il flag ma non crea
+nulla da ripristinare: alla successiva attivazione SU mette
+`model.styles.selected_style` a **`nil`** e il modello resta armato per il
+crash successivo. Niente a che vedere con Match Photo in sé, né coi setter.
+
+**Controllo negativo eseguito** (quello che mancava alla diagnosi vecchia):
+flag da solo → `selected_style` nil; flag + `page.update(PAGE_USE_SKETCHCS |
+PAGE_USE_RENDERING_OPTIONS)` con la pagina attiva → tutto stabile su
+attivazioni ripetute, foto di sfondo intatta.
+
+**Fix**: `Core::SceneModel.capture_style!` + `style_missing?`, usati da
+`SceneModel.update_page`, `Buffer.flush!` (secondo passaggio, perché le
+pagine vanno attivate una a una) e dal comando "Save all properties" in
+`main.rb`. Rimosso il ripiego UI in `properties.js` / `properties.css`: il
+checkbox è tornato un checkbox normale. Il bottone "apri pannello Scenes
+nativo" nell'header resta come scorciatoia generica.
+
+**Ordine obbligatorio**: attivare la pagina PRIMA di scrivere i flag (dopo
+significherebbe attivare proprio la combinazione che azzera `selected_style`)
+e catturare mentre è attiva (`page.update` salva ciò che il viewport mostra
+adesso). Dettagli API in `SU2019-LESSONS.md`.
+
+**Verificato su `File di test/Test Match Photo.skp`** (4 scene Match Photo,
+tutte nate con `style == nil`):
+
+| Percorso | Esito |
+|---|---|
+| `update_page` con la scena **non** attiva | stile catturato, scena attiva ripristinata, foto intatta |
+| defer mode → `Buffer.flush!` (secondo passaggio) | idem, e in defer nulla viene scritto prima del flush |
+| navigazioni ripetute dopo la modifica | `selected_style` mai nil |
+| **save + rilettura vera da disco** | flag e stile persistono, foto intatte, nessuno stato di crash ricreato |
