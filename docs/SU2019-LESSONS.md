@@ -592,6 +592,58 @@ In pratica per SM+ non è servita (`send_action` basta), ma resta lo
 strumento generale per qualsiasi comando nativo non esposto all'API.
 Gli ID numerici si ricavano con `tools/dump-su-menu.ps1`.
 
+### Pilotare i controlli di un pannello nativo (fiddle + Win32), 2026-08-01
+
+Estensione della lezione precedente: `send_action` copre i **comandi di menu**,
+ma le impostazioni che vivono solo come *controlli* di un pannello (slider,
+checkbox) si raggiungono lo stesso, perché i pannelli di SU 2019 su Windows
+sono Win32 veri.
+
+**`fiddle` (stdlib Ruby) funziona dentro SketchUp 2019**: si chiama
+`user32.dll` direttamente, senza spawn di PowerShell. Le `SendMessage`
+partono dal thread UI di SU, lo stesso che possiede quelle finestre → sono
+chiamate sincrone dirette alla window proc.
+
+Le due trappole che producono un "non succede niente" silenzioso:
+
+- **`TBM_SETPOS` non notifica il parent.** Sposta il cursore dello slider e
+  basta; serve il `WM_HSCROLL` successivo (`SB_THUMBPOSITION` +
+  `SB_ENDSCROLL`, hwnd della trackbar in lParam).
+- **`BM_SETCHECK` idem**: cambia solo il disegno della checkbox, serve il
+  `WM_COMMAND`/`BN_CLICKED` al parent.
+
+Con solo il primo messaggio la **rilettura del controllo mostra il valore
+nuovo** ma il viewport non cambia: verificare sempre con un confronto di
+render, mai con la rilettura del controllo.
+
+Altri fatti verificati su 19.3.253:
+
+- I pannelli ancorati in un tray restano finestre **top-level** separate: si
+  trovano per titolo (`"Styles"`) filtrando per PID, non sotto la finestra
+  principale.
+- I controlli rispondono ai messaggi **anche da invisibili** (tray su
+  un'altra scheda): non serve che l'utente abbia il pannello aperto sulla
+  scheda giusta.
+- Su x64 dichiarare wparam/lparam come `long` (4 byte) lascia sporcizia nella
+  parte alta del registro: usare `Fiddle::TYPE_LONG_LONG`.
+- Identificare i controlli **per etichetta**, non per ID: nel pannello Styles
+  ogni slider segue immediatamente la propria checkbox, quindi si cerca il
+  `Button` col testo giusto e si prende la trackbar successiva. Si
+  auto-valida, e gli ID (non documentati, version-specific) restano solo come
+  fallback. `Core::NativePanel.dump('<pannello>')` stampa tutto per rimappare.
+
+### `view.write_image` subito dopo una modifica può catturare un frame intermedio
+
+Confrontando i render prima/dopo un cambio di stato, il render fatto
+**immediatamente dopo** il ripristino risultava diverso dall'originale — e
+sembrava che il ripristino non funzionasse. Rirendendo un attimo dopo, l'hash
+tornava identico all'originale (e stabile su due render consecutivi): SU non
+aveva ancora finito di ridisegnare.
+
+**Regola**: quando si usa il confronto di render come prova, un singolo render
+subito dopo la mutazione non è una misura. Renderizzare due volte e
+pretendere che siano uguali tra loro prima di confrontarli con il riferimento.
+
 ---
 
 ## CEF / HtmlDialog
@@ -605,6 +657,27 @@ esecuzione è ancora quello vecchio.
 accanto all'originale, riscrivendo i tag `<script src>` e `<link href>` con
 `?v=<timestamp>`. CEF è obbligato a rileggere asset. Il temp file è
 gitignored.
+
+### `add_action_callback` dopo il load della pagina NON arriva al JS
+
+Registrare un callback nuovo su un `HtmlDialog` **già mostrato** non lo espone
+al contesto JS della pagina caricata: `sketchup.<nuovo_nome>` resta undefined e
+la chiamata muore in silenzio. Il binding object viene costruito al load.
+
+Conseguenza pratica (utile per il debug): per interrogare il DOM di un dialog
+già aperto da Ruby, **riusare un callback esistente** (in SM+ va bene
+`sm_style_log`, `sm_log`, ecc.) ridefinendone il blocco — il lato JS è già
+bindato e la ridefinizione lato Ruby sostituisce l'handler:
+
+```ruby
+dlg.add_action_callback('sm_style_log') { |_c, msg| $probe = msg }
+dlg.execute_script("sketchup.sm_style_log(JSON.stringify({...}))")
+# $probe leggibile alla eval successiva
+```
+
+Distingue anche i due sintomi: se il JS è rotto (SyntaxError nella IIFE) il
+callback risponde comunque, perché il binding CEF è indipendente dal nostro
+codice.
 
 ### CEF non ridipinge il DOM durante un HTML5 native drag
 

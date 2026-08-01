@@ -35,7 +35,8 @@ module SceneManagerPlus
       @style_name    = nil  # stile target di edit
 
       RO_KEYS = %w[
-        EdgeColorMode TransparencySort BackgroundColor DrawHorizon SkyColor
+        EdgeColorMode TransparencySort
+        BackgroundColor DrawHorizon SkyColor
         HorizonColor
         ModelTransparency DrawHidden DisplaySectionPlanes DisplaySectionCuts
         DrawSilhouettes ProfileWidth DisplaySketchAxes
@@ -203,6 +204,29 @@ module SceneManagerPlus
           end
         end
 
+        # === Match Photo (via pannello nativo Win32) ===
+        # Foreground/Background Photo non esistono nell'API Ruby di SU 2019
+        # (61 rendering options enumerate anche con la scena MP attiva: zero
+        # chiavi a tema). Si pilotano i controlli veri del pannello Styles.
+        # Vedi Core::NativePanel per misure e trappole.
+        #
+        # Dopo ogni scrittura si ri-pusha lo stato LETTO dal pannello: se la
+        # scrittura non ha fatto presa, la UI torna da sola al valore reale
+        # invece di mostrare una bugia.
+        dlg.add_action_callback('sm_style_mp_enable') do |_ctx, payload|
+          data = parse(payload)
+          select_style!(@style_name) if @style_name && !@style_name.empty?
+          Core::NativePanel.match_photo_set_enabled(data['which'], data['on'])
+          push_state
+        end
+
+        dlg.add_action_callback('sm_style_mp_opacity') do |_ctx, payload|
+          data = parse(payload)
+          select_style!(@style_name) if @style_name && !@style_name.empty?
+          Core::NativePanel.match_photo_set_opacity(data['which'], data['value'].to_i)
+          push_state
+        end
+
         dlg.add_action_callback('sm_style_log') do |_ctx, msg|
           puts "[SM+ Style UI] #{msg}"
         end
@@ -213,6 +237,13 @@ module SceneManagerPlus
         m = Sketchup.active_model
         return unless m
         using = scenes_using_style(@style_name)
+        # I controlli Match Photo esistono nel pannello nativo per qualunque
+        # stile, ma hanno effetto solo sulle scene Match Photo: fuori da
+        # quelle la sezione si nasconde invece di offrire comandi inerti.
+        # Contesto = la scena da cui il dialog e' stato aperto; se manca
+        # (aperto senza scena) si guarda quella attiva nel viewport.
+        ctx  = (@scene_id ? Core::SceneModel.find_by_id(@scene_id) : nil) || m.pages.selected_page
+        is_mp = ctx ? Core::SceneModel.matchphoto?(ctx) : false
         state = {
           style_name:   @style_name,
           nickname:     Core::Styles.get_nickname(@style_name),
@@ -220,7 +251,13 @@ module SceneManagerPlus
           scene_id:     @scene_id,
           scenes_count: using.size,
           scenes_list:  using.map { |p| p.name },
-          values:       current_values
+          values:       current_values,
+          is_matchphoto: is_mp,
+          # Letto solo se serve: match_photo_state cammina l'albero delle
+          # finestre del pannello nativo, inutile farlo per scene normali.
+          # nil con is_matchphoto=true = pannello non raggiungibile -> la
+          # sezione si mostra disabilitata invece di fingere di funzionare.
+          match_photo:  (is_mp ? (Core::NativePanel.match_photo_state rescue nil) : nil)
         }
         @dialog.execute_script("window.SMS && SMS.setState(#{state.to_json});")
       rescue => e
@@ -234,7 +271,14 @@ module SceneManagerPlus
         m = Sketchup.active_model
         return unless m && m.respond_to?(:styles) && name
         target = m.styles.find { |s| s.name.to_s == name.to_s }
-        m.styles.selected_style = target if target
+        return unless target
+        # Riassegnare lo stile GIA' selezionato non e' un no-op per SU:
+        # riapplica lo stile salvato e butta via le modifiche pendenti. Con
+        # i controlli Match Photo (che non passano da update_selected_style)
+        # significherebbe azzerare la scrittura precedente a ogni tick del
+        # drag dello slider.
+        return if m.styles.selected_style == target
+        m.styles.selected_style = target
       rescue => e
         warn "[SM+] select_style!: #{e.class}: #{e.message}"
       end

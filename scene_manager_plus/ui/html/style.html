@@ -110,6 +110,38 @@
       </label>
     </section>
 
+    <!-- Match Photo: questi non sono rendering options (l'API Ruby non li
+         espone). Pilotano i controlli veri del pannello Styles nativo — vedi
+         core/native_panel.rb. Effetto solo sulle scene Match Photo. -->
+    <section class="group" id="group-matchphoto">
+      <h3>Match Photo</h3>
+      <div id="mp-unavailable" class="mp-note hidden">
+        Native Styles panel not reachable — these controls are disabled.
+      </div>
+      <label class="row">
+        <span class="lbl" title="Draw the photo on top of the model">Foreground photo</span>
+        <input type="checkbox" id="ctrl-mp-foreground-on" data-mp="foreground">
+      </label>
+      <div class="row">
+        <span class="lbl">Opacity</span>
+        <span class="slider-control">
+          <input type="range" class="slider" id="slider-mp-foreground" data-mp="foreground" min="0" max="100" step="1">
+          <input type="number" class="num" id="ctrl-mp-foreground" data-mp="foreground" min="0" max="100" step="1">
+        </span>
+      </div>
+      <label class="row">
+        <span class="lbl" title="Draw the photo behind the model">Background photo</span>
+        <input type="checkbox" id="ctrl-mp-background-on" data-mp="background">
+      </label>
+      <div class="row">
+        <span class="lbl">Opacity</span>
+        <span class="slider-control">
+          <input type="range" class="slider" id="slider-mp-background" data-mp="background" min="0" max="100" step="1">
+          <input type="number" class="num" id="ctrl-mp-background" data-mp="background" min="0" max="100" step="1">
+        </span>
+      </div>
+    </section>
+
     <footer class="ftr">
       <span id="footer-text" class="footer-link" title="Click to see all scenes using this style">—</span>
     </footer>

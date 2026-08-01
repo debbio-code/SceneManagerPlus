@@ -82,6 +82,23 @@ body {
   min-height: 24px;
 }
 .row .lbl { color: #ddd; }
+/* Riga ancora editabile ma senza effetto nel viewport con le impostazioni
+   correnti (es. Foreground color quando Color != All same). */
+/* La sezione Match Photo esiste solo per le scene Match Photo: sulle altre
+   i controlli nativi ci sono comunque, ma non hanno alcun effetto. */
+.group.hidden { display: none; }
+/* Nota della sezione Match Photo quando il pannello nativo non risponde. */
+.mp-note {
+  color: #d9a441;
+  background: #2a2318;
+  border: 1px solid #4a3c1e;
+  border-radius: 2px;
+  padding: 4px 6px;
+  margin-bottom: 6px;
+  font-size: 11px;
+  line-height: 1.35;
+}
+.mp-note.hidden { display: none; }
 .row select {
   background: #1a1a1a;
   color: #ddd;

@@ -85,6 +85,7 @@ scene_manager_plus/
 │   └── logo.jpg                    # logo aziendale per il cartiglio
 ├── core/
 │   ├── buffer.rb                   # Defer mode: stato globale edit in RAM + flush!
+│   ├── native_panel.rb             # controlli Win32 dei pannelli nativi (fiddle)
 │   ├── exporter.rb                 # Batch export PNG/JPG + watermark + titleblock via ImageRep
 │   ├── folders.rb                  # cartelle logiche (schema + load/save)
 │   ├── layers.rb                   # layer/tag model-wide + payload per-scena
@@ -798,11 +799,25 @@ subsystem:
   tutti i 5 provider di `model.options` (PageOptions, UnitsOptions,
   SlideshowOptions, NamedOptions, PrintOptions) → niente. Le uniche RO
   "fore/back" sono `ForegroundColor`/`BackgroundColor` (colori bordi/sfondo)
-  e `FaceBackColor`/`DrawBackEdges`. Conseguenza pratica: **impossibile
-  aggiungere lo slider opacità foto al Mini Style Manager** — non c'è un
-  valore da leggere/scrivere. `ForegroundColor` (colore, non opacità) è
-  l'unico controllo "foreground" implementabile. Richiesta utente
-  archiviata come non fattibile.
+  e `FaceBackColor`/`DrawBackEdges`.
+  Ri-verificato il **2026-08-01 con la scena Match Photo ATTIVA nel
+  viewport** — la condizione in cui una chiave dovrebbe materializzarsi:
+  61 chiavi prima, 61 dopo, **zero chiavi nuove**. Altri angoli battuti,
+  tutti negativi: 14 nomi plausibili letti a mano
+  (`ForegroundPhotoOpacity`, `PhotoOpacity`, `DisplayForegroundPhoto`...)
+  → tutti `nil`; `Sketchup::Style` **è un `Entity`** e quindi espone
+  `attribute_dictionaries`/`get_attribute`, ma sullo stile MP ritorna
+  `nil`; `page.attribute_dictionaries` vuoto; **`page.rendering_options`
+  ritorna `nil`** in SU 2019; il formato `.style` su disco non contiene
+  campi photo/opacity. (La costante globale `PhotoMatch` che compare in
+  `Object.constants` è il plugin `3dg_photomatch`, non un'API SU.)
+  ⚠️ **La feature è comunque implementata** (2026-08-01): il valore vive
+  nel pannello nativo, che su Windows è Win32, e i suoi slider sono
+  `msctls_trackbar32` veri — leggibili e scrivibili dall'interno di
+  SketchUp. Vedi la sezione **"Controlli dei pannelli nativi
+  (`Core::NativePanel`)"**. La conclusione precedente ("archiviata come
+  non fattibile") era giusta sull'API e sbagliata sulla feature: non
+  confondere "l'API non lo espone" con "non si può fare".
 
 L'unica API esposta è `Sketchup::Pages#add_matchphoto_page(image_filename,
 camera, page_name)`, che richiede il path della foto — non leggibile
@@ -851,11 +866,24 @@ che il timer scattasse.)
 - `add_from_view` accetta un blocco `on_created`, chiamato in linea nel
   ramo normale e **dal timer** nel ramo MP. Il valore di ritorno è la
   Page solo nel ramo sincrono: **chi chiama deve usare il blocco**;
-- sulle scene MP la finalizzazione esclude `use_style` /
-  `use_rendering_options` e scrive un flag **solo se differisce** (le due
-  precauzioni anti-BugSplat già note), e il dialog dello stile dirty è
-  saltato di proposito: il ramo "Save as new style" cambierebbe
-  `selected_style` sostituendo lo stile che porta la foto;
+- la finalizzazione scrive un flag **solo se differisce** (write spuri
+  costano ~5s sui modelli con AttributeObserver terzi), e il dialog dello
+  stile dirty è saltato di proposito: il ramo "Save as new style"
+  cambierebbe `selected_style` sostituendo lo stile che porta la foto;
+- **`use_style` / `use_rendering_options` NON sono più esclusi**
+  (2026-08-01): venivano lasciati spenti per la vecchia teoria del
+  "toccarli su MP crasha", smontata dal fix del null-deref. Ora li accende
+  `capture_style!`, che scrive i flag **e** cattura lo stile nella stessa
+  mossa — accenderli e basta è ciò che lascia la pagina nello stato che
+  splatta quando `page.style` è `nil`. Risultato: la scena copiata da una
+  MP nasce con tutte e 8 le proprietà spuntate (grip **giallo**, non
+  rosso). Precondizione di `capture_style!`: la pagina dev'essere quella
+  attiva — il comando nativo la attiva, ma se non lo fosse la cattura
+  viene **saltata con un warning**, mai forzata attivandola in quello
+  stato. Stessa protezione difensiva aggiunta al ramo sincrono
+  (`pages.add` con i Default Scene Properties che hanno "Style and Fog"
+  spento produceva `page.style == nil` + flag accesi = stesso stato
+  pericoloso);
 - command ID overridabile:
   `Sketchup.write_default('SceneManagerPlus', 'add_scene_cmd_id', N)`.
 
@@ -1034,6 +1062,96 @@ Style panel inquina lo stile uscente con le RO Match Photo. Disastro.
 **Per chi scrive plugin che usano `add_matchphoto_page`**: chiamare
 `model.styles.update_selected_style` subito dopo, come fa il nativo.
 Applicato nella nostra copia patchata di `3dg_photomatch.rb`.
+
+## Controlli dei pannelli nativi (`Core::NativePanel`) — 2026-08-01
+
+Quando l'API Ruby non espone un'impostazione **ma il pannello nativo sì**, il
+plugin può pilotare il controllo Win32 vero. Primo (e per ora unico) uso:
+l'opacità Foreground/Background Photo della sezione Match Photo del pannello
+Styles, che non esiste da nessuna parte nell'API (vedi la sezione Match Photo
+per l'elenco degli angoli battuti).
+
+**`fiddle` funziona dentro SU 2019** (stdlib Ruby): si parla con `user32.dll`
+direttamente, niente spawn di PowerShell come per `TextRender`/`TitleBlock`.
+Le `SendMessage` partono dal thread UI di SketchUp, che è lo stesso che
+possiede quelle finestre → sono chiamate sincrone dirette alla window proc,
+nessun rischio di deadlock.
+
+### Le due trappole che fanno "non succede niente"
+
+1. **`TBM_SETPOS` da solo non basta**: sposta il cursore dello slider ma NON
+   notifica il parent. Serve il `WM_HSCROLL` successivo
+   (`SB_THUMBPOSITION` + `SB_ENDSCROLL`, con l'hwnd della trackbar in lParam),
+   altrimenti l'applicazione non sa che il valore è cambiato.
+2. **`BM_SETCHECK` idem**: cambia solo il disegno della checkbox, serve il
+   `WM_COMMAND`/`BN_CLICKED` al parent.
+
+Con solo il primo messaggio tutto "sembra" funzionare (rileggendo il controllo
+il valore è quello nuovo) ma il viewport non cambia: verificare sempre con un
+confronto di render, non con la rilettura del controllo.
+
+### Identificazione dei controlli: etichetta, non ID
+
+Gli ID numerici non sono documentati e cambiano tra versioni. La strada
+primaria è l'**etichetta**: nel pannello ogni slider segue immediatamente la
+propria checkbox, quindi si cerca il `Button` con testo "Foreground Photo" e
+si prende la prima trackbar dopo di lui. Si auto-valida (ha ritrovato
+esattamente gli ID mappati a mano). Gli ID restano come fallback per SU
+localizzato, sovrascrivibili con `write_default` (`mp_fg_track_ctrl_id` ecc.),
+stessa convenzione di `add_scene_cmd_id`.
+
+Per rimappare su un'altra versione: **`Core::NativePanel.dump('Styles')`**
+stampa classe/id/testo/valore di ogni controllo. È l'equivalente di
+`tools/dump-su-menu.ps1` per i command ID dei menu.
+
+Mappa su 19.3.253: `Button 2881 "Foreground Photo"` + trackbar `2884`,
+`Button 2880 "Background Photo"` + trackbar `2882` (range 0..100).
+
+### Note operative
+
+- Il pannello resta una finestra **top-level** anche se ancorato in un tray, e
+  si trova per titolo (`"Styles"`) filtrando per PID. I controlli rispondono ai
+  messaggi **anche quando sono invisibili** (tray su un'altra scheda) —
+  verificato: non serve che l'utente abbia il pannello aperto sulla scheda
+  giusta. Se la finestra non esiste proprio, `panel!` la apre con
+  `UI.show_inspector`.
+- Gli hwnd sono cachati e validati con `IsWindow`, così la chiusura del
+  pannello non lascia handle morti.
+- Tutto degrada: se `fiddle` manca o il controllo non si trova, i chiamanti
+  disabilitano la UI invece di fallire.
+
+### Sezione "Match Photo" nel Mini Style Manager
+
+Checkbox + slider 0-100 + campo numerico per Foreground e Background Photo.
+Dettagli non ovvi:
+
+- **Visibile solo sulle scene Match Photo** (`state.is_matchphoto`): i controlli
+  nativi esistono per qualunque stile ma non fanno nulla altrove. Il contesto è
+  la scena da cui il dialog è stato aperto (fallback: la scena attiva).
+  `match_photo_state` viene letto solo se serve — sulle scene normali non
+  cammina nemmeno l'albero delle finestre.
+- **Niente `update_selected_style`**: misurato che una modifica regge al cambio
+  scena anche senza commit, e su scene MP committare lo stile è la mossa
+  storicamente rischiosa.
+- Drag throttlato a 60ms: ogni invio è un messaggio Win32 + un redraw.
+- Dopo ogni scrittura si ri-pusha lo stato **letto dal pannello**: se la
+  scrittura non fa presa la UI torna al valore reale invece di mentire.
+
+### ⚠️ `selected_style = <stile già selezionato>` NON è un no-op
+
+Riassegnare lo stile corrente **riapplica lo stile salvato e scarta le
+modifiche pendenti**. `StyleDialog.select_style!` ora esce subito se il target
+è già selezionato: senza quella guardia, ogni tick del drag dello slider Match
+Photo (che passa da `select_style!` prima di scrivere) azzerava la scrittura
+precedente. Vale per qualunque codice futuro che tocchi `selected_style=`.
+
+### Non verificato
+
+Se il valore finisca nel `.skp` salvato. `model.modified?` non diventa mai
+`true`, nemmeno dopo `update_selected_style`, quindi i proxy non bastano:
+serve salvare e rileggere da disco. Nota però che stiamo pilotando **lo stesso
+identico controllo** dello slider nativo, quindi il comportamento è per
+costruzione quello di SketchUp.
 
 ## Style pool + nickname per-modello (Fase 1A — "+ New style…")
 
@@ -1218,13 +1336,25 @@ Nessuno strettamente bloccante. Possibili miglioramenti futuri:
   multiplier"). Da indagare se diventa fastidioso.
 - ~~**WM_COMMAND Win32 per Match Photo**~~: **risolto 2026-07-31**, e
   senza Win32 — bastava `send_action`. Vedi sezione "Match Photo".
-- ⚠️ **`Sketchup::Style#name=` e `#description=` ESISTONO in SU 2019**
-  (letti nella lista metodi di `Sketchup::Style` su 19.3.253,
-  2026-07-31). Questo file afferma il contrario in più punti, ed è la
-  premessa su cui è costruito **tutto il pool dei 25 slot**. Non ancora
-  verificato se scrivano davvero o sollevino `NotImplementedError`: se
-  funzionassero, il pool sarebbe rimpiazzabile da una vera creazione di
-  stili con nome arbitrario, e i nickname diventerebbero superflui.
+- ⚠️ **`Sketchup::Style#name=` e `#description=` FUNZIONANO in SU 2019**
+  — non sollevano, scrivono davvero (verificato 2026-08-01 su 19.3.253
+  con rename + ripristino): `style.name` rilegge il nuovo valore,
+  `model.styles.map(&:name)` lo mostra, `model.styles["nuovo nome"]` lo
+  trova, e **rinominare NON sporca lo stile** (`active_style_changed`
+  resta false). Questo file afferma il contrario in più punti ed è la
+  premessa su cui è costruito **tutto il pool dei 25 slot**: con
+  `add_style(template, false)` + `name=` basterebbe **un solo**
+  `_template.style` riusato all'infinito, e i nickname diventerebbero
+  superflui. Due cose però non lo rendono uno swap banale:
+  1. **SU non valida l'unicità**: rinominare uno stile col nome esatto di
+     un altro è accettato in silenzio (due stili omonimi in lista, nessun
+     suffisso automatico). La validazione oggi sui nickname andrebbe
+     spostata sui nomi reali, perché tutto ciò che è chiavato per nome
+     (`SMP_style_nicks`, `SMP_style_colors`, `styles_map`, `assign_style`,
+     `scenes_using_style`, la clipboard) diventerebbe ambiguo.
+  2. **Persistenza su disco non verificata**: serve salvare e rileggere
+     davvero il `.skp` — è il controllo che ha fatto la differenza sul fix
+     "Style and Fog". Farlo PRIMA di toccare il pool.
   **Prima di rimettere mano al pool, testare questi due setter.**
 
 ## Performance su modelli con AttributeObserver di plugin terzi (2026-05)

@@ -246,6 +246,107 @@ window.SMS = (function () {
       'To affect only one scene, duplicate via SketchUp Window → Styles, then reassign.';
     $('footer-text').textContent = state.scenes_count + ' scene(s) use this style';
     populate(state.values);
+    populateMatchPhoto(state.match_photo, state.is_matchphoto);
+  }
+
+  // Match Photo: i valori NON arrivano dalle rendering options (l'API Ruby
+  // non li espone) ma dai controlli del pannello Styles nativo, letti via
+  // Win32. state.match_photo == null significa pannello non raggiungibile:
+  // in quel caso disabilitiamo tutto invece di mostrare valori finti.
+  function populateMatchPhoto(mp, isMatchPhoto) {
+    // Fuori dalle scene Match Photo la sezione sparisce del tutto: i
+    // controlli nativi esistono comunque, ma non farebbero niente.
+    var sec = $('group-matchphoto');
+    if (sec) sec.classList.toggle('hidden', !isMatchPhoto);
+    if (!isMatchPhoto) return;
+    var avail = !!mp;
+    var note = $('mp-unavailable');
+    if (note) note.classList.toggle('hidden', avail);
+    ['foreground', 'background'].forEach(function (which) {
+      var cb = $('ctrl-mp-' + which + '-on');
+      var sl = $('slider-mp-' + which);
+      var nu = $('ctrl-mp-' + which);
+      if (!cb || !sl || !nu) return;
+      var d = avail ? mp[which] : null;
+      if (!d) {
+        cb.disabled = true; sl.disabled = true; nu.disabled = true;
+        cb.checked = false; nu.value = '';
+        return;
+      }
+      cb.disabled = false;
+      if (document.activeElement !== cb) cb.checked = !!d.on;
+      // Rispecchiamo lo stato reale del controllo nativo: nel pannello SU
+      // lo slider resta attivo anche a photo spenta.
+      var en = d.enabled !== false;
+      sl.disabled = !en; nu.disabled = !en;
+      sl.min = String(d.min); sl.max = String(d.max);
+      nu.min = String(d.min); nu.max = String(d.max);
+      if (document.activeElement !== sl) sl.value = String(d.opacity);
+      if (document.activeElement !== nu) nu.value = String(d.opacity);
+    });
+  }
+
+  // Durante il drag mando a Ruby al massimo ogni MP_THROTTLE_MS: ogni invio
+  // e' un messaggio Win32 al pannello nativo piu' un redraw del viewport,
+  // quindi live si', ma non a raffica.
+  var MP_THROTTLE_MS = 60;
+  var mpTimer = null, mpPending = null;
+
+  function scheduleMpApply(which, value) {
+    mpPending = { which: which, value: parseInt(value, 10) };
+    if (mpTimer) return;
+    mpTimer = setTimeout(function () {
+      mpTimer = null;
+      if (mpPending) { call('sm_style_mp_opacity', mpPending); mpPending = null; }
+    }, MP_THROTTLE_MS);
+  }
+
+  function cancelMpApply() {
+    if (mpTimer) { clearTimeout(mpTimer); mpTimer = null; }
+    mpPending = null;
+  }
+
+  function bindMatchPhoto() {
+    ['foreground', 'background'].forEach(function (which) {
+      var cb = $('ctrl-mp-' + which + '-on');
+      var sl = $('slider-mp-' + which);
+      var nu = $('ctrl-mp-' + which);
+
+      if (cb) {
+        cb.addEventListener('change', function () {
+          call('sm_style_mp_enable', { which: which, on: !!cb.checked });
+        });
+      }
+
+      if (sl) {
+        sl.addEventListener('input', function () {
+          if (nu) nu.value = sl.value;
+          scheduleMpApply(which, sl.value);
+        });
+        sl.addEventListener('change', function () {
+          cancelMpApply();
+          call('sm_style_mp_opacity', { which: which, value: parseInt(sl.value, 10) });
+        });
+      }
+
+      if (nu) {
+        var commitNum = function () {
+          var n = parseInt(nu.value, 10);
+          if (isNaN(n)) { nu.value = sl ? sl.value : ''; return; }
+          if (n < 0) n = 0;
+          if (n > 100) n = 100;
+          nu.value = String(n);
+          if (sl) sl.value = String(n);
+          cancelMpApply();
+          call('sm_style_mp_opacity', { which: which, value: n });
+        };
+        nu.addEventListener('change', commitNum);
+        nu.addEventListener('blur', commitNum);
+        nu.addEventListener('keydown', function (e) {
+          if (e.key === 'Enter') { e.preventDefault(); nu.blur(); }
+        });
+      }
+    });
   }
 
   function showScenesOverlay() {
@@ -577,6 +678,7 @@ window.SMS = (function () {
     if (bClr) {
       bClr.addEventListener('click', function () { commitBadgeColor(''); });
     }
+    bindMatchPhoto();
     listenersBound = true;
   }
 

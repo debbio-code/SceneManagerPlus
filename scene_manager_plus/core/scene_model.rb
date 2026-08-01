@@ -992,6 +992,17 @@ module SceneManagerPlus
             end
           end
 
+          # Se pages.add non ha salvato alcuno stile (succede quando i "Default
+          # Scene Properties" di SU hanno "Style and Fog" spento), i due flag
+          # appena accesi puntano al nulla: alla prossima attivazione SU mette
+          # model.styles.selected_style a nil e da li' qualunque operazione puo'
+          # splattare. capture_style! salva nella pagina lo stile del viewport.
+          # Richiede che la pagina sia quella attiva -- pages.add la seleziona,
+          # ma se cosi' non fosse meglio saltare che attivarla in quello stato.
+          if style_missing?(page) && m.pages.selected_page == page
+            capture_style!(page)
+          end
+
           page_id(page) # ensure uid attribute exists
           m.commit_operation
           finish.call(page)
@@ -1082,14 +1093,16 @@ module SceneManagerPlus
             end
           end
 
-          # Due precauzioni Match Photo, entrambe documentate:
-          # 1) MAI scrivere un flag gia' allineato al valore corrente -> il
-          #    subsystem MP marca lo stato dirty e la successiva attivazione
-          #    della scena fa BugSplat (vedi CLAUDE.md, "Crash pattern");
-          # 2) use_style / use_rendering_options restano fuori: toccarli su
-          #    una scena MP sostituisce lo stile che porta la foto. Stessa
-          #    esclusione del comando "Save all properties" in main.rb.
-          keys = FLAG_KEYS - %w[use_style use_rendering_options]
+          # MAI scrivere un flag gia' allineato al valore corrente: sui
+          # modelli con AttributeObserver di plugin terzi ogni write costa
+          # ~5s (vedi CLAUDE.md, "Performance").
+          #
+          # use_style / use_rendering_options restano fuori DA QUESTO LOOP,
+          # ma non perche' vadano lasciati spenti: li accende capture_style!
+          # piu' sotto, che li scrive E cattura lo stile nella stessa mossa.
+          # Accenderli qui e basta lascerebbe la pagina nello stato che fa
+          # BugSplat quando page.style e' nil (vedi capture_style!).
+          keys = FLAG_KEYS - STYLE_FLAG_KEYS
           keys.each do |k|
             setter = "#{k}="
             next unless page.respond_to?(setter)
@@ -1115,6 +1128,28 @@ module SceneManagerPlus
             rescue => e
               warn "[SM+] finalize_native_page: set_visibility failed for #{layer.name rescue '?'}: #{e.message}"
             end
+          end
+
+          # "Style and Fog" (use_style + use_rendering_options): il comando
+          # nativo rispetta i "Default Scene Properties" globali di SU, quindi
+          # se l'utente li ha personalizzati la scena nasce senza quei flag e
+          # il grip resta rosso ("some properties not recorded"). Li accendiamo
+          # con capture_style!, che scrive i flag e subito dopo fa
+          # page.update(STYLE|RO) per salvare nella pagina lo stile che il
+          # viewport sta mostrando -- sulle scene MP e' lo stile che porta la
+          # foto, e la sequenza e' quella verificata il 2026-08-01 su 19.3.253
+          # (flag + update con la pagina attiva: stabile, foto intatta).
+          #
+          # PRECONDIZIONE di capture_style!: la pagina dev'essere quella
+          # attiva. Il comando nativo "Add Scene" attiva la scena appena
+          # creata, quindi normalmente lo e'. Se non lo fosse NON attiviamola
+          # qui: attivare una pagina con use_style acceso e style == nil e'
+          # esattamente cio' che azzera model.styles.selected_style.
+          if m.pages.selected_page == page
+            capture_style!(page)
+          else
+            warn "[SM+] finalize_native_page: '#{page.name}' non e' la pagina attiva, " \
+                 "Style and Fog lasciato com'e' (cattura saltata)"
           end
 
           page_id(page) # ensure uid attribute exists
