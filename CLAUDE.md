@@ -582,12 +582,20 @@ loop. Soluzione: settare EdgeWidth/ProfileWidth **dentro lo step**, dopo
 `pages.selected_page = page` e prima di `view.write_image` (sia in Exporter
 sia in Previews).
 
-**Limite noto sulle thumbnails**: anche con il fix sopra, il line scale
-multiplier sulle thumbnail **non sembra produrre cambio visibile**, mentre
-sull'export funziona. Ipotesi non confermata: a 300×150 con
-`antialias: false` la rasterizzazione di SU clampa la line width a 1px.
-Va indagato più a fondo — per ora il moltiplicatore Thumbnails è esposto
-ma di fatto inefficace.
+⚠️ **TUTTO QUANTO SOPRA È INEFFICACE — misurato 2026-08-02.**
+`rendering_options['EdgeWidth']` **non esiste** in SU 2019 (una delle 61
+chiavi enumerate: non c'è): si scrive senza errore e si rilegge `nil`. Quindi
+la guardia `prev_edge_width.is_a?(Numeric)` in `Exporter` è sempre falsa e il
+ramo non gira **mai**, né su export né su thumbnail. La vecchia nota
+"sulle thumbnail non funziona, sull'export sì" era sbagliata in entrambe le
+metà, e l'ipotesi del clamp a 300×150 era una spiegazione costruita su una
+premessa falsa (quarta volta che succede in questo progetto: vedi Match Photo).
+
+Gli **spigoli ordinari non hanno spessore** in SketchUp — sono sempre 1 px.
+Hanno una larghezza solo `SilhouetteWidth` (profili, round-trip esatto fino a
+20), `SectionCutWidth`, `DepthQueWidth`, `LineEndWidth`. Il fix va rifatto su
+quelle chiavi — vedi `docs/SU2019-LESSONS.md`, sezione "RenderingOptions: le
+chiavi inesistenti…", e il task aperto sul moltiplicatore.
 
 ## `add_from_view` e visibilità layer — risolto (2026-05)
 
@@ -1645,6 +1653,99 @@ Trappole / note di design:
   (l'utente non lo usa). `#apply-status` e `setStatus` restano (li usa ancora
   il "Saved" del naming auto-save); `SMS.setApplyResult` / `sm_naming_apply`
   sono ora dead-code innocuo.
+
+## Stampa in scala — progettata, Fase 0 conclusa (2026-08-02)
+
+**Stato: nessun codice scritto.** Fase 0 (misure preliminari) chiusa con esito
+positivo; l'impianto sotto è il riferimento per iniziare la Fase 1.
+
+### Vincolo di prodotto (richiesta esplicita dell'utente)
+
+Deve restare una funzione **completamente separata** dall'export a serie:
+finestra propria, impostazioni proprie, e agisce **solo sulle scene
+selezionate**. Nessuna fusione con `ExportDialog`/`Exporter.export`. In comune
+solo gli helper di basso livello (`imagerep_to_bgra`, `blend_stamp!`,
+`draw_frame!`, `pad_white`, `TitleBlock.render_batch`), che sono già
+`module_function` e quindi riusabili senza refactor.
+
+Output scelto: **file immagine alla misura fisica esatta** (DPI scritti nel
+file, così stampa giusto ovunque). PDF e stampa diretta su stampante sono
+rimandati — la stampa diretta è dove la scala si perde in silenzio (basta un
+"adatta alla pagina" nel driver).
+
+### Il principio
+
+In proiezione parallela `camera.height` è **esattamente** l'estensione
+verticale inquadrata (in pollici). Quindi:
+
+1. foglio (es. A3 orizzontale) − margini − fascia cartiglio = area di disegno
+   in mm (es. 400 × 252);
+2. scala 1:50 → l'area deve coprire 20000 × 12600 mm di modello;
+3. si impone `camera.height` = 12600 mm;
+4. si esporta a DPI scelti: 400 mm @300 DPI = 4724 px, 252 mm = 2976 px.
+
+1 mm su carta = 50 mm nel modello **per costruzione**. Il verso inverso
+("questa inquadratura che scala è?") arrotonda alla scala normalizzata più
+vicina.
+
+### Fatti misurati in Fase 0 (19.3.253, dettagli e numeri in `docs/SU2019-LESSONS.md`)
+
+| Domanda | Esito |
+|---|---|
+| `write_image` con aspect ≠ viewport: conserva altezza o larghezza? | **Altezza**, sempre. Pixel quadrati |
+| La scala è esatta? | ✅ scarto 1 px **costante** al raddoppio di risoluzione = overdraw del bordo, non deriva |
+| Serve toccare `camera.aspect_ratio`? | ❌ no → **zero rischio** di inquinare l'euristica `matchphoto?` |
+| Tetto di `write_image` | Nessun clamp fino a 14043×9933 (A0@300DPI), 6.8s su scena vuota |
+| Vero collo di bottiglia | La memoria del composite (A0@300 = ~560 MB di buffer BGRA), **non misurata su modello reale** |
+
+### ⚠️ Lo spessore delle linee ribalta l'intuizione sui DPI
+
+Gli spigoli ordinari sono **sempre 1 px** (non esiste una loro larghezza — vedi
+sezione "Line scale multiplier"). Quindi **sono i DPI a decidere la linea più
+sottile sulla carta**, e alzarli *peggiora* il tratto:
+
+| DPI | linea ordinaria su carta |
+|---|---|
+| 150 | 0,17 mm (≈ rapidograph 0.18) |
+| 200 | 0,13 mm |
+| 300 | 0,085 mm — grigina |
+| 600 | 0,04 mm — sparisce |
+
+Conseguenze di progetto: la finestra deve mostrare **lo spessore in mm
+risultante** accanto alla scelta DPI; la gerarchia del disegno va costruita sui
+**profili** (`SilhouetteWidth`, che uno spessore ce l'ha), non sugli spigoli;
+gli spessori si esprimono in mm e si convertono in px dai DPI.
+
+### Altri limiti intrinseci da comunicare nella UI
+
+- **Solo scene in proiezione parallela.** In prospettiva (two-point inclusa) la
+  scala non esiste — la stampa nativa SU infatti forza "fit to page". Le scene
+  prospettiche nella selezione vanno elencate e saltate, non "aggiustate".
+- La scala è esatta per ciò che giace su un piano **parallelo allo schermo**:
+  piante e prospetti sì, assonometrie solo nel piano frontale. Identico al
+  nativo.
+- **Testi e quote a dimensione-schermo escono microscopici**, perché SU li
+  misura in pixel e qui si lavora a migliaia di pixel. Vanno messi in
+  dimensione-modello. Si nota solo a stampa fatta → serve un avviso.
+
+### Fasi previste
+
+| Fase | Contenuto |
+|---|---|
+| 0 ✅ | Misure preliminari (sopra) |
+| 1 | Motore: scala↔inquadratura↔pixel, A4→A0, margini, DPI con mm mostrati, spessori profili in mm. Singola scena, file a misura esatta. Verifica: A3 1:50, col metro sul foglio 20 cm = 10 m nel modello |
+| 2 | Finestra "Print to scale" (formato, orientamento, scala + suggerimento normalizzato, DPI, spessori, anteprima numerica: area coperta, px, MB) |
+| 3 | Campo SCALA nel cartiglio + scaletta grafica opzionale + cornice a misura |
+| 4 | Serie sulle scene selezionate, scala fissa o migliore-per-ciascuna, numerazione tavola esistente |
+| 5 | Eventuali: PDF, stampa diretta, render a mattonelle per A1/A0 (possibile **solo** grazie alla proiezione parallela: spostando la vista di quantità esatte i pezzi combaciano al pixel) |
+
+### Scelte assunte, non ancora confermate dall'utente
+
+- La scala **la impone l'utente** e il plugin ri-inquadra; la scala
+  normalizzata più vicina è mostrata come suggerimento, non applicata da sola.
+- Punto di accesso: **voce autonoma nel menu Plugins** (così è anche
+  assegnabile a scorciatoia da Preferences → Shortcuts, vedi sezione
+  "Shortcut globali"), eventualmente più un bottone se si trova spazio.
 
 ## Trappola Edit tool → smart quotes nei file JS (2026-05)
 

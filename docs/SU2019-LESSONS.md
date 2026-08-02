@@ -51,10 +51,75 @@ end
 
 ### `view.write_image(:scale_factor)` esiste solo in SU 2020+
 
-Per Line Scale Multiplier su SU 2019 fallback: manipola
-`model.rendering_options['EdgeWidth']` e `['ProfileWidth']` temporaneamente
-prima del batch render, ripristina in `finish` (anche su cancel/errore).
-Funziona solo se lo stile attivo ha edges/profili visibili.
+⚠️ **Il fallback documentato qui — manipolare `rendering_options['EdgeWidth']`
+— non ha mai funzionato.** Vedi la sezione seguente: quella chiave non esiste.
+
+### RenderingOptions: le chiavi inesistenti si scrivono in silenzio e si rileggono `nil`
+
+Misurato via MCP `eval_ruby` su 19.3.253 (2026-08-02) enumerando tutte le
+**61** chiavi con `ro.each_pair`:
+
+| Chiave | Realtà |
+|---|---|
+| `EdgeWidth` | ❌ **non esiste** — `ro['EdgeWidth'] = 6` non solleva, `ro['EdgeWidth']` ritorna `nil` |
+| `DisplayEdges` | ❌ non esiste — la chiave vera è `EdgeDisplayMode` |
+| `SilhouetteWidth` | ✅ round-trip esatto, testato fino a 20 |
+| `DepthQueWidth` | ✅ (=4 default) |
+| `LineEndWidth` | ✅ (=7 default) |
+| `SectionCutWidth` | ✅ (=3 default) |
+| `LineExtension` | ✅ (=2 default) |
+
+**Gli spigoli ordinari non hanno spessore in SketchUp**: sono sempre 1 px.
+Solo profili, sezioni, depth cue ed estremi hanno una larghezza. Coerente con
+il pannello Styles nativo, che infatti non espone alcun campo per gli edge.
+
+Due conseguenze:
+
+1. **`export.line_scale_multiplier` e `preview.line_scale_multiplier` non
+   hanno alcun effetto su SU 2019.** In `Core::Exporter` la guardia
+   `prev_edge_width.is_a?(Numeric)` è sempre falsa (il valore è `nil`),
+   quindi il ramo che scalerebbe anche i profili non gira mai; e
+   `scale_factor:` passato a `write_image` è ignorato fino a SU 2020. La
+   nota storica "sull'export funziona, sulle thumbnail no" era sbagliata in
+   entrambe le metà: non ha mai funzionato da nessuna parte.
+2. **Regola generale**: per `RenderingOptions` il pattern "scrivo, non
+   esplode, quindi la chiave esiste" è **falso**. Validare sempre con un
+   round-trip (`ro[k] = v; ro[k] == v`) o con `each_pair`, mai col solo
+   assegnamento. Stessa famiglia di errore di `ProfileWidth`, che invece
+   esiste ma è un alias ignorato in scrittura (vedi CLAUDE.md, Mini Style
+   Manager).
+
+### `view.write_image` conserva sempre l'ALTEZZA inquadrata
+
+Misurato (2026-08-02, 19.3.253) su un quadrato di 1 m² in proiezione
+parallela con `camera.height = 2500 mm`, esportato a proporzioni diverse da
+quelle del viewport (1916×966):
+
+| Immagine chiesta | Estensione attesa se height-preserving | Misurata |
+|---|---|---|
+| 600×800 | 320 px | 319 |
+| 800×600 | 240 px | 239 |
+| 1000×500 | 200 px | 199 |
+| 2000×1000 | 400 px | 399 |
+| 4000×2000 | 800 px | 799 |
+
+Cioè: l'estensione verticale del render **è esattamente `camera.height`**,
+indipendentemente dall'aspect dell'immagine richiesta; la larghezza si adatta
+di conseguenza e i pixel restano quadrati. Lo scarto di 1 px è **costante al
+raddoppio della risoluzione** (399→799, non 398→797): è l'overdraw della linea
+di bordo disegnata sul perimetro della faccia, non una deriva di scala. La
+scala è esatta.
+
+Conseguenza pratica (feature "stampa in scala"): **non serve toccare
+`camera.aspect_ratio`** per ottenere proporzioni arbitrarie — e quindi non si
+rischia di inquinare l'euristica `matchphoto?`, che si basa proprio su
+`aspect_ratio != 0`.
+
+**Dimensione massima**: nessun ritaglio silenzioso fino a **14043×9933**
+(A0 a 300 DPI), `ok=true` e PNG delle dimensioni chieste, 6.8s su scena vuota.
+Il tetto vero non è il render ma la memoria del composite (quel formato =
+~560 MB di buffer BGRA in una String Ruby): da misurare su modello reale
+prima di promettere formati oltre l'A2.
 
 ### `view.write_image` per JPG apre la dialog "JPG Image Options"
 
