@@ -17,18 +17,30 @@ module SceneManagerPlus
         sep      = (settings['separator'] || '_').to_s
         number   = idx.to_s.rjust(pad, '0')
 
-        prefix = case settings['prefix_mode']
-                 when 'custom'   then (settings['prefix_custom'] || '').to_s.strip
-                 when 'skp_name' then sanitize(skp_title.to_s)
-                 when 'skp_first_word' then sanitize(skp_title.to_s).split(/\s+/).first.to_s
-                 else ''
-                 end
+        prefix = prefix_for(settings, skp_title)
 
         parts = []
         parts << prefix unless prefix.empty?
         parts << number
         parts << original_name.to_s if settings['include_scene_name'] && !original_name.to_s.empty?
         parts.join(sep)
+      end
+
+      # Solo il PREFISSO del pattern, senza numero né nome scena. Serve al
+      # campo CLIENTE del cartiglio, che per scelta dell'utente riusa il
+      # prefisso del naming.
+      #
+      # ⚠️ Deve rispettare `prefix_mode`, non leggere solo `prefix_custom`:
+      # con 'skp_first_word' (default attuale) il Cliente uscirebbe vuoto —
+      # è già successo una volta. `Core::Exporter` ne ha una copia più
+      # vecchia inline: se si tocca questa regola, allinearla.
+      def prefix_for(settings, skp_title)
+        case settings['prefix_mode']
+        when 'custom'         then (settings['prefix_custom'] || '').to_s.strip
+        when 'skp_name'       then sanitize(skp_title.to_s)
+        when 'skp_first_word' then sanitize(skp_title.to_s).split(/\s+/).first.to_s
+        else ''
+        end
       end
 
       # Rimuove caratteri non adatti a nomi scena/file dal titolo SKP.

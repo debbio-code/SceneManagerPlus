@@ -197,6 +197,29 @@ window.SM = (function () {
 
   function setStatus(msg) { if (statusEl) statusEl.textContent = msg; }
 
+  // Icona "scena in scala di stampa". Compare SOLO sulle scene che hanno una
+  // scala impostata, nello stesso slot del badge variante colore (se una
+  // scena ha entrambi stanno affiancati). Il numero della scala sta nel
+  // tooltip: a 14 px non ci starebbe scritto.
+  // Stato 'warn' = l'inquadratura salvata nella scena non e' piu' a quella
+  // scala (di solito perche' e' stato premuto Update dal pannello nativo).
+  function printScaleBadgeHtml(scene) {
+    var ps = scene && scene.print_scale;
+    if (!ps) return '';
+    var title = ps.ok
+      ? 'Print scale ' + ps.label + ' on ' + ps.sheet +
+        ' - click to bring the view back to this scale'
+      : 'Print scale ' + ps.label + ' on ' + ps.sheet +
+        ' - WARNING: ' + (ps.reason || 'out of scale') +
+        '. Click to fix and store it.';
+    // Due immagini invece di un filtro CSS: su un glifo a tinta piatta un
+    // sepia/hue-rotate da' risultati imprevedibili, mentre due PNG sono
+    // esattamente il colore voluto.
+    return '<img class="row-scale-badge' + (ps.ok ? '' : ' is-warn') +
+      '" src="img/' + (ps.ok ? 'scale.png' : 'scale_warn.png') +
+      '" title="' + escapeAttr(title) + '" alt="scale">';
+  }
+
   // Costruisce una scene-row. parent = 'root' o folder_id.
   function makeSceneRow(scene, idx, parent) {
     var row = document.createElement('div');
@@ -258,6 +281,7 @@ window.SM = (function () {
       (scene.has_variant
         ? '<img class="row-variant-badge" src="img/variant.png" title="Color variant defined - click to edit" alt="variant">'
         : '') +
+      printScaleBadgeHtml(scene) +
       '<span class="row-scene-color" title="Scene color — click to pick, right-click to clear"' + sceneSwatchStyle + '></span>';
     row.querySelector('.name').textContent = scene.name;
     row.addEventListener('mousedown', function (e) { onRowClick(e, scene.id); });
@@ -470,6 +494,27 @@ window.SM = (function () {
         SMBridge.pasteVariant(sceneId);
       });
       menu.appendChild(pItem);
+    }
+    // Stampa in scala: impostare/cambiare la scala della scena, e toglierla.
+    var psItem = document.createElement('div');
+    psItem.className = 'ctx-item';
+    psItem.textContent = (sc && sc.print_scale)
+      ? 'Print scale (' + sc.print_scale.label + ')...'
+      : 'Print scale...';
+    psItem.addEventListener('click', function () {
+      hideContextMenu();
+      SMBridge.printScaleEdit(sceneId);
+    });
+    menu.appendChild(psItem);
+    if (sc && sc.print_scale) {
+      var psClear = document.createElement('div');
+      psClear.className = 'ctx-item';
+      psClear.textContent = 'Remove print scale';
+      psClear.addEventListener('click', function () {
+        hideContextMenu();
+        SMBridge.printScaleClear(sceneId);
+      });
+      menu.appendChild(psClear);
     }
     document.body.appendChild(menu);
     // Posiziona dentro la viewport
@@ -1005,6 +1050,29 @@ window.SM = (function () {
       if (!row || !row.dataset || !row.dataset.id) return;
       SMBridge.openVariant(row.dataset.id);
     });
+
+    // Icona scala di stampa: click sinistro rimette la vista in scala e la
+    // salva nella scena; click destro apre le impostazioni di stampa.
+    listEl.addEventListener('mousedown', function (e) {
+      if (!e.target.classList || !e.target.classList.contains('row-scale-badge')) return;
+      e.stopPropagation();
+      e.preventDefault();
+    }, true);
+    listEl.addEventListener('click', function (e) {
+      if (!e.target.classList || !e.target.classList.contains('row-scale-badge')) return;
+      e.stopPropagation();
+      var row = e.target.closest('.scene-row');
+      if (!row || !row.dataset || !row.dataset.id) return;
+      SMBridge.printScaleApply(row.dataset.id);
+    });
+    listEl.addEventListener('contextmenu', function (e) {
+      if (!e.target.classList || !e.target.classList.contains('row-scale-badge')) return;
+      e.preventDefault();
+      e.stopPropagation();
+      var row = e.target.closest('.scene-row');
+      if (!row || !row.dataset || !row.dataset.id) return;
+      SMBridge.printScaleEdit(row.dataset.id);
+    }, true);
 
     // Export-include checkbox: blocca selezione/drag, invia toggle a Ruby.
     // Se la row cliccata è dentro una selezione multipla, applica a tutte:

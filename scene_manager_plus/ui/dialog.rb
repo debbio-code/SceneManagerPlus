@@ -76,7 +76,12 @@ module SceneManagerPlus
         # equivalente a un click utente, non un write per-tick.
         begin
           page_for_variant = m.pages.selected_page
-          Core::Variants.on_scene_activated(page_for_variant) if page_for_variant
+          if page_for_variant
+            Core::Variants.on_scene_activated(page_for_variant)
+            # Stampa in scala: stessa deroga: legge un attributo e al massimo
+            # muove la camera, nessuna write sul modello.
+            Core::PrintScale.on_scene_activated(page_for_variant)
+          end
         rescue => e
           warn "[SM+] poll variant apply: #{e.class}: #{e.message}"
         end
@@ -275,6 +280,34 @@ module SceneManagerPlus
         dlg.add_action_callback('sm_open_variant') do |_ctx, payload|
           data = parse(payload)
           VariantDialog.show_for(data['id']) if data['id']
+        end
+
+        # Stampa in scala (Fase 2). Il click sull'icona rimette la vista in
+        # scala E salva l'inquadratura nella scena, così il badge torna
+        # verde; il context menu permette di impostarla o toglierla.
+        dlg.add_action_callback('sm_print_scale_apply') do |_ctx, payload|
+          data = parse(payload)
+          page = Core::SceneModel.find_by_id(data['id'])
+          if page
+            ok, err = Core::PrintScale.reapply_and_store(page)
+            ::UI.messagebox(err) if !ok && err
+            Sketchup.status_text = "'#{page.name}' back to its print scale" if ok
+          end
+          push_state
+        end
+
+        dlg.add_action_callback('sm_print_scale_edit') do |_ctx, payload|
+          data = parse(payload)
+          page = Core::SceneModel.find_by_id(data['id'])
+          Core::PrintScale.run_interactive(page) if page
+          push_state
+        end
+
+        dlg.add_action_callback('sm_print_scale_clear') do |_ctx, payload|
+          data = parse(payload)
+          page = Core::SceneModel.find_by_id(data['id'])
+          Core::PrintScale.clear_scene_config(page) if page
+          push_state
         end
 
         # Copy/paste variante colore tra scene (clipboard RAM di sessione,

@@ -14,6 +14,7 @@ module SceneManagerPlus
   require File.join(PLUGIN_DIR, 'core', 'text_render')
   require File.join(PLUGIN_DIR, 'core', 'titleblock')
   require File.join(PLUGIN_DIR, 'core', 'exporter')
+  require File.join(PLUGIN_DIR, 'core', 'print_scale')
   require File.join(PLUGIN_DIR, 'core', 'clipboard')
   require File.join(PLUGIN_DIR, 'ui', 'dialog')
   require File.join(PLUGIN_DIR, 'ui', 'settings_dialog')
@@ -107,6 +108,26 @@ module SceneManagerPlus
       'Tick all Properties to save on the currently-active scene'
     save_all_cmd.menu_text = 'Save all properties on active scene'
     ::UI.menu('Plugins').add_item(save_all_cmd)
+
+    # "Print to scale": funzione volutamente SEPARATA dall'export a serie
+    # (finestra propria, impostazioni proprie). Fase 1 = motore + questo
+    # harness a inputbox sulla scena attiva; la finestra vera arriva in
+    # Fase 2. Voce di menu autonoma anche per poterle assegnare uno
+    # shortcut da Window > Preferences > Shortcuts.
+    print_cmd = ::UI::Command.new("#{PLUGIN_NAME}: Print to scale") do
+      begin
+        SceneManagerPlus::Core::PrintScale.run_interactive
+      rescue => e
+        ::UI.messagebox("Print to scale failed:\n#{e.class}: #{e.message}")
+        warn "[SM+] print to scale: #{e.class}: #{e.message}"
+        warn e.backtrace.first(5).join("\n") if e.backtrace
+      end
+    end
+    print_cmd.tooltip = 'Export the active scene at an exact printing scale'
+    print_cmd.status_bar_text =
+      'Render the active scene so that 1 mm on paper is exactly N mm in the model'
+    print_cmd.menu_text = 'Print to scale...'
+    ::UI.menu('Plugins').add_item(print_cmd)
 
     # Auto-riapertura come i pannelli nativi: se la finestra era aperta
     # all'ultima chiusura di SU, la ri-mostriamo. Salvato in Dialog#show e

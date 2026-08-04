@@ -1654,10 +1654,12 @@ Trappole / note di design:
   il "Saved" del naming auto-save); `SMS.setApplyResult` / `sm_naming_apply`
   sono ora dead-code innocuo.
 
-## Stampa in scala — progettata, Fase 0 conclusa (2026-08-02)
+## Stampa in scala — Fase 1 implementata (2026-08-04)
 
-**Stato: nessun codice scritto.** Fase 0 (misure preliminari) chiusa con esito
-positivo; l'impianto sotto è il riferimento per iniziare la Fase 1.
+**Stato: motore scritto (`core/print_scale.rb`) e misurato dal vivo su
+19.3.253** (tabella in fondo alla sezione). Manca solo la prova finale col
+metro su un foglio stampato davvero. Il resto della sezione è il riferimento
+per le fasi successive.
 
 ### Vincolo di prodotto (richiesta esplicita dell'utente)
 
@@ -1733,11 +1735,283 @@ gli spessori si esprimono in mm e si convertono in px dai DPI.
 | Fase | Contenuto |
 |---|---|
 | 0 ✅ | Misure preliminari (sopra) |
-| 1 | Motore: scala↔inquadratura↔pixel, A4→A0, margini, DPI con mm mostrati, spessori profili in mm. Singola scena, file a misura esatta. Verifica: A3 1:50, col metro sul foglio 20 cm = 10 m nel modello |
-| 2 | Finestra "Print to scale" (formato, orientamento, scala + suggerimento normalizzato, DPI, spessori, anteprima numerica: area coperta, px, MB) |
-| 3 | Campo SCALA nel cartiglio + scaletta grafica opzionale + cornice a misura |
-| 4 | Serie sulle scene selezionate, scala fissa o migliore-per-ciascuna, numerazione tavola esistente |
+| 1 ✅ | Motore: scala↔inquadratura↔pixel, A4→A0, margini, DPI con mm mostrati, spessori profili in mm. Singola scena, file a misura esatta. Verifica: A3 1:50, col metro sul foglio 20 cm = 10 m nel modello |
+| 2a ✅ | La scala diventa **proprietà della scena**: memoria sulla pagina, riapplicazione all'attivazione, icona in lista, inquadratura del foglio nel viewport |
+| 2b | Finestra vera al posto dell'harness a `UI.inputbox` (numeri live: area coperta, px, MB, mm del tratto) |
+| 3a ✅ | Cartiglio dentro la fascia della tavola in scala, con il box **SCALA / STAMPA** |
+| 3b | Scaletta grafica da 200 mm che fa anche da righello di taratura + taratura stampante in percentuale (globale per macchina, applicata via il DPI scritto nel file) |
+| 4 | Serie sulle scene selezionate, ognuna col suo foglio e la sua scala, numerazione tavola esistente |
 | 5 | Eventuali: PDF, stampa diretta, render a mattonelle per A1/A0 (possibile **solo** grazie alla proiezione parallela: spostando la vista di quantità esatte i pezzi combaciano al pixel) |
+
+### Fase 1 — `Core::PrintScale`: le decisioni non ovvie
+
+Motore in `core/print_scale.rb`, settings nel gruppo `print_scale`, accesso
+via **Plugins → Print to scale...** (`UI::Command` con `menu_text`, così è
+assegnabile a scorciatoia). L'harness a `UI.inputbox` in `run_interactive` è
+**temporaneo**: la finestra vera è Fase 2 e leggerà lo stesso gruppo settings.
+
+**L'altezza camera si ricava dai PIXEL arrotondati, non dai mm nominali.**
+`camera.height = px_h / DPI × denominatore` (pollici). Partendo dai mm
+nominali, l'arrotondamento a pixel del render sposterebbe la scala di ~0,01%:
+poco, ma è una discrepanza gratuita e non misurabile dall'utente. Così invece
+la scala è esatta **per l'immagine che esce davvero**. Verificato per costruzione
+nei test: 20 cm sul foglio = 10.000,0000 mm nel modello a 1:50.
+
+⚠️ **I DPI vanno scritti DENTRO il file, e né `write_image` né
+`ImageRep#save_file` lo fanno.** Senza, ogni programma di stampa inventa la
+propria risoluzione (di solito 96 DPI) e la scala salta silenziosamente —
+l'immagine è giusta, la stampa no. `stamp_dpi!` scrive il chunk **pHYs** nel
+PNG (inserito dopo IHDR, sostituendo un eventuale pHYs preesistente invece di
+duplicarlo) e i campi densità dell'header **JFIF** nel JPG. Il CRC32 del chunk
+PNG è calcolato con una tabella in Ruby puro (13 byte per chiamata): **non
+dipendere da `Zlib`**, che non è verificato presente in SU 2019.
+
+Altri punti che sembrano dettagli e non lo sono:
+
+- **Gli spessori si scrivono DOPO `pages.selected_page = page`**, stessa
+  trappola dell'`Exporter`: se la scena ha `PAGE_USE_RENDERING_OPTIONS`,
+  attivarla ripristina i valori salvati e cancella quanto scritto prima.
+  Si scrivono sia `SilhouetteWidth` sia `ProfileWidth` (regola di progetto),
+  più `DrawSilhouettes = true` — senza profili accesi la loro larghezza non
+  si vede. Tutto ripristinato nell'`ensure`, insieme all'altezza camera.
+- **Ripristino della vista**: si rimette `camera.height` al valore precedente
+  e si ri-attiva la scena solo se era diversa. Ri-attivare quella già attiva
+  costerebbe un giro di varianti colore per niente.
+- **Render su PNG temporaneo, poi composite sul path finale.** Su JPG evita la
+  doppia ricompressione (renderizzare in JPG e ricomprimerlo dopo il composite).
+- **`sheet_mode`**: `full_sheet` produce il foglio intero con i margini bianchi
+  (si stampa "dimensione reale" e i margini tornano), `drawing_only` solo
+  l'area di stampa. La cornice è disegnata attorno all'**area di stampa**
+  (disegno + fascia cartiglio), non attorno al foglio: è il bordo tavola, e in
+  Fase 3 il cartiglio ci si appoggia dentro.
+- **Guardia prospettiva**: si legge `view.camera.perspective?` **dopo** aver
+  attivato la scena (la camera della pagina potrebbe non essere quella
+  ripristinata se `use_camera?` è false), e si esce con un messaggio che dice
+  cosa fare, non con un errore.
+- **A0@300 DPI = ~1043 MB di picco** (foglio + render vivi insieme): sopra
+  `PEAK_MB_WARN`, quindi l'utente vede un avviso prima di lanciare. Il numero
+  esce da `compute` — Fase 2 lo mostrerà live invece che in un messagebox.
+- `parse_num` accetta la **virgola decimale** ("0,35") e la forma "1:50":
+  l'utente scrive in italiano e le scale si dicono così.
+
+**Collaudo senza SketchUp**: `compute`, `parse_num`, il CRC32, l'iniezione dei
+DPI e `draw_rect_frame!` non toccano l'API SU, quindi il file si carica in un
+Ruby normale (`C:\Ruby33-x64`) e si testa da riga di comando — stesso spirito
+del trucco per il JS del Properties dialog. Il CRC in Ruby puro è stato
+validato contro `Zlib.crc32`, e il PNG prodotto ri-parsato chunk per chunk.
+
+### Fase 1 — misure sul campo (2026-08-04, 19.3.253)
+
+Metodo: quadrato di **10 m** con spigoli nascosti (così si misura il colore,
+non il tratto), vista dall'alto in proiezione parallela, render via
+`PrintScale.render`, poi estensione in pixel letta sull'immagine prodotta con
+`ImageRep` + `Exporter.imagerep_to_bgra`.
+
+| Prova | Atteso | Misurato | Errore |
+|---|---|---|---|
+| A3 1:50 @200 DPI | 1574,80 px | 1574 | −0,80 px |
+| A3 1:100 @200 DPI | 787,40 px | 788 | +0,60 px |
+| A3 1:50 @**400** DPI | 3149,61 px | 3149 | −0,61 px |
+| A4 portrait 1:200 @150 DPI | 295,28 px | 295 | −0,28 px |
+
+⚠️ **La prova che conta è la terza riga, non le prime.** Raddoppiando la
+risoluzione l'errore **non raddoppia** (−0,80 su 1574 px → −0,61 su 3149 px):
+resta sotto il pixel in valore assoluto. Se ci fosse una deriva di scala
+crescerebbe in proporzione. È lo stesso ragionamento con cui la Fase 0 aveva
+scartato l'ipotesi di deriva (399→799 e non 398→797) — **una misura di errore
+presa a una sola risoluzione non distingue un arrotondamento da una deriva.**
+
+Corollario già inciampato una volta: **con gli spigoli visibili** la stessa
+misura dà +1,72 px invece di −0,28, perché il tratto nero deborda oltre il
+colore. Non è un errore di scala, è la larghezza della linea — ma misurando
+solo quel caso si concluderebbe a torto che la scala sbaglia.
+
+Verificato nello stesso giro, tutto con esito positivo:
+
+- immagine delle dimensioni esatte previste su tutti i formati provati;
+- **spessore profili esatto**: 0,5 mm → 4 px chiesti → **4 px di nero
+  misurati**; 1,0 mm → 8 px → 8 px;
+- `SilhouetteWidth`/`DrawSilhouettes`/`SectionCutWidth` e altezza camera
+  **ripristinate** ai valori di partenza;
+- foglio bianco, cornice nera di 2 px sul bordo dell'area di stampa, fascia
+  cartiglio riservata e vuota, disegno centrato entro 1 px;
+- DPI riletti dal file: 150,01 / 200,0 / 400,0, CRC dei chunk validi;
+- guardia prospettiva: rifiuta e **non lascia file** dietro di sé.
+
+Tempi su scena vuota: 2,6 s per A3@200 DPI, 9,7 s per A3@400 DPI.
+
+### Fase 2a — la scala è una proprietà della scena (2026-08-04)
+
+**Riorientamento chiesto dall'utente**, e sostituisce il piano originale
+("finestra separata che agisce sulle scene selezionate, senza memoria"): una
+pianta a 1:50 è a 1:50 sempre, non è un'impostazione di export. Quindi la
+configurazione di stampa vive **sulla pagina** e la vista viene rimessa in
+scala a ogni attivazione, esattamente come le varianti colore.
+
+Decisioni dell'utente, prese esplicitamente (2026-08-04):
+
+- **bande grigie attive di default** sulle scene in scala;
+- **taratura della stampante globale per macchina**, non per file né per
+  scena (è una proprietà della stampante — Fase 3);
+- **icona** nella riga, non testo: il numero sta nel tooltip. Vive nello
+  **stesso slot del badge variante colore**, e se una scena ha entrambi si
+  affiancano (verificato nel DOM). È una **"S" grande a tinta piatta**
+  (`img/scale.png`), nello stile pieno-colore del badge variante.
+
+⚠️ **Lo stato "fuori scala" è una SECONDA immagine (`scale_warn.png`), non un
+filtro CSS.** Su un glifo a tinta piatta un `sepia/saturate/hue-rotate` dà
+risultati imprevedibili e non verificabili senza vederli renderizzati; due PNG
+sono esattamente il colore voluto. Si generano con
+`tools/`-style script in scratchpad (System.Drawing, font più pesante
+disponibile, "S" come `GraphicsPath` scalato per riempire il riquadro — le
+metriche del font non bastano). ⚠️ In quello script i parametri del colore si
+chiamano `ColR/ColG/ColB`: **PowerShell non distingue maiuscole da minuscole**,
+quindi un parametro `$G` collide con `$g` di Graphics e `$B` con `$b` dei
+bounds — stessa famiglia della trappola `$w`/`$W` del cartiglio.
+
+### ⚠️ "Le bande non corrispondono alla tavola": quasi sempre è un equivoco
+
+Segnalato dall'utente il 2026-08-04, e **non era un bug**. Le bande grigie
+mostrano l'area di disegno della **stampa in scala**; la tavola col cartiglio
+che l'utente aveva sotto gli occhi veniva invece dall'**export a serie**, che
+della scala non sa niente. Numeri misurati in quel caso:
+
+| Origine | Proporzione |
+|---|---|
+| Scena in scala 1:1 su A4 orizzontale, margini 0, fascia 0 | 297×210 mm = **1,4143** |
+| `view.camera.aspect_ratio` effettivamente impostato | **1,4141** ✓ |
+| Export a serie: 3000×1500 px + 160 px di cartiglio | 3000×1660 = **1,807** |
+
+Cioè le bande erano giuste e il confronto era con l'immagine sbagliata. Finché
+la Fase 3 non porta il cartiglio dentro la stampa in scala, i due percorsi
+producono fogli di forma diversa: **Print to scale** dà il foglio giusto con la
+fascia vuota, **Export** dà il cartiglio ma con proporzioni fissate da
+`export.width/height`. Prima di cercare un bug nelle bande, confrontare
+`draw_w_mm/draw_h_mm` della scena con l'aspect del viewport: se coincidono, il
+problema è quale immagine si sta guardando.
+
+Punti non ovvi dell'implementazione:
+
+- **Si salva la cfg INTERA, non solo il denominatore.** "1:200" da solo non
+  vuol dire niente: la scala dipende dal foglio. E i DPI ci vanno pure,
+  perché l'altezza camera si ricava dai pixel arrotondati. Un solo campo
+  JSON su un page attribute (`SceneManagerPlus/print_scale`) invece di undici
+  attributi: sui modelli con AttributeObserver di plugin terzi ogni write
+  costa ~5s.
+- **Impostare una scala forza `use_camera = true`**: una scena che non salva
+  la propria inquadratura non può avere una scala.
+- **`apply_to_view` tocca solo lo zoom** (`camera.height`): la panoramica
+  fatta a mano dall'utente resta dov'è.
+- **Il badge dice la verità sulla camera SALVATA**, non sul viewport: `ok`
+  significa "riattivando questa scena sarà già in scala". Vira all'ambra
+  quando non lo è, e il click rimette la scala **e la salva** nella scena.
+- **Guardia in `update_from_view`**: se la pagina ha una scala e il bit
+  CAMERA è nel mask, prima si rimette la scala e poi si salva — così una
+  scena marcata 1:50 non può salvarsi uno zoom che 1:50 non è. E le bande
+  vengono tolte **prima** di `page.update` (vedi sotto).
+- ⚠️ **La trappola delle bande**, e la difesa: dettagli e misure in
+  `docs/SU2019-LESSONS.md`, sezione "`camera.aspect_ratio` sul VIEWPORT è
+  transitorio". In breve: il pulsante **Update del pannello Scene nativo**
+  non passa dal plugin e salverebbe le bande nella pagina, facendola
+  scambiare per una Match Photo. Per questo `SceneModel.matchphoto?` esclude
+  a monte le pagine che hanno una configurazione di stampa in scala.
+  Verificato che dopo un Update nativo simulato la scena resta non-MP.
+- `render` **toglie le bande prima di `write_image`** e le rimette dopo:
+  con un aspect impostato SU potrebbe aggiungere lettering all'immagine.
+
+Collaudo (10 verifiche live su 19.3.253, tutte positive): cfg salvata e
+riletta, badge ambra→verde, `camera.height` esatta a 496.0000 in, bande col
+rapporto giusto, camera salvata pulita, Update nativo simulato che **non**
+trasforma la scena in MP, via-e-ritorno che rimette la scala, zoom sballato
+corretto dall'Update del plugin, i due payload allineati, clear pulito.
+
+### Fase 3a — il cartiglio dentro la tavola in scala (2026-08-04)
+
+`PrintScale.render_titleblock` riusa **lo stesso** `TitleBlock.render_batch`
+dell'export a serie. La differenza che conta: larghezza e altezza vengono dal
+**foglio** (`print_w_px` × `band_px`), non da `export.width/height` — è questo
+che rende la tavola coerente con l'inquadratura mostrata nel viewport, e che
+chiude l'equivoco descritto nella sezione precedente.
+
+**Box nuovo `SCALA` / `STAMPA`**, in alto e in basso: `1:50` e
+`A3 orizz. al 100%`. Sta fra il box PROGETTO(fase) e TAVOLA nr.
+
+⚠️ **Gli indici di `$widths` nello script PowerShell sono cambiati.** Ora sono
+`0 cliente, 1 fase, 2 SCALA, 3 tavola, 4 progetto, 5 dati, 6 logo`. Chi tocca
+quel layout deve ricordarsene: prima `tavola` era 2, `dati` 4, `logo` 5.
+
+Il box è **presente solo se il chiamante passa `scala_value`**: l'export a
+serie non lo passa, quindi il suo cartiglio è rimasto identico — verificato
+generando le due varianti e confrontandole. Quando la scala manca il box vale
+**larghezza 0** e il divisore verticale corrispondente viene saltato (senza il
+`continue` si disegnerebbe una riga doppia sopra la precedente).
+
+**`Naming.prefix_for(settings, skp_title)`** estratto da `Naming.format`: è la
+regola del prefisso (che il cartiglio riusa come CLIENTE) in un posto solo.
+`Core::Exporter` ne ha ancora una copia inline più vecchia — se si tocca la
+regola vanno allineate. Era già uscito un bug da questa duplicazione.
+
+**Collaudo senza SketchUp**: lo script del cartiglio non usa l'API SU, quindi
+`TitleBlock.render_batch` si chiama da un Ruby normale e si guarda il PNG che
+esce. Provati: senza scala (identico a prima), con SCALA+STAMPA, con la sola
+SCALA, e con `1:1000` su A0 verticale — tutti 3150×197 px come richiesto.
+
+⚠️ **Non ancora verificato dal vivo**: che il PNG del cartiglio finisca nella
+fascia giusta della tavola vera (il blit in `compose_sheet`). Serve SketchUp
+aperto: la composizione usa `Sketchup::ImageRep`.
+
+### ⚠️ STATO APERTO a fine sessione 2026-08-04 — "non ci siamo ancora"
+
+Da qui riparte la prossima sessione. **Il motore è giusto, il percorso utente
+no.**
+
+**Cosa è verificato e regge** (non rimetterlo in discussione senza motivo):
+
+- la scala è esatta — misurata a tre risoluzioni diverse, errore sotto il
+  pixel che **non cresce** raddoppiando i DPI;
+- spessore profili esatto (0,5 mm → 4 px chiesti → 4 px misurati);
+- DPI scritti nel file e riletti corretti (150 / 200 / 400);
+- la scala come proprietà della scena: salvata, riapplicata all'attivazione,
+  badge, guardia sull'Update, esclusione Match Photo — 10 verifiche live;
+- il cartiglio col box SCALA/STAMPA, provato fuori da SketchUp su 4 varianti.
+
+**Cosa NON è verificato**: che il PNG del cartiglio atterri nella fascia
+giusta della tavola vera (`compose_sheet`, blit BGRA). Serve SketchUp aperto.
+È l'unico pezzo di Fase 3a mai eseguito dal vivo.
+
+**Il problema vero, che resta aperto.** L'utente ha stampato una tavola e il
+disegno è uscito al **68,3%**. Non era un bug del motore: aveva stampato
+l'**export a serie**, non la stampa in scala. Ricostruzione, che torna al
+decimo di millimetro:
+
+| | |
+|---|---|
+| Scena 1:1 su A4 orizz. → la vista inquadra | 210 mm di modello |
+| Export a serie: 3000×1500 px + 160 di cartiglio | 7,1429 px per mm di modello |
+| Stampato "adatta alla pagina" su A4 orizz. (stampabile ~287×200) | 0,095667 mm/px |
+| Lato da 100 mm → previsto | **68,33 mm** — misurato **68,30** |
+| Lato da 140 mm → previsto | **95,67 mm** — misurato **95,35** |
+
+⚠️ **L'immagine dell'export non ha dimensione fisica**, quindi da lì una scala
+corretta non è ottenibile in nessun modo, nemmeno stampando al 100%.
+
+**Perché ci è finito, ed è un difetto di prodotto non dell'utente**: la fascia
+cartiglio partiva da **0**, quindi la stampa in scala produceva un foglio
+*senza* cartiglio; per avere una tavola vera l'unica strada era l'export, che
+la scala non ce l'ha. Cane che si morde la coda. Mitigato a fine sessione
+(default fascia 20 mm + avviso nel riepilogo se il cartiglio è acceso e la
+fascia è 0) ma **non risolto alla radice**: i due percorsi restano due, e
+producono fogli di forma diversa.
+
+Stesso equivoco sulle bande grigie, due volte di fila: l'utente le confronta
+con la tavola che ha in mano, che viene dall'export (proporzione 2:1 o
+1,807:1) invece che dal foglio (1,414:1 per un A4). **Prima di cercare un bug
+nelle bande, guardare da quale dei due percorsi viene l'immagine.**
+
+**Da decidere la prossima volta** (è una scelta di prodotto, va chiesta):
+i due percorsi vanno *unificati* — l'export a serie che produce tavole in
+scala quando la scena ne ha una — oppure va reso impossibile confonderli?
+Finché convivono, l'errore si ripete.
 
 ### Scelte assunte, non ancora confermate dall'utente
 

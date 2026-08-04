@@ -245,6 +245,21 @@ body {
   vertical-align: middle;
 }
 .scene-row .row-variant-badge:hover { filter: brightness(1.25); }
+
+/* Icona "scena in scala di stampa": stesso slot e stessa misura del badge
+   variante colore, cosi' se una scena ha entrambi si affiancano. */
+.scene-row .row-scale-badge {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  margin-left: 6px;
+  cursor: pointer;
+  flex-shrink: 0;
+  vertical-align: middle;
+}
+.scene-row .row-scale-badge:hover { filter: brightness(1.25); }
+/* Inquadratura salvata non piu' alla scala dichiarata: la "S" ambra e' una
+   SECONDA immagine (scale_warn.png), non un filtro CSS — vedi app.js. */
 .scene-row.dragging { opacity: 0.4; }
 
 .scene-row .thumb {

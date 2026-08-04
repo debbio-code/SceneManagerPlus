@@ -64,6 +64,7 @@ Misurato via MCP `eval_ruby` su 19.3.253 (2026-08-02) enumerando tutte le
 | `EdgeWidth` | ❌ **non esiste** — `ro['EdgeWidth'] = 6` non solleva, `ro['EdgeWidth']` ritorna `nil` |
 | `DisplayEdges` | ❌ non esiste — la chiave vera è `EdgeDisplayMode` |
 | `SilhouetteWidth` | ✅ round-trip esatto, testato fino a 20 |
+| `ProfileWidth` | ❌ **non esiste** — si rilegge `nil` (misurato 2026-08-04). Il progetto la scrive comunque insieme a `SilhouetteWidth`: costa nulla e copre l'ipotesi che su altre build sia un alias vero. Ma **non usarla mai in lettura**, e ricordarsi che un `prev = ro['ProfileWidth']` da ripristinare sara' sempre `nil` |
 | `DepthQueWidth` | ✅ (=4 default) |
 | `LineEndWidth` | ✅ (=7 default) |
 | `SectionCutWidth` | ✅ (=3 default) |
@@ -120,6 +121,74 @@ rischia di inquinare l'euristica `matchphoto?`, che si basa proprio su
 Il tetto vero non è il render ma la memoria del composite (quel formato =
 ~560 MB di buffer BGRA in una String Ruby): da misurare su modello reale
 prima di promettere formati oltre l'A2.
+
+### `ImageRep#save_file` ritorna `nil` ANCHE quando riesce
+
+Misurato su 19.3.253 (2026-08-04):
+
+| Situazione | Ritorno |
+|---|---|
+| Salvataggio riuscito (file scritto, contenuto corretto) | **`nil`** |
+| Path non scrivibile | **solleva `RuntimeError`** |
+
+Quindi `ok = img.save_file(path); warn 'fallito' unless ok` segnala un errore
+**a ogni salvataggio riuscito**. L'unico controllo sensato e' `File.file?` +
+`File.size > 0`, lasciando che il fallimento vero arrivi come eccezione.
+
+Gia' costato un falso allarme in `Core::PrintScale` (corretto). ⚠️ In
+`Core::Exporter#composite_to_file` la riga di log stampa tuttora
+`composite save_file ok=nil` a ogni export **riuscito**: il valore non viene
+usato per decidere nulla, quindi non e' un bug — ma chi legge la console
+mentre indaga su un export non deve prenderlo per un errore.
+
+### PNG e JPG escono senza risoluzione fisica: la scala di stampa va scritta a mano
+
+Ne' `view.write_image` ne' `ImageRep#save_file` scrivono i DPI nel file. Senza,
+ogni programma di stampa ne inventa una (di solito 96) e una immagine
+"in scala" si stampa alla misura sbagliata **senza alcun avviso**.
+
+Rimedio in `Core::PrintScale.stamp_dpi!` (misurato funzionante a 150/200/400
+DPI, chunk ri-parsati e CRC verificati):
+
+- **PNG**: chunk `pHYs` (9 byte: px/unita' X, px/unita' Y, unita'=1=metro)
+  inserito **subito dopo `IHDR`**, sostituendo un eventuale `pHYs` gia'
+  presente invece di duplicarlo. Il CRC-32 e' calcolato con una tabella in
+  Ruby puro: `Zlib` non e' verificato presente in SU 2019 e servono 13 byte.
+- **JPG**: campi `units`/`Xdensity`/`Ydensity` dell'header **JFIF**, a offset
+  fissi 13/14-15/16-17. Se il file inizia con `APP1`/Exif invece che con
+  `APP0`/JFIF la patch non si applica: va gestito il caso, non assunto.
+
+L'ordine conta: **prima** `save_file`, **poi** la scrittura dei DPI. Un
+salvataggio successivo di ImageRep sullo stesso file cancellerebbe il chunk.
+
+### `camera.aspect_ratio` sul VIEWPORT è transitorio, sulla PAGINA no
+
+Misurato su 19.3.253 (2026-08-04). Serve a mostrare nel viewport
+l'inquadratura vera di un foglio (bande grigie ai lati, come Match Photo):
+
+| Azione | `view.camera.aspect_ratio` | `page.camera.aspect_ratio` |
+|---|---|---|
+| `view.camera.aspect_ratio = 1.41` | 1.41 | **0.0** — la pagina non viene toccata |
+| poi `page.update(PAGE_USE_CAMERA)` | 1.41 | **1.41** ⚠️ salvato nella pagina |
+| poi `= 0` + `page.update(...)` | 0.0 | 0.0 — reversibile |
+| attivazione di un'altra scena | **0.0** | invariato |
+
+Due conseguenze:
+
+1. **Si può mostrare l'inquadratura del foglio senza sporcare la scena**, ma
+   va **ri-applicata a ogni attivazione**: SU azzera l'aspect del viewport a
+   ogni cambio scena (è parte della camera che ripristina).
+2. ⚠️ **Qualunque `page.update` col bit CAMERA fatto mentre l'aspect è
+   attivo lo salva nella pagina.** Il pulsante **Update del pannello Scene
+   nativo** non passa dal plugin, quindi non è intercettabile: da lì in poi
+   `SceneModel.matchphoto?` (che si basa proprio su `aspect_ratio != 0`)
+   scambierebbe quella scena per una Match Photo.
+
+Difesa adottata: `matchphoto?` esce subito con `false` se la pagina ha una
+configurazione di stampa in scala (`Core::PrintScale.scene_config?`). Una
+scena Match Photo è per definizione in prospettiva e non ha una scala di
+stampa, quindi le due condizioni non possono coesistere. Verificato che dopo
+un `page.update` "nativo" simulato la scena resta correttamente non-MP.
 
 ### `view.write_image` per JPG apre la dialog "JPG Image Options"
 

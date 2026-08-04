@@ -206,8 +206,17 @@ module SceneManagerPlus
       # aspect_ratio = 0 (significa "usa aspect del viewport").
       # Verificato empiricamente: in un model con scene miste, solo la scena
       # MP aveva aspect_ratio != 0 — tutte le altre 0.0.
+      # ⚠️ Esclusione per le scene "in scala": anche loro possono ritrovarsi
+      # con aspect_ratio != 0 nella camera salvata, perché mostriamo nel
+      # viewport l'inquadratura del foglio e un Update premuto dal pannello
+      # Scene NATIVO (che non passa da noi) la salverebbe nella pagina.
+      # Senza questa riga quelle scene verrebbero scambiate per Match Photo:
+      # lettera stile a '?', conferme MP sul cambio stile, esclusione dalla
+      # clipboard. Una scena Match Photo è per definizione in prospettiva e
+      # non ha una scala di stampa, quindi le due condizioni non collidono.
       def matchphoto?(page)
         return false unless page && page.respond_to?(:camera)
+        return false if defined?(Core::PrintScale) && Core::PrintScale.scene_config?(page)
         c = page.camera
         return false unless c
         ratio = c.aspect_ratio.to_f rescue 0.0
@@ -520,7 +529,8 @@ module SceneManagerPlus
             style_name:      page_style_name(p),
             color:           get_scene_color(page_id(p)),
             is_matchphoto:   matchphoto?(p),
-            has_variant:     Core::Variants.has_variant?(p)
+            has_variant:     Core::Variants.has_variant?(p),
+            print_scale:     Core::PrintScale.scene_badge(p)
           }
         end
       end
@@ -627,6 +637,9 @@ module SceneManagerPlus
           color:           get_scene_color(uid),
           is_matchphoto:   matchphoto?(page),
           has_variant:     Core::Variants.has_variant?(page),
+          # Trappola dei due payload: ogni campo letto dal JS via sceneById
+          # deve stare SIA qui SIA in list_ordered (vedi CLAUDE.md).
+          print_scale:     Core::PrintScale.scene_badge(page),
           pending:         false
         }
         # Overlay buffer edits
@@ -875,10 +888,31 @@ module SceneManagerPlus
           end
         end
 
+        # Scene "in scala": prima di salvare l'inquadratura la si rimette in
+        # scala, così una scena marcata 1:50 non può salvarsi uno zoom che
+        # 1:50 non è. La panoramica fatta a mano resta (si tocca solo lo
+        # zoom). E le bande grigie vanno tolte prima di p.update: salvarle
+        # nella pagina la farebbe passare per Match Photo.
+        cam_bit  = sc.call('PAGE_USE_CAMERA')
+        ps_bands = false
+        if cam_bit != 0 && (mask & cam_bit) != 0 &&
+           defined?(Core::PrintScale) && Core::PrintScale.scene_config?(p)
+          begin
+            if model.pages.selected_page == p
+              Core::PrintScale.apply_to_view(p)
+              ps_bands = model.active_view.camera.aspect_ratio.to_f != 0.0
+              Core::PrintScale.clear_bands(model.active_view)
+            end
+          rescue => e
+            warn "[SM+] update_from_view print scale guard: #{e.class}: #{e.message}"
+          end
+        end
+
         puts "[SM+] update_from_view: page='#{p.name}' mask=#{mask} flags=#{flags_hash(p).inspect}"
         model.start_operation('SM+ Update from view', true)
         result = p.update(mask)
         model.commit_operation
+        Core::PrintScale.on_scene_activated(p) if ps_bands
         puts "[SM+] update_from_view: page.update returned #{result.inspect}"
         true
       end
@@ -1292,6 +1326,9 @@ module SceneManagerPlus
         # Variante colore: ripristina l'eventuale variante precedente e
         # applica quella della scena attivata (no-op se nessuna delle due).
         Core::Variants.on_scene_activated(p)
+        # Stampa in scala: rimette la vista alla scala della scena (e le
+        # bande del foglio), oppure toglie le bande se la scena non ne ha.
+        Core::PrintScale.on_scene_activated(p)
         true
       end
 

@@ -82,6 +82,35 @@ module SceneManagerPlus
           # all'immagine). Serve a evitare che la stampa "mangi" la cornice
           # sui bordi. 0 = nessun margine.
           'white_margin_px' => 2
+        },
+        'print_scale' => {
+          # Stampa in scala: funzione separata dall'export a serie (finestra
+          # propria, impostazioni proprie, agisce sulle scene selezionate).
+          # Vedi Core::PrintScale.
+          'paper'         => 'A3',        # A4|A3|A2|A1|A0
+          'orientation'   => 'landscape', # 'landscape' | 'portrait'
+          'scale_denom'   => 50.0,        # N di 1:N
+          # 200 DPI e' un buon compromesso: gli spigoli ordinari sono sempre
+          # 1 px, quindi sono i DPI a decidere lo spessore della linea piu'
+          # sottile sulla carta (150 -> 0,17 mm; 300 -> 0,085 mm, grigina).
+          'dpi'           => 200,
+          'margin_mm'     => 10.0,
+          # Fascia riservata al cartiglio. Default 20 mm e NON 0: con 0 la
+          # tavola in scala esce senza cartiglio, e l'utente ripiega
+          # sull'export a serie — che pero' la scala non ce l'ha. Vedi la
+          # sezione "le bande non corrispondono" nel CLAUDE.md.
+          'titleblock_mm' => 20.0,
+          'profile_mm'    => 0.0,   # 0 = lascia i profili come sono nello stile
+          'section_mm'    => 0.0,
+          'antialias'     => true,
+          'format'        => 'png', # png|jpg — per il tratto, PNG
+          'sheet_mode'    => 'full_sheet', # 'full_sheet' | 'drawing_only'
+          'output_dir'    => '',
+          # Bande grigie nel viewport sulle scene in scala: mostrano
+          # l'inquadratura vera del foglio. Verificato che NON sporcano la
+          # scena (matchphoto? legge page.camera, non il viewport) — vedi
+          # Core::PrintScale, sezione bande.
+          'viewport_frame' => true
         }
       }.freeze
 
