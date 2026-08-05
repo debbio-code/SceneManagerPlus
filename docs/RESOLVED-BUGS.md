@@ -380,3 +380,69 @@ tutte nate con `style == nil`):
 | defer mode → `Buffer.flush!` (secondo passaggio) | idem, e in defer nulla viene scritto prima del flush |
 | navigazioni ripetute dopo la modifica | `selected_style` mai nil |
 | **save + rilettura vera da disco** | flag e stile persistono, foto intatte, nessuno stato di crash ricreato |
+
+---
+
+## Stampa in scala
+
+### La foto delle scene Match Photo sparisce (2026-08-05)
+
+**Sintomo**: aprendo una scena Match Photo la foto di sfondo non si vede piu'.
+Comparso con la release della stampa in scala. Indizio dell'utente, decisivo:
+*"se cambio stile riappare, ma poi scompare ancora, anche con refresh"*.
+
+**Causa**: le bande grigie che mostrano l'inquadratura del foglio si ottengono
+impostando `view.camera.aspect_ratio`. `PrintScale.on_scene_activated` — che
+gira a ogni attivazione, incluso il polling a 250ms e i tab nativi — chiamava
+`clear_bands` su ogni scena senza scala, e `clear_bands` era:
+
+```ruby
+view.camera.aspect_ratio = 0.0 if view.camera.aspect_ratio.to_f != 0.0
+```
+
+Ma una scena Match Photo ha un aspect proprio (quello della foto) ed e' cio'
+che tiene la foto visibile: azzerarlo SU lo legge come "camera mossa" e la
+nasconde. Misurato sul file dell'utente: `page.camera.aspect_ratio = 1.3337`,
+`view.camera.aspect_ratio = 0.0`.
+
+L'indizio "cambiando stile riappare" torna: `assign_style` fa
+`pages.selected_page = p`, e SU nel riattivare la pagina rimette la camera
+salvata, aspect compreso. Al primo giro di polling successivo veniva riazzerato.
+
+**Fix in due tempi.** Il primo, mirato, faceva rimettere a `clear_bands`
+l'aspect della pagina invece di 0 — risolveva il sintomo ma proteggeva le
+Match Photo solo perche' hanno una forma riconoscibile. Su richiesta esplicita
+dell'utente ("le scene senza scala devono comportarsi esattamente come prima")
+e' stato sostituito dalla regola generale:
+
+> il plugin toglie **solo le bande che ha messo lui**. `apply_bands` memorizza
+> il ratio in `@bands_ratio`; `clear_bands` azzera solo se l'aspect corrente e'
+> ancora quello (tolleranza 1e-6), altrimenti e' di qualcun altro e non lo
+> tocca. `force_clear_bands` resta per i punti dove un aspect impostato
+> romperebbe l'operazione (`write_image`, `page.update`) e il chiamante
+> ripristina subito dopo.
+
+Copre gratis anche le scene con `use_camera?` false e gli aspect impostati da
+altri plugin.
+
+**Verificato live su 19.3.253**, senza scrivere nel modello (`modified?` false
+a fine test):
+
+| Caso | Esito |
+|---|---|
+| Scena MP, 3 tick dell'hook | 1.3333 invariato, nessuna scrittura |
+| Scena normale con aspect altrui (1.9) | invariato |
+| Bande nostre, poi scena normale | tolte (0.0) |
+| Bande nostre, poi scena MP | SU mette 1.3333, l'hook non lo tocca |
+| `force_clear_bands` | azzera comunque |
+
+⚠️ **Trappola di misura**: `view.write_image` **non** renderizza la foto MP,
+quindi il confronto di render — il metodo raccomandato altrove per le scene
+Match Photo — su questa domanda non distingue niente. Serve guardare il
+viewport, o leggere i due `aspect_ratio`.
+
+**Audit degli altri punti** in cui la stampa in scala tocca una scena senza
+scala: `scene_badge` (sola lettura, nessuna icona), la guardia in
+`update_from_view` e `matchphoto?` (entrambe gated su `scene_config?`), i
+comandi di menu/dialog (azioni esplicite dell'utente). Dopo il fix
+`on_scene_activated` e' l'unico hook non gated, ed e' a effetto zero.

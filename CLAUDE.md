@@ -1670,6 +1670,17 @@ solo gli helper di basso livello (`imagerep_to_bgra`, `blend_stamp!`,
 `draw_frame!`, `pad_white`, `TitleBlock.render_batch`), che sono già
 `module_function` e quindi riusabili senza refactor.
 
+⚠️ **Secondo vincolo, ribadito il 2026-08-05**: una scena **senza scala** (senza
+l'icona in lista) deve comportarsi **esattamente come prima che la stampa in
+scala esistesse**. Non "quasi": la funzione non deve avere alcun punto di
+contatto con quelle scene se non l'icona che non viene disegnata. È la regola
+che ha portato a riscrivere la rimozione delle bande (sotto) — la prima
+versione del fix proteggeva le Match Photo perché hanno una forma
+riconoscibile, non perché il plugin avesse smesso di intromettersi. Ogni
+aggiunta futura alla stampa in scala va misurata contro questo vincolo: se
+tocca il viewport o la pagina, deve essere gated su
+`PrintScale.scene_config?`.
+
 Output scelto: **file immagine alla misura fisica esatta** (DPI scritti nel
 file, così stampa giusto ovunque). PDF e stampa diretta su stampante sono
 rimandati — la stampa diretta è dove la scala si perde in silenzio (basta un
@@ -1916,6 +1927,17 @@ Punti non ovvi dell'implementazione:
   scambiare per una Match Photo. Per questo `SceneModel.matchphoto?` esclude
   a monte le pagine che hanno una configurazione di stampa in scala.
   Verificato che dopo un Update nativo simulato la scena resta non-MP.
+- ⚠️ **Le bande si tolgono SOLO se le ha messe il plugin** (regola introdotta
+  2026-08-05 dopo il bug della foto Match Photo sparita — storia completa in
+  `docs/RESOLVED-BUGS.md`). `apply_bands` memorizza il ratio in `@bands_ratio`,
+  `clear_bands` azzera solo se l'aspect corrente è ancora quello. Motivo: una
+  scena **Match Photo ha un aspect proprio ed è quello che tiene visibile la
+  foto** — azzerarlo la fa sparire, perché SU legge la scrittura come "camera
+  mossa". `force_clear_bands` è la variante che azzera comunque, e va usata
+  **solo** dove un aspect impostato romperebbe l'operazione in corso
+  (`write_image`, `page.update` col bit CAMERA) e il chiamante ripristina
+  subito dopo. Regola generale: `view.camera.aspect_ratio` è stato condiviso,
+  non una proprietà del proprio codice.
 - `render` **toglie le bande prima di `write_image`** e le rimette dopo:
   con un aspect impostato SU potrebbe aggiungere lettering all'immagine.
 

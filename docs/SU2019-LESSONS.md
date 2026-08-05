@@ -171,7 +171,13 @@ l'inquadratura vera di un foglio (bande grigie ai lati, come Match Photo):
 | `view.camera.aspect_ratio = 1.41` | 1.41 | **0.0** — la pagina non viene toccata |
 | poi `page.update(PAGE_USE_CAMERA)` | 1.41 | **1.41** ⚠️ salvato nella pagina |
 | poi `= 0` + `page.update(...)` | 0.0 | 0.0 — reversibile |
-| attivazione di un'altra scena | **0.0** | invariato |
+| attivazione di un'altra scena | **l'aspect salvato in quella scena** | invariato |
+
+⚠️ L'ultima riga diceva "**0.0**" e **era una generalizzazione sbagliata**,
+presa misurando solo scene normali (che 0.0 ce l'hanno salvato). SU ripristina
+l'aspect **della pagina**: su una Match Photo rimette il suo, ed e' quello che
+fa ricomparire la foto. Vedi la sezione successiva — la svista e' costata un
+bug in produzione.
 
 Due conseguenze:
 
@@ -189,6 +195,39 @@ configurazione di stampa in scala (`Core::PrintScale.scene_config?`). Una
 scena Match Photo è per definizione in prospettiva e non ha una scala di
 stampa, quindi le due condizioni non possono coesistere. Verificato che dopo
 un `page.update` "nativo" simulato la scena resta correttamente non-MP.
+
+### ⚠️ La foto Match Photo dipende dall'aspect del VIEWPORT: scriverlo la nasconde
+
+Misurato su 19.3.253 (2026-08-05), dopo un bug in produzione.
+
+Una scena Match Photo ha un `page.camera.aspect_ratio` proprio (quello della
+foto, es. 1.3337). SU lo ripristina a ogni attivazione, e finche' il viewport
+lo conserva la foto resta visibile dietro il modello. **Qualunque scrittura su
+`view.camera.aspect_ratio` che lo cambi — `= 0.0` compreso — SU la interpreta
+come "camera mossa" e nasconde la foto**, esattamente come quando orbiti su una
+scena Match Photo. Non serve toccare stile o rendering options: basta l'aspect.
+
+| Passo | Foto |
+|---|---|
+| attivazione della scena MP (SU rimette 1.3337) | visibile |
+| `view.camera.aspect_ratio = 0.0` | **sparita** |
+| ri-attivazione della pagina (anche indiretta, es. cambio stile) | torna |
+
+Corollario diagnostico: **"sparisce, ma cambiando stile riappare"** e' la firma
+di questo problema, non un problema di stili. Assegnare uno stile ri-attiva la
+pagina, e SU nel farlo rimette la camera salvata.
+
+⚠️ **`view.write_image` non renderizza la foto**, quindi il confronto di render
+— il metodo che questo file raccomanda altrove per le scene MP — qui **non
+serve a niente**: le due immagini differiscono solo per l'inquadratura. Su
+questa specifica domanda l'unica verifica e' guardare il viewport (o leggere i
+due `aspect_ratio` e confrontarli).
+
+**Regola per chi scrive nel viewport**: `aspect_ratio` e' uno stato condiviso,
+non una proprieta' del proprio codice. Chi lo imposta deve ricordarsi il valore
+che ha messo e rimuoverlo **solo se e' ancora il suo** (`PrintScale.clear_bands`
+vs `force_clear_bands`). Un azzeramento a tappeto e' un bug che si manifesta
+lontano dal punto in cui e' scritto.
 
 ### `view.write_image` per JPG apre la dialog "JPG Image Options"
 

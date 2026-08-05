@@ -348,7 +348,7 @@ module SceneManagerPlus
         # aggiungere lettering all'immagine se non coincide al pixel con
         # quello richiesto.
         prev_aspect = (cam.aspect_ratio.to_f rescue 0.0)
-        clear_bands(view)
+        force_clear_bands(view)
 
         tmp_png = File.join(Dir.tmpdir, "smp_print_#{Process.pid}_#{rand(1_000_000)}.png")
         ok = false
@@ -743,7 +743,7 @@ module SceneManagerPlus
           began = true
           page.set_attribute(SCENE_DICT, SCENE_KEY, '')
           m.commit_operation
-          clear_bands(m.active_view)
+          clear_bands(m.active_view, page)
           true
         rescue => e
           m.abort_operation if began
@@ -779,20 +779,66 @@ module SceneManagerPlus
         cfg['viewport_frame'].nil? ? true : !!cfg['viewport_frame']
       end
 
+      # Ratio delle bande che il PLUGIN ha messo nel viewport, o nil se non ce
+      # ne sono di nostre. E' l'unico titolo che abbiamo per toglierle.
+      @bands_ratio = nil
+
+      def bands_ours?(cur)
+        r = @bands_ratio
+        return false unless r.is_a?(Numeric) && r > 0
+        return false unless cur.is_a?(Numeric) && cur > 0
+        ((cur - r) / r).abs <= 1e-6
+      end
+
       def apply_bands(view, geo)
         return unless view && geo
         ratio = geo[:draw_w_px].to_f / geo[:draw_h_px]
         return unless ratio > 0
         view.camera.aspect_ratio = ratio if view.camera.aspect_ratio.to_f != ratio
+        @bands_ratio = ratio
       rescue => e
         warn "[SM+] print_scale apply_bands: #{e.class}: #{e.message}"
       end
 
-      def clear_bands(view)
+      # ⚠️ REGOLA: una scena SENZA scala deve comportarsi esattamente come
+      # prima che la stampa in scala esistesse — e prima, il plugin l'aspect
+      # del viewport non lo toccava mai. Quindi qui si toglie **solo cio' che
+      # abbiamo messo noi**: se l'aspect corrente non e' quello delle nostre
+      # bande, e' di qualcun altro e non si tocca.
+      #
+      # Non e' teoria: azzerare a tappeto faceva sparire la foto delle scene
+      # **Match Photo**, che un aspect proprio ce l'hanno ed e' esattamente
+      # quello che tiene la foto attaccata dietro il modello — SU legge la
+      # scrittura come "camera mossa" e la nasconde (bug 2026-08-05; la foto
+      # tornava solo cambiando stile, perche' quello ri-attiva la pagina e SU
+      # rimette la camera salvata). Stessa protezione, gratis, per le scene
+      # con `use_camera?` false e per gli aspect impostati da altri plugin.
+      #
+      # Dove invece un aspect impostato romperebbe l'operazione in corso
+      # (`write_image`, `page.update`) serve l'azzeramento secco:
+      # `force_clear_bands`.
+      def clear_bands(view, _page = nil)
         return unless view
-        view.camera.aspect_ratio = 0.0 if view.camera.aspect_ratio.to_f != 0.0
+        unless bands_ours?(view.camera.aspect_ratio.to_f)
+          @bands_ratio = nil
+          return
+        end
+        view.camera.aspect_ratio = 0.0
+        @bands_ratio = nil
       rescue => e
         warn "[SM+] print_scale clear_bands: #{e.class}: #{e.message}"
+      end
+
+      # Azzera comunque, di chiunque sia l'aspect. Solo per i punti in cui il
+      # chiamante ripristina subito dopo (render, store_camera!): l'aspect del
+      # viewport e' transitorio, ma se finisce dentro un `page.update` viene
+      # salvato nella scena e da li' in poi la scena passa per Match Photo.
+      def force_clear_bands(view)
+        return unless view
+        view.camera.aspect_ratio = 0.0 if view.camera.aspect_ratio.to_f != 0.0
+        @bands_ratio = nil
+      rescue => e
+        warn "[SM+] print_scale force_clear_bands: #{e.class}: #{e.message}"
       end
 
       # =====================================================================
@@ -817,7 +863,7 @@ module SceneManagerPlus
           cam.height = geo[:camera_height_in]
           changed = true
         end
-        bands_enabled? ? apply_bands(view, geo) : clear_bands(view)
+        bands_enabled? ? apply_bands(view, geo) : force_clear_bands(view)
         view.invalidate
         changed
       rescue => e
@@ -833,7 +879,7 @@ module SceneManagerPlus
         return unless m
         view = m.active_view
         if page.nil? || !scene_config?(page)
-          clear_bands(view)
+          clear_bands(view, page)
           return
         end
         apply_to_view(page, view)
@@ -869,7 +915,7 @@ module SceneManagerPlus
         return false unless m && page
         view ||= m.active_view
         had_bands = view.camera.aspect_ratio.to_f != 0.0
-        clear_bands(view)
+        force_clear_bands(view)
         bit = Object.const_defined?(:PAGE_USE_CAMERA) ? PAGE_USE_CAMERA : 1
         began = false
         begin

@@ -901,7 +901,7 @@ module SceneManagerPlus
             if model.pages.selected_page == p
               Core::PrintScale.apply_to_view(p)
               ps_bands = model.active_view.camera.aspect_ratio.to_f != 0.0
-              Core::PrintScale.clear_bands(model.active_view)
+              Core::PrintScale.force_clear_bands(model.active_view)
             end
           rescue => e
             warn "[SM+] update_from_view print scale guard: #{e.class}: #{e.message}"
