@@ -736,6 +736,37 @@ window.SM = (function () {
     return arr;
   }
 
+  // Salto di "una schermata" (PagSu/PagGiu'): ritorna l'id della scena che
+  // dista circa un'altezza di lista da quella corrente, muovendo di almeno
+  // una riga e senza uscire dagli estremi.
+  //
+  // Misurato sulla GEOMETRIA vera delle row, non su un conteggio di scene:
+  // l'altezza di riga cambia con le thumbnails on/off, e le intestazioni di
+  // cartella occupano spazio pur non essendo scene. Contare gli elementi
+  // darebbe un salto sbagliato in entrambi i casi.
+  function pageJumpTarget(order, idx, dir) {
+    function topOf(id) {
+      var el = listEl && listEl.querySelector('.scene-row[data-id="' + id + '"]');
+      return el ? el.offsetTop : null;
+    }
+    var best = Math.max(0, Math.min(order.length - 1, idx + dir));
+    var h = listEl ? listEl.clientHeight : 0;
+    var curTop = topOf(order[idx]);
+    // Lista non ancora misurabile (finestra minimizzata, row fuori dal DOM):
+    // ripiego su un salto a righe fisse invece di non fare nulla.
+    if (!h || curTop === null) {
+      return order[Math.max(0, Math.min(order.length - 1, idx + dir * 10))];
+    }
+    var wantTop = curTop + dir * h;
+    for (var i = best; i >= 0 && i < order.length; i += dir) {
+      var t = topOf(order[i]);
+      if (t === null) continue;
+      if (dir > 0 ? t <= wantTop : t >= wantTop) best = i;
+      else break;
+    }
+    return order[best];
+  }
+
   function onRowClick(e, id) {
     // Se l'utente ha cliccato sulla checkbox export-cb, non toccare la selezione:
     // il click handler del listEl gestirà il bulk toggle.
@@ -1110,13 +1141,6 @@ window.SM = (function () {
       SMBridge.setExportIncluded(targetIds, newIncluded);
     });
 
-    // PageUp/PageDown/Home/End: navigazione lungo l'ordine logico del plugin
-    // (cartella aperta → in fila, cartella chiusa → saltata). Bind su document
-    // così funziona ovunque il focus stia dentro la finestra. Si esce dal
-    // gestore se l'utente sta digitando in un campo testuale.
-    // ArrowUp / ArrowDown: sposta la selezione su/giù nell'ordine logico.
-    // Funziona sia per scene a root sia per scene dentro la stessa cartella.
-    // Selezione multipla supportata solo se contigua sotto lo stesso parent.
     // Enter / F2 -> rinomina inline la scena selezionata (solo se ne e'
     // selezionata esattamente una). Equivale al click destro -> Rename.
     document.addEventListener('keydown', function (e) {
@@ -1128,37 +1152,59 @@ window.SM = (function () {
       e.preventDefault();
       startInlineRename(selection[0]);
     });
-    document.addEventListener('keydown', function (e) {
-      if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
-      var t = document.activeElement;
-      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
-      if (!selection.length) return;
-      e.preventDefault();
-      e.stopPropagation();
-      moveSelection(e.key === 'ArrowDown' ? +1 : -1);
-    });
 
+    // Navigazione da tastiera lungo l'ordine logico del plugin (cartella
+    // aperta = scene in fila, cartella chiusa = saltata). Bind su document
+    // cosi' funziona ovunque il focus stia dentro la finestra; si esce dal
+    // gestore se l'utente sta digitando in un campo testuale.
+    //
+    //   Freccia Su/Giu'      -> sposta la SELEZIONE di una riga
+    //   PageUp/PageDown      -> una schermata su/giu' (vedi pageJumpTarget)
+    //   Home/End             -> prima / ultima scena visibile
+    //   Ctrl + Freccia Su/Giu' -> SPOSTA la scena (riordino)
+    //
+    // Il riordino sta sotto Ctrl di proposito: con le frecce nude era troppo
+    // facile riordinare credendo di navigare. Funziona sia per scene a root
+    // sia dentro la stessa cartella; selezione multipla supportata solo se
+    // contigua sotto lo stesso parent.
     document.addEventListener('keydown', function (e) {
       var k = e.key;
-      if (k !== 'PageUp' && k !== 'PageDown' && k !== 'Home' && k !== 'End') return;
+      var isArrow = (k === 'ArrowUp' || k === 'ArrowDown');
+      var isPage  = (k === 'PageUp' || k === 'PageDown');
+      var isJump  = (k === 'Home' || k === 'End');
+      if (!isArrow && !isPage && !isJump) return;
       var t = document.activeElement;
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+
+      // Ctrl (o Cmd) + freccia = riordino, cioe' il vecchio comportamento
+      // delle frecce nude.
+      if (isArrow && (e.ctrlKey || e.metaKey)) {
+        if (!selection.length) return;
+        e.preventDefault();
+        e.stopPropagation();
+        moveSelection(k === 'ArrowDown' ? +1 : -1);
+        return;
+      }
+      if ((isPage || isJump) && (e.ctrlKey || e.metaKey)) return;
+
       var order = visibleSceneOrder();
       if (order.length === 0) return;
       var target = null;
-      if (k === 'Home') {
-        target = order[0];
-      } else if (k === 'End') {
-        target = order[order.length - 1];
+      if (isJump) {
+        target = (k === 'Home') ? order[0] : order[order.length - 1];
       } else {
-        // Se la scena attiva non è nell'ordine visibile (es. dentro cartella
-        // chiusa), idx = -1 e cadiamo nel caso "fuori lista" per convenzione.
+        // Se la scena selezionata non è nell'ordine visibile (es. dentro
+        // cartella chiusa), idx = -1 e cadiamo nel caso "fuori lista" per
+        // convenzione: giù parte dalla prima, su dall'ultima.
+        var dir = (k === 'ArrowDown' || k === 'PageDown') ? +1 : -1;
         var curId = selection[0];
         var idx = curId ? order.indexOf(curId) : -1;
-        if (k === 'PageDown') {
-          target = idx < 0 ? order[0] : order[Math.min(order.length - 1, idx + 1)];
+        if (idx < 0) {
+          target = dir > 0 ? order[0] : order[order.length - 1];
+        } else if (isPage) {
+          target = pageJumpTarget(order, idx, dir);
         } else {
-          target = idx < 0 ? order[order.length - 1] : order[Math.max(0, idx - 1)];
+          target = order[Math.max(0, Math.min(order.length - 1, idx + dir))];
         }
       }
       if (!target) return;

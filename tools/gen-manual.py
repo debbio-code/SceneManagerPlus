@@ -367,9 +367,10 @@ h2('4.3 Selezione e navigazione da tastiera')
 table(
     ['Tasto', 'Azione'],
     [
-        ['PaginaSu / PaginaGiù', 'Sposta la selezione su/giù lungo l’ordine logico visibile (le cartelle chiuse vengono saltate).'],
+        ['Freccia Su / Freccia Giù', 'Sposta la selezione di una riga lungo l’ordine logico visibile (le cartelle chiuse vengono saltate).'],
+        ['PaginaSu / PaginaGiù', 'Sposta la selezione di una schermata (se ne vedi 10, PaginaGiù porta all’undicesima).'],
         ['Home / Fine', 'Salta alla prima / ultima scena visibile.'],
-        ['Freccia Su / Freccia Giù', 'SPOSTA la scena selezionata (riordino) nell’ordine logico.'],
+        ['Ctrl + Freccia Su/Giù', 'SPOSTA la scena selezionata (riordino) nell’ordine logico.'],
         ['Invio / F2', 'Avvia la rinomina inline della scena selezionata.'],
         ['Esc', 'Annulla la rinomina inline in corso.'],
     ],
@@ -634,9 +635,10 @@ para('Funzionano dopo un clic dentro la finestra del plugin.')
 table(
     ['Scorciatoia', 'Azione'],
     [
-        ['PaginaSu / PaginaGiù', 'Muove la selezione lungo la lista (salta cartelle chiuse).'],
+        ['Freccia Su / Freccia Giù', 'Muove la selezione di una riga (salta cartelle chiuse).'],
+        ['PaginaSu / PaginaGiù', 'Muove la selezione di una schermata.'],
         ['Home / Fine', 'Prima / ultima scena.'],
-        ['Freccia Su / Freccia Giù', 'Sposta (riordina) la scena selezionata.'],
+        ['Ctrl + Freccia Su/Giù', 'Sposta (riordina) la scena selezionata.'],
         ['Invio / F2', 'Rinomina inline la scena selezionata.'],
         ['Esc', 'Annulla rinomina inline.'],
         ['Doppio clic', 'Apre il Properties dialog.'],
