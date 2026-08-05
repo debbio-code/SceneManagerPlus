@@ -32,12 +32,42 @@ v = 1.0 - (dy + 0.5) / th.to_f
 ```
 Altrimenti il logo finisce capovolto verticalmente nell'output (testo "ʇsɐıdǝp").
 
-### `Sketchup.write_default` con stringhe JSON è inaffidabile in SU 2019
+### ⚠️ `Sketchup.write_default` PERDE le stringhe che contengono `"` (misurato)
 
-Salvare `'{"width":3840,"format":"jpg"}'` come singolo valore può non
-persistere o ritornare valori vecchi alla lettura. **Schema robusto**: un
-`write_default` per leaf, usando tipi nativi (Integer/Float/Boolean/String).
-Vedi `Core::Settings#read_one`/`#write_one`. Chiave piatta `group.field`.
+Non è "inaffidabile con il JSON": la causa è precisa ed è stata isolata il
+**2026-08-05 su 19.3.253**. Una stringa che contiene una virgoletta doppia
+non viene scritta, e la scrittura **non fallisce**: ritorna `true`.
+
+| Scritto | Riletto |
+|---|---|
+| `'ciao mondo'` | `"ciao mondo"` ✓ |
+| `0.958933` (Float) | `0.958933` ✓ |
+| `'a"b'` | **`nil`** ✗ |
+| `'{"active":"HP","factor":0.95}'` | **`nil`** ✗ |
+
+Quindi qualunque JSON sparisce in silenzio, e il `default` della `read_default`
+fa sembrare che l'utente non abbia mai salvato nulla. È una trappola cattiva:
+il codice sembra funzionare (il salvataggio "riesce"), e il valore riappare
+sbagliato solo al giro dopo.
+
+**Due schemi validi**, a seconda del dato:
+
+1. *Un `write_default` per leaf* con tipi nativi (Integer/Float/Boolean/String
+   senza virgolette), chiave piatta `group.field`. Vedi
+   `Core::Settings#read_one`/`#write_one`. Preferibile quando i campi sono
+   pochi e fissi.
+2. *JSON codificato Base64*, quando la struttura è annidata o le chiavi sono
+   nomi liberi (es. i profili di taratura stampante in `Core::PrintScale`):
+   ```ruby
+   Sketchup.write_default(SECTION, KEY, [JSON.generate(h)].pack('m0'))
+   JSON.parse(Sketchup.read_default(SECTION, KEY, '').to_s.unpack('m0').first)
+   ```
+   `pack('m0')` è core Ruby (niente `require 'base64'`) e produce solo
+   `A-Za-z0-9+/=`, quindi nessuna virgoletta. Costo: il valore non è più
+   leggibile a occhio nel registro.
+
+In entrambi i casi **verificare rileggendo**: il valore di ritorno di
+`write_default` non dice se ha scritto davvero.
 
 Pattern al read: booleani salvati con `write_default(..., true)` possono
 ritornare come `1`/`0` in alcune build. Coercion difensiva:

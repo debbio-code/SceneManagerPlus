@@ -118,9 +118,8 @@ module SceneManagerPlus
         # Box SCALA: presente SOLO se il chiamante passa scala_value. L'export
         # a serie non la passa (non ha una scala), quindi il suo cartiglio
         # resta identico a prima.
-        $scalaValue = [string]$cfg.scala_value
-        $stampaValue = [string]$cfg.stampa_value
-        $hasScala = -not [string]::IsNullOrEmpty($scalaValue)
+        $scalaLine = [string]$cfg.scala_line
+        $hasScala = -not [string]::IsNullOrEmpty($scalaLine)
         # Cliente: il valore è costante per tutto il batch (= prefix_custom).
         $clientStr = [string]$cfg.client
         # Nome scena più lungo nel batch (Ruby lo precalcola).
@@ -205,19 +204,17 @@ module SceneManagerPlus
             if ($ww -gt $dW) { $dW = $ww }
           }
           $datiW = [int]([Math]::Ceiling($dW * $boxBreath)) + 2 * $pad
-          # Box FASE (right sub-box of Cliente): auto-sized on "PROGETTO:" + phase value.
+          # Box FASE: riga superiore "PROGETTO: <fase>", riga inferiore la SCALA
+          # (solo sulle tavole in scala). Senza scala la riga inferiore non
+          # esiste: li' sotto passa la riga OGGETTO, unificata col box 0.
           $wFase = Measure-LV $measureG "PROGETTO:" $phaseValue $midLabelFont $midValueFont
-          $faseW = [int]([Math]::Ceiling($wFase * $boxBreath)) + 2 * $pad
-          # Box SCALA (solo stampa in scala): larghezza 0 quando assente, cosi'
-          # gli indici di $widths restano fissi per tutti i casi.
-          $scalaW = 0
           if ($hasScala) {
-            $wSc1 = Measure-LV $measureG "SCALA:"  $scalaValue  $midLabelFont $midValueFont
-            $wSc2 = Measure-LV $measureG "STAMPA:" $stampaValue $midLabelFont $midValueFont
-            $scalaW = [int]([Math]::Ceiling([Math]::Max($wSc1, $wSc2) * $boxBreath)) + 2 * $pad
+            $wScala = Measure-LV $measureG "SCALA:" $scalaLine $midLabelFont $midValueFont
+            if ($wScala -gt $wFase) { $wFase = $wScala }
           }
+          $faseW = [int]([Math]::Ceiling($wFase * $boxBreath)) + 2 * $pad
 
-          $autoSum = $clienteW + $faseW + $scalaW + $tavolaW + $progW + $datiW
+          $autoSum = $clienteW + $faseW + $tavolaW + $progW + $datiW
           if ($autoSum -le $target) { break }
           # Scala globalmente i font -1px e riprova.
           if ($valueSz -le 10.0) { break }
@@ -236,11 +233,13 @@ module SceneManagerPlus
           if ($iter -gt 60) { break }
         }
         # Spazio rimanente al Cliente (box più "elastico"), dedotto il box FASE.
-        $clienteW = $W - $logoW - $faseW - $scalaW - $tavolaW - $progW - $datiW
-        # Indici: 0 cliente, 1 fase, 2 SCALA, 3 tavola, 4 progetto, 5 dati, 6 logo.
-        # Il box SCALA vale 0 quando assente: i divisori a larghezza nulla
-        # vengono saltati, cosi' il cartiglio dell'export resta invariato.
-        $widths = @($clienteW, $faseW, $scalaW, $tavolaW, $progW, $datiW, $logoW)
+        $clienteW = $W - $logoW - $faseW - $tavolaW - $progW - $datiW
+        # Indici: 0 cliente, 1 fase(+scala), 2 tavola, 3 progetto, 4 dati, 5 logo.
+        # ATTENZIONE: la SCALA non e' una colonna a se'. Vive nella meta'
+        # INFERIORE del box 1 (fase), che senza scala e' occupata dalla riga
+        # OGGETTO. Il cartiglio dell'export a serie resta quindi identico a
+        # prima quando la scena non ha una scala.
+        $widths = @($clienteW, $faseW, $tavolaW, $progW, $datiW, $logoW)
         Write-Host "[SM+ TB] fonts: label=$labelSz value=$valueSz small=$smallSz bold=$boldSz iters=$iter widths=$($widths -join ',')"
 
         foreach ($item in $cfg.items) {
@@ -261,12 +260,13 @@ module SceneManagerPlus
           $xAccum = 0
           for ($i=0; $i -lt $widths.Length - 1; $i++) {
             $xAccum += $widths[$i]
-            # Box a larghezza nulla (SCALA assente): niente divisore, sarebbe
-            # una riga doppia sopra quella precedente.
             if ($widths[$i] -eq 0) { continue }
-            # Il divisore tra box 0 (CLIENTE) e box 1b (FASE) è parziale:
-            # solo riga superiore — la riga OGGETTO non è divisa.
-            if ($i -eq 0) {
+            # Il divisore tra box 0 (CLIENTE/OGGETTO) e box 1 (FASE) e'
+            # PARZIALE (solo riga superiore) quando non c'e' scala, perche' la
+            # riga OGGETTO prosegue sotto il box fase. Con la scala invece la
+            # meta' inferiore del box 1 e' una cella vera e propria, quindi il
+            # divisore va a tutta altezza.
+            if ($i -eq 0 -and -not $hasScala) {
               $g.DrawLine($borderPen, $xAccum, 0, $xAccum, $halfH)
             } else {
               $g.DrawLine($borderPen, $xAccum, 0, $xAccum, $H)
@@ -335,8 +335,13 @@ module SceneManagerPlus
 
           $lblOgg = "OGGETTO:"
           $lblOggW = $g.MeasureString($lblOgg, $labelFont).Width
-          # OGGETTO: occupa la larghezza unificata box 0 + box 1b.
-          $rowMaxW_ogg = [single]($widths[0] + $widths[1] - 2 * $pad)
+          # OGGETTO: occupa la larghezza unificata box 0 + box 1 SOLO quando
+          # sotto il box fase non c'e' la cella della scala.
+          if ($hasScala) {
+            $rowMaxW_ogg = [single]($widths[0] - 2 * $pad)
+          } else {
+            $rowMaxW_ogg = [single]($widths[0] + $widths[1] - 2 * $pad)
+          }
           $valMaxW2 = [single]($rowMaxW_ogg - $lblOggW - 8)
           # Se il nome scena non entra su una riga: comprime e va a capo (max 2 righe).
           $oggFit = Fit-Object $g $sceneName $fontFamily $valueSz ([System.Drawing.FontStyle]::Regular) $valMaxW2 9.0
@@ -378,53 +383,45 @@ module SceneManagerPlus
           $mLblAsc = Get-Asc $midLabelFont
           $mValAsc = Get-Asc $midValueFont
 
-          # ---------- Box 1b: Fase di progetto (MID font, solo riga superiore) ----------
-          # Centrata nel range [0, halfH] — la riga inferiore è unificata con OGGETTO.
+          # ---------- Box 1: Fase di progetto (top) / SCALA (bottom) ----------
+          # Senza scala la riga inferiore non esiste: e' la prosecuzione di
+          # OGGETTO. Con la scala diventa la cella che rende la tavola
+          # autosufficiente: dice a che scala e' e a quale condizione vale.
           $wFr = (Measure-LV $g "PROGETTO:" $phaseValue $midLabelFont $midValueFont)
-          $startXf = $x + [int](($widths[1] - $wFr) / 2)
+          $blockFaseW = $wFr
+          if ($hasScala) {
+            $wScR = (Measure-LV $g "SCALA:" $scalaLine $midLabelFont $midValueFont)
+            if ($wScR -gt $blockFaseW) { $blockFaseW = $wScR }
+          }
+          $startXf = $x + [int](($widths[1] - $blockFaseW) / 2)
           Draw-LV-At $g "PROGETTO:" $phaseValue $midLabelFont $midValueFont $brush $startXf 0 $halfH
+          if ($hasScala) {
+            $lblScW = $g.MeasureString("SCALA:", $midLabelFont).Width
+            $g.DrawString("SCALA:", $midLabelFont, $brush, [single]$startXf, [single]($bY_bot - $mLblAsc))
+            $g.DrawString($scalaLine, $midValueFont, $brush, [single]($startXf + $lblScW + 8), [single]($bY_bot - $mValAsc))
+          }
           $x += $widths[1]
 
-          # ---------- Box 2: SCALA / STAMPA (solo stampa in scala) ----------
-          # E' il campo che rende la tavola autosufficiente: dice a che scala
-          # e' e a quale condizione quella scala vale.
-          if ($widths[2] -gt 0) {
-            $g.DrawLine($linePen, $x, $halfH, $x + $widths[2], $halfH)
-            $rScW = (Measure-LV $g "SCALA:"  $scalaValue  $midLabelFont $midValueFont)
-            $rStW = (Measure-LV $g "STAMPA:" $stampaValue $midLabelFont $midValueFont)
-            $blockScW = [Math]::Max($rScW, $rStW)
-            $startXsc = $x + [int](($widths[2] - $blockScW) / 2)
-            $lblScW = $g.MeasureString("SCALA:",  $midLabelFont).Width
-            $lblStW = $g.MeasureString("STAMPA:", $midLabelFont).Width
-            $g.DrawString("SCALA:",  $midLabelFont, $brush, [single]$startXsc, [single]($bY_top - $mLblAsc))
-            $g.DrawString($scalaValue, $midValueFont, $brush, [single]($startXsc + $lblScW + 8), [single]($bY_top - $mValAsc))
-            if (-not [string]::IsNullOrEmpty($stampaValue)) {
-              $g.DrawString("STAMPA:", $midLabelFont, $brush, [single]$startXsc, [single]($bY_bot - $mLblAsc))
-              $g.DrawString($stampaValue, $midValueFont, $brush, [single]($startXsc + $lblStW + 8), [single]($bY_bot - $mValAsc))
-            }
-          }
-          $x += $widths[2]
-
-          # ---------- Box 3: Tavola / Data (MID font) ----------
-          $g.DrawLine($linePen, $x, $halfH, $x + $widths[3], $halfH)
+          # ---------- Box 2: Tavola / Data (MID font) ----------
+          $g.DrawLine($linePen, $x, $halfH, $x + $widths[2], $halfH)
           $r2aW = (Measure-LV $g "TAVOLA nr.:" $tavola $midLabelFont $midValueFont)
           $r2bW = (Measure-LV $g "DATA:"       $date   $midLabelFont $midValueFont)
           $block2W = [Math]::Max($r2aW, $r2bW)
-          $startX2 = $x + [int](($widths[3] - $block2W) / 2)
+          $startX2 = $x + [int](($widths[2] - $block2W) / 2)
           $lblTavW = $g.MeasureString("TAVOLA nr.:", $midLabelFont).Width
           $lblDtW  = $g.MeasureString("DATA:",       $midLabelFont).Width
           $g.DrawString("TAVOLA nr.:", $midLabelFont, $brush, [single]$startX2, [single]($bY_top - $mLblAsc))
           $g.DrawString($tavola,       $midValueFont, $brush, [single]($startX2 + $lblTavW + 8), [single]($bY_top - $mValAsc))
           $g.DrawString("DATA:",       $midLabelFont, $brush, [single]$startX2, [single]($bY_bot - $mLblAsc))
           $g.DrawString($date,         $midValueFont, $brush, [single]($startX2 + $lblDtW  + 8), [single]($bY_bot - $mValAsc))
-          $x += $widths[3]
+          $x += $widths[2]
 
-          # ---------- Box 4: Progetto / Disegnato (MID font) ----------
-          $g.DrawLine($linePen, $x, $halfH, $x + $widths[4], $halfH)
+          # ---------- Box 3: Progetto / Disegnato (MID font) ----------
+          $g.DrawLine($linePen, $x, $halfH, $x + $widths[3], $halfH)
           $r3aW = (Measure-LV $g "PROGETTO:"      $projectBy $midLabelFont $midValueFont)
           $r3bW = (Measure-LV $g "CONTROLLATO DA:" $designer $midLabelFont $midValueFont)
           $block3W = [Math]::Max($r3aW, $r3bW)
-          $startX3 = $x + [int](($widths[4] - $block3W) / 2)
+          $startX3 = $x + [int](($widths[3] - $block3W) / 2)
           $lblPjW = $g.MeasureString("PROGETTO:",      $midLabelFont).Width
           $lblDsW = $g.MeasureString("CONTROLLATO DA:", $midLabelFont).Width
           $g.DrawString("PROGETTO:",      $midLabelFont, $brush, [single]$startX3, [single]($bY_top - $mLblAsc))
@@ -433,9 +430,9 @@ module SceneManagerPlus
           if (-not [string]::IsNullOrEmpty($designer)) {
             $g.DrawString($designer, $midValueFont, $brush, [single]($startX3 + $lblDsW + 8), [single]($bY_bot - $mValAsc))
           }
-          $x += $widths[4]
+          $x += $widths[3]
 
-          # ---------- Box 5: Dati aziendali ----------
+          # ---------- Box 4: Dati aziendali ----------
           # Blocco di N righe centrate verticalmente come unità, tutte
           # left-aligned alla stessa X. Interlinea molto stretta: usa
           # ascent + small_gap (no descent intero) così le righe sono vicine.
@@ -454,7 +451,7 @@ module SceneManagerPlus
             $rw = $g.MeasureString([string]$companyLines[$k], $f).Width
             if ($rw -gt $maxRowW4) { $maxRowW4 = $rw }
           }
-          $startX4 = $x + [int](($widths[5] - $maxRowW4) / 2)
+          $startX4 = $x + [int](($widths[4] - $maxRowW4) / 2)
           # Baseline prima riga: yTop4 + boldAsc.
           # Righe successive: precedente baseline + lineHeight.
           $baseY4 = [single]($yTop4 + $boldAsc)
@@ -464,11 +461,11 @@ module SceneManagerPlus
             $g.DrawString([string]$companyLines[$k], $f, $brush, [single]$startX4, $top)
             $baseY4 = [single]($baseY4 + $lineHeight)
           }
-          $x += $widths[5]
+          $x += $widths[4]
 
-          # ---------- Box 6: Logo ----------
+          # ---------- Box 5: Logo ----------
           if ($logoImg) {
-            $boxW = $widths[6]
+            $boxW = $widths[5]
             $margin = [int]([Math]::Max(4, $H * 0.10))
             $availW = $boxW - 2 * $margin
             $availH = $H - 2 * $margin
@@ -540,11 +537,10 @@ module SceneManagerPlus
           'project_by'         => cfg[:project_by].to_s,
           'designer'           => cfg[:designer].to_s,
           'project_phase'      => cfg[:project_phase].to_s,
-          # Box SCALA: presente solo se scala_value non è vuoto. L'export a
-          # serie non lo passa, quindi il suo cartiglio non cambia di una
-          # virgola rispetto a prima.
-          'scala_value'        => cfg[:scala_value].to_s,
-          'stampa_value'       => cfg[:stampa_value].to_s,
+          # Cella SCALA (meta' inferiore del box fase): presente solo se
+          # scala_line non è vuota. L'export a serie non la passa per le scene
+          # senza scala, quindi il loro cartiglio non cambia di una virgola.
+          'scala_line'         => cfg[:scala_line].to_s,
           'company_lines'      => Array(cfg[:company_lines]).map(&:to_s),
           'logo_path'          => cfg[:logo_path].to_s,
           'tavola_placeholder' => placeholder,

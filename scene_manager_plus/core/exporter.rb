@@ -170,8 +170,19 @@ module SceneManagerPlus
                      end
           name_out = page.name.to_s if name_out.to_s.strip.empty?
           base_name = sanitize_filename(name_out)
-          [page, idx, base_name, SceneModel.page_id(page)]
+          # Tavola in scala: la scena si porta dietro foglio, scala e DPI.
+          # Se c'è, questa scena esce dal percorso "immagine a dimensione
+          # fissa dai settings" e viene renderizzata da Core::PrintScale,
+          # che scrive nel file anche la dimensione fisica (DPI). Vedi la
+          # sezione "un percorso solo" nel CLAUDE.md.
+          ps_cfg = begin
+            defined?(Core::PrintScale) ? Core::PrintScale.scene_config(page) : nil
+          rescue
+            nil
+          end
+          [page, idx, base_name, SceneModel.page_id(page), ps_cfg]
         end
+        scale_meta = targets_meta.select { |m| m[4] }
 
         # Pre-renderizza tutte le filename label in un'unica chiamata PowerShell
         # (riusa System.Drawing per font/size/colore configurabili).
@@ -179,10 +190,17 @@ module SceneManagerPlus
         label_warn = nil
         if label_cfg['enabled']
           begin
-            items = targets_meta.map { |_p, _i, base_name, uid| [uid, base_name] }
-            label_pngs = TextRender.render_batch(items, label_cfg)
-            produced = label_pngs.keys.reject { |k| k == '_tmpdir' }.size
-            label_warn = "Filename labels: nessuna immagine generata" if produced.zero?
+            # Le tavole in scala non prendono la label: hanno il cartiglio,
+            # che porta già nome e numero della tavola.
+            items = targets_meta.reject { |m| m[4] }
+                                .map { |_p, _i, base_name, uid| [uid, base_name] }
+            if items.empty?
+              label_pngs = nil
+            else
+              label_pngs = TextRender.render_batch(items, label_cfg)
+              produced = label_pngs.keys.reject { |k| k == '_tmpdir' }.size
+              label_warn = "Filename labels: nessuna immagine generata" if produced.zero?
+            end
           rescue => e
             label_warn = "Filename label render failed: #{e.message}"
             warn "[SM+] label pre-render error: #{e.class}: #{e.message}"
@@ -225,11 +243,15 @@ module SceneManagerPlus
             logo_for_tb   = '' unless File.file?(logo_for_tb)
 
             pad = (naming_cfg['pad'] || 2).to_i
-            tb_items = targets_meta.map do |page, idx, _b, uid|
+            # Le tavole in scala hanno il cartiglio della LORO larghezza di
+            # foglio e la loro fascia in mm, più il box SCALA/STAMPA: se lo
+            # rendono da sé (Core::PrintScale.render_titleblock). Qui restano
+            # fuori dal batch, altrimenti si generano PNG mai usati.
+            tb_items = targets_meta.reject { |m| m[4] }.map do |page, idx, _b, uid|
               num_str = idx.to_s.rjust([pad, 1].max, '0')
               { uid: uid, client: client_str, tavola: num_str, scene_name: page.name.to_s }
             end
-            tb_pngs = TitleBlock.render_batch(tb_items,
+            tb_pngs = tb_items.empty? ? nil : TitleBlock.render_batch(tb_items,
               width:              wpx,
               height:             tb_height,
               font_family:        (tb_cfg['font_family']    || 'Century Gothic'),
@@ -241,8 +263,10 @@ module SceneManagerPlus
               logo_path:          logo_for_tb,
               tavola_placeholder: '0' * [pad, 1].max
             )
-            produced = tb_pngs.keys.reject { |k| k == '_tmpdir' }.size
-            tb_warn = 'Title block: nessuna immagine generata' if produced.zero?
+            if tb_pngs
+              produced = tb_pngs.keys.reject { |k| k == '_tmpdir' }.size
+              tb_warn = 'Title block: nessuna immagine generata' if produced.zero?
+            end
           rescue => e
             tb_warn = "Title block render failed: #{e.message}"
             warn "[SM+] titleblock pre-render error: #{e.class}: #{e.message}"
@@ -254,6 +278,35 @@ module SceneManagerPlus
         errors << logo_warn  if logo_warn
         errors << label_warn if label_warn
         errors << tb_warn    if tb_warn
+
+        # Riepilogo sulle tavole in scala: sono le uniche del lotto che vanno
+        # stampate al 100% (senza "adatta alla pagina"), ed è esattamente la
+        # cosa che non si vede guardando i file. Va detta PRIMA di partire e
+        # ripetuta alla fine.
+        unless scale_meta.empty?
+          scale_meta.each do |page, _idx, _b, _uid, ps_cfg|
+            begin
+              g = Core::PrintScale.compute(ps_cfg)
+              if Array(g[:errors]).empty?
+                errors << format("Scale drawing '%s': %s on %s %s - print at 100%%",
+                                 page.name, Core::PrintScale.format_scale(g[:denom]),
+                                 g[:paper], g[:landscape] ? 'landscape' : 'portrait')
+                if g[:peak_mb] > Core::PrintScale::PEAK_MB_WARN
+                  errors << format("  ...and it needs about %d MB of memory: SketchUp may run out.",
+                                   g[:peak_mb].round)
+                end
+              else
+                errors << "Scale drawing '#{page.name}': #{Array(g[:errors]).join(' ')}"
+              end
+            rescue => e
+              warn "[SM+] export scale preflight on '#{page.name}': #{e.class}: #{e.message}"
+            end
+          end
+          if logo_cfg['enabled'] || label_cfg['enabled']
+            errors << 'Scale drawings get no logo watermark and no filename label: ' \
+                      'the title block already names and numbers the sheet.'
+          end
+        end
 
         puts "[SM+] export start: out=#{out_dir} fmt=#{fmt} size=#{wpx}x#{hpx} aa=#{aa} " \
              "transp=#{transp} line_scale=#{line_scale} " \
@@ -337,9 +390,19 @@ module SceneManagerPlus
             finish.call(false); next
           end
 
-          page, _idx_for_name, base_name, uid = targets_meta[i]
+          page, _idx_for_name, base_name, uid, ps_cfg = targets_meta[i]
           i += 1
-          fname = base_name + ext
+          # Una tavola in scala usa il formato scelto per LEI (di default PNG:
+          # a quelle risoluzioni il JPG sporca il tratto), non quello della
+          # serie. Nella stessa cartella possono quindi convivere estensioni
+          # diverse: è voluto.
+          t_ext = ext
+          if ps_cfg
+            ps_fmt = (ps_cfg['format'] || 'png').to_s.downcase
+            ps_fmt = 'png' unless EXTS.key?(ps_fmt)
+            t_ext  = EXTS[ps_fmt]
+          end
+          fname = base_name + t_ext
           fpath = File.join(out_dir, fname)
           fpath = unique_path(fpath) unless overwrite
 
@@ -352,6 +415,30 @@ module SceneManagerPlus
             rescue => e
               warn "[SM+] export variant apply: #{e.class}: #{e.message}"
             end
+
+            if ps_cfg
+              # Percorso tavola in scala. La scena è già attiva, quindi
+              # PrintScale.render non cambia pagina e non deve ripristinarla:
+              # imposta l'altezza camera della scala, renderizza, monta foglio
+              # + cartiglio + cornice e scrive i DPI dentro al file.
+              # Niente overlay qui: il cartiglio è l'etichetta della tavola.
+              ok_ps, notes_ps = Core::PrintScale.render(page, ps_cfg, fpath)
+              Array(notes_ps).each { |n| errors << "#{page.name}: #{n}" }
+              if ok_ps
+                count += 1
+              else
+                errors << "Print to scale failed on '#{page.name}'"
+              end
+              # ATTENZIONE: queste due righe sono la copia della coda del
+              # ciclo (in fondo alla lambda). Il `next` salta tutto il resto
+              # dello step, coda inclusa, quindi vanno tenute allineate: se
+              # cambi come si avanza al target successivo, cambialo in
+              # ENTRAMBI i posti.
+              on_progress&.call(i, total, page.name.to_s)
+              ::UI.start_timer(0.01, false) { step.call } unless stopped
+              next
+            end
+
             # Riapplica EdgeWidth/ProfileWidth DOPO pages.selected_page=: se la
             # scena ha PAGE_USE_RENDERING_OPTIONS, SU al cambio pagina ripristina
             # i valori salvati nella scena, sovrascrivendo la nostra modifica

@@ -575,3 +575,169 @@ fieldset legend {
 .fog-step-btn:active { background: #2b5a86; color: #fff; }
 .fog-step-btn:disabled { opacity: 0.4; cursor: default; }
 
+
+/* === Print to scale ========================================= */
+/* La scala e' una proprieta' della scena, quindi vive qui dentro insieme
+   alle altre. I numeri sotto i controlli si aggiornano a ogni tocco: li
+   calcola Ruby (Core::PrintScale.compute), il JS li mostra e basta. */
+#ps-fieldset { padding-top: 10px; }
+.ps-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #ddd;
+  cursor: pointer;
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+.ps-badge {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+.ps-badge.is-ok {
+  background: #24402c;
+  border-color: #35603f;
+  color: #9fd8ac;
+}
+.ps-badge.is-off {
+  background: #4a3a1e;
+  border-color: #6b542a;
+  color: #f0c274;
+}
+.ps-note {
+  background: #4a3a1e;
+  border: 1px solid #6b542a;
+  color: #f0c274;
+  font-size: 11px;
+  padding: 6px 8px;
+  border-radius: 2px;
+  margin-bottom: 8px;
+  display: none;
+}
+.ps-note.is-error {
+  background: #4a2424;
+  border-color: #6b3030;
+  color: #f0a0a0;
+}
+.ps-controls.ps-disabled { opacity: 0.4; pointer-events: none; }
+
+.ps-grid {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: 5px 8px;
+  align-items: center;
+}
+.ps-grid > label {
+  color: #bbb;
+  font-size: 11px;
+  text-align: right;
+}
+.ps-inline {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.ps-num { width: 66px; flex: 0 0 auto; }
+.ps-unit { color: #888; font-size: 11px; flex: 0 0 auto; }
+.ps-hint {
+  color: #7d7d7d;
+  font-size: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#ps-fieldset select {
+  background: #232323;
+  border: 1px solid #1e1e1e;
+  color: #ddd;
+  padding: 4px 5px;
+  border-radius: 2px;
+  font-size: 11px;
+  font-family: inherit;
+}
+#ps-fieldset select:focus { outline: none; border-color: #4ea1ff; }
+#ps-denom-pick { width: 74px; }
+
+.ps-readout {
+  margin: 10px 0 8px;
+  padding: 7px 9px;
+  background: #262626;
+  border: 1px solid #1e1e1e;
+  border-radius: 2px;
+  display: grid;
+  grid-template-columns: 92px 1fr;
+  gap: 3px 10px;
+  font-size: 11px;
+}
+.ps-readout .ps-r-lbl { color: #888; text-align: right; }
+.ps-readout .ps-r-val { color: #ddd; }
+.ps-readout .ps-r-val.is-heavy { color: #f0c274; }
+
+.ps-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ps-spacer { flex: 1 1 auto; }
+.ps-actions button {
+  background: #3a3a3a;
+  border: 1px solid #1e1e1e;
+  color: #ddd;
+  padding: 5px 10px;
+  border-radius: 2px;
+  cursor: pointer;
+  font-size: 11px;
+  font-family: inherit;
+}
+.ps-actions button:hover { background: #4a4a4a; border-color: #4ea1ff; }
+.ps-actions button:disabled { opacity: 0.4; cursor: default; }
+/* Apply si accende quando ci sono modifiche non ancora salvate nella scena:
+   qui il commit NON e' live, perche' scrivere sulla pagina puo' costare
+   secondi sui modelli con AttributeObserver di plugin terzi. */
+#btn-ps-apply.is-dirty {
+  background: #2e6fb8;
+  border-color: #1a4e8a;
+  color: #fff;
+  font-weight: bold;
+}
+#btn-ps-apply.is-dirty:hover { background: #3a85d6; }
+#btn-ps-clear { color: #c98a8a; }
+
+/* Taratura stampante: non e' una proprieta' della scena (e' della stampante,
+   ed e' salvata per computer), quindi e' staccata visivamente dai controlli
+   della tavola. */
+.ps-calib {
+  margin-top: 12px;
+  padding-top: 9px;
+  border-top: 1px dashed #3d3d3d;
+}
+.ps-calib-title {
+  color: #aaa;
+  font-size: 11px;
+  font-weight: bold;
+  margin-bottom: 7px;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.ps-calib-title .ps-hint { font-weight: normal; }
+.ps-num3 { width: 58px; flex: 0 0 auto; }
+.ps-mini {
+  background: #3a3a3a;
+  border: 1px solid #1e1e1e;
+  color: #ddd;
+  padding: 3px 8px;
+  border-radius: 2px;
+  cursor: pointer;
+  font-size: 11px;
+  font-family: inherit;
+  flex: 0 0 auto;
+}
+.ps-mini:hover { background: #4a4a4a; border-color: #4ea1ff; }
+.ps-mini:disabled { opacity: 0.4; cursor: default; }
+#ps-calib { max-width: 150px; }
+.ps-readout .ps-r-val.is-calib { color: #9ec5f0; }

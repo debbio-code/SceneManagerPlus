@@ -100,6 +100,111 @@
         </div>
       </fieldset>
 
+      <fieldset id="ps-fieldset">
+        <legend>Print to scale</legend>
+        <label class="ps-toggle">
+          <input type="checkbox" id="ps-enabled">
+          <span>This scene is a scale drawing</span>
+          <span id="ps-badge" class="ps-badge"></span>
+        </label>
+        <div class="ps-note" id="ps-warn"></div>
+        <div class="ps-controls" id="ps-controls">
+          <div class="ps-grid">
+            <label for="ps-paper">Sheet</label>
+            <span class="ps-inline">
+              <select id="ps-paper"></select>
+              <select id="ps-orient">
+                <option value="landscape">Landscape</option>
+                <option value="portrait">Portrait</option>
+              </select>
+            </span>
+
+            <label for="ps-denom">Scale 1:</label>
+            <span class="ps-inline">
+              <input type="text" id="ps-denom" class="ps-num" spellcheck="false" autocomplete="off">
+              <select id="ps-denom-pick" title="Common scales"></select>
+            </span>
+
+            <label for="ps-dpi">Resolution</label>
+            <span class="ps-inline">
+              <input type="text" id="ps-dpi" class="ps-num" spellcheck="false" autocomplete="off">
+              <span class="ps-unit">DPI</span>
+              <span class="ps-hint" id="ps-thinnest" title="Ordinary edges are always 1 pixel thick, so the resolution decides the thinnest line that reaches the paper: raising it makes lines finer, not heavier."></span>
+            </span>
+
+            <label for="ps-margin">Margins</label>
+            <span class="ps-inline">
+              <input type="text" id="ps-margin" class="ps-num" spellcheck="false" autocomplete="off">
+              <span class="ps-unit">mm</span>
+            </span>
+
+            <label for="ps-band">Title block</label>
+            <span class="ps-inline">
+              <input type="text" id="ps-band" class="ps-num" spellcheck="false" autocomplete="off">
+              <span class="ps-unit">mm</span>
+              <span class="ps-hint">band reserved at the bottom of the sheet</span>
+            </span>
+
+            <label for="ps-profile">Profile lines</label>
+            <span class="ps-inline">
+              <input type="text" id="ps-profile" class="ps-num" spellcheck="false" autocomplete="off">
+              <span class="ps-unit">mm</span>
+              <span class="ps-hint" id="ps-profile-hint">0 = leave as in the style</span>
+            </span>
+
+            <label for="ps-sheetmode">Output</label>
+            <span class="ps-inline">
+              <select id="ps-sheetmode">
+                <option value="full_sheet">Full sheet, margins included</option>
+                <option value="drawing_only">Drawing area only</option>
+              </select>
+              <select id="ps-format">
+                <option value="png">PNG</option>
+                <option value="jpg">JPG</option>
+              </select>
+            </span>
+          </div>
+
+          <div class="ps-readout" id="ps-readout"></div>
+
+          <div class="ps-actions">
+            <button type="button" id="btn-ps-apply" title="Save these settings in the scene, put the view back at this scale and store it in the scene">Apply to this scene</button>
+            <button type="button" id="btn-ps-print" title="Render this one sheet now. The batch export produces the same sheet for every scene that has a scale.">Print this sheet...</button>
+            <span class="ps-spacer"></span>
+            <button type="button" id="btn-ps-clear" title="This scene goes back to exporting like any other, at the size set in Settings">Remove scale</button>
+          </div>
+        </div>
+
+        <!-- La taratura NON e' una proprieta' della scena ne' del file: e' una
+             proprieta' della stampante, quindi vive fuori dai controlli della
+             scena ed e' salvata per questo computer. -->
+        <div class="ps-calib">
+          <div class="ps-calib-title">
+            Printer calibration
+            <span class="ps-hint">saved on this computer, valid for every file and every scene</span>
+          </div>
+          <div class="ps-grid">
+            <label for="ps-calib">Printer</label>
+            <span class="ps-inline">
+              <select id="ps-calib" title="No printer prints exactly to size. Pick the profile of the printer you use."></select>
+              <button type="button" id="btn-ps-calib-del" class="ps-mini" title="Delete the selected printer profile">Delete</button>
+              <span class="ps-hint" id="ps-calib-hint"></span>
+            </span>
+
+            <label for="ps-calib-exp">From a test print</label>
+            <span class="ps-inline">
+              <span class="ps-hint">should be</span>
+              <input type="text" id="ps-calib-exp" class="ps-num3" spellcheck="false" autocomplete="off">
+              <span class="ps-unit">mm</span>
+              <span class="ps-hint">came out</span>
+              <input type="text" id="ps-calib-got" class="ps-num3" spellcheck="false" autocomplete="off">
+              <span class="ps-unit">mm</span>
+              <button type="button" id="btn-ps-calib-save" class="ps-mini" title="Print a sheet at 100%, measure a known length with a ruler, type both numbers here.">Save profile...</button>
+            </span>
+          </div>
+        </div>
+      </fieldset>
+
       <div class="preview-wrap">
         <div class="preview-label">Preview</div>
         <div id="preview-box" class="preview-box">
@@ -136,5 +241,7 @@
 
   <script src="js/color_popup.js"></script>
   <script src="js/properties.js"></script>
+  <!-- Deve stare DOPO properties.js: si aggancia a window.SMP.setState. -->
+  <script src="js/props_print_scale.js"></script>
 </body>
 </html>

@@ -98,10 +98,13 @@ module SceneManagerPlus
 
       # Che scala sta inquadrando la camera, data l'altezza dell'area di
       # disegno sul foglio. nil se la camera e' in prospettiva.
+      # Diviso per la taratura: l'altezza camera la contiene (vedi
+      # "Taratura della stampante"), ma qui vogliamo la scala NOMINALE, quella
+      # che l'utente scrive e che finisce nel cartiglio.
       def scale_from_camera(cam, draw_h_mm)
         return nil if cam.nil? || draw_h_mm.nil? || draw_h_mm <= 0
         return nil if cam.perspective?
-        (cam.height.to_f * MM_PER_INCH) / draw_h_mm
+        ((cam.height.to_f * MM_PER_INCH) / draw_h_mm) / calibration_factor
       end
 
       # =====================================================================
@@ -160,10 +163,17 @@ module SceneManagerPlus
         # L'estensione verticale che la camera deve inquadrare, in POLLICI
         # (unita' interna di SketchUp): pixel / DPI = pollici su carta,
         # x denominatore = pollici nel modello.
-        camera_height_in = draw_h_px.to_f / dpi * denom
+        #
+        # x fattore di taratura: la stampante rimpicciolisce di k, quindi il
+        # disegno va fatto piu' grande di 1/k sul foglio -> la camera deve
+        # inquadrare k volte meno modello. Vedi la sezione "Taratura della
+        # stampante": il foglio resta di dimensione nominale, cambia solo
+        # quanto modello ci sta dentro.
+        calib = calibration_factor
+        camera_height_in = draw_h_px.to_f / dpi * denom * calib
 
-        cover_h_mm = draw_h_mm_real * denom
-        cover_w_mm = draw_w_mm_real * denom
+        cover_h_mm = draw_h_mm_real * denom * calib
+        cover_w_mm = draw_w_mm_real * denom * calib
 
         # Spessori: 1 px = 25.4/DPI mm sulla carta. Gli spigoli ordinari sono
         # sempre 1 px, quindi edge_mm e' il tratto piu' sottile ottenibile.
@@ -242,7 +252,9 @@ module SceneManagerPlus
           section_mm:        section_mm,
           profile_px:        profile_px,
           section_px:        section_px,
-          peak_mb:           peak_mb
+          peak_mb:           peak_mb,
+          calib_factor:      calib,
+          calib_name:        calibration_name
         }
       end
 
@@ -689,6 +701,20 @@ module SceneManagerPlus
       SCENE_FIELDS = %w[paper orientation scale_denom dpi margin_mm titleblock_mm
                         profile_mm section_mm antialias format sheet_mode].freeze
 
+      # I campi arrivano dalla UI come testo ("200", "0,35"). Salvarli grezzi
+      # funzionerebbe lo stesso (compute li ri-parsa comunque), ma lascerebbe
+      # nel .skp una cfg mezza stringa e mezza numero: qualunque confronto
+      # numerico futuro su quei valori sarebbe una trappola.
+      NUMERIC_FIELDS = %w[scale_denom dpi margin_mm titleblock_mm
+                          profile_mm section_mm].freeze
+
+      def coerce_field(key, value)
+        return parse_num(value, 0.0) if NUMERIC_FIELDS.include?(key)
+        return !!value if key == 'antialias' && !value.is_a?(String)
+        return !%w[false 0 off].include?(value.to_s.downcase) if key == 'antialias'
+        value.to_s
+      end
+
       def scene_config(page)
         return nil unless page && page.respond_to?(:get_attribute)
         raw = page.get_attribute(SCENE_DICT, SCENE_KEY, nil)
@@ -716,7 +742,7 @@ module SceneManagerPlus
         m = Sketchup.active_model
         return false unless m
         clean = {}
-        SCENE_FIELDS.each { |k| clean[k] = cfg[k] unless cfg[k].nil? }
+        SCENE_FIELDS.each { |k| clean[k] = coerce_field(k, cfg[k]) unless cfg[k].nil? }
         clean['v'] = 1
         began = false
         begin
@@ -750,6 +776,187 @@ module SceneManagerPlus
           warn "[SM+] print_scale clear_scene_config: #{e.class}: #{e.message}"
           false
         end
+      end
+
+      # =====================================================================
+      # Taratura della stampante
+      # =====================================================================
+      #
+      # Nessuna catena di stampa e' esatta: fra il file e la carta c'e' un
+      # fattore `k` (driver, margini non stampabili, meccanica). Si misura una
+      # volta stampando una tavola e misurando col righello una lunghezza nota:
+      #
+      #     k = misurato / atteso        (es. 143,84 / 150 = 0,9589)
+      #
+      # ⚠️ **Il fattore si applica all'altezza camera, NON ai DPI scritti nel
+      # file.** Alzare la dimensione dichiarata farebbe uscire il foglio dal
+      # formato (un A4 che dichiara 310 mm invece di 297 viene tagliato dai
+      # margini non stampabili, o rimesso "adatta alla pagina" dal driver — cioe'
+      # riporta esattamente il problema che stiamo correggendo). Disegnando
+      # invece piu' grande DENTRO un foglio che resta nominale, la stampante lo
+      # rimpicciolisce di k e il disegno atterra in scala esatta. Funziona sia
+      # se la stampante onora i DPI sia se adatta alla pagina, ed e' per questo
+      # che la misura converge in un solo giro.
+      #
+      # I profili sono GLOBALI per macchina (`write_default`), non per file:
+      # la taratura e' una proprieta' della stampante, non del progetto.
+      CALIB_KEY = 'print_calibration'.freeze
+
+      # Fuori da questa forbice e' quasi certamente un errore di battitura
+      # (mm scambiati con cm, virgola sbagliata): meglio rifiutare che
+      # falsare tutte le tavole in silenzio.
+      CALIB_MIN = 0.80
+      CALIB_MAX = 1.25
+
+      # ⚠️ `Sketchup.write_default` PERDE le stringhe che contengono una
+      # virgoletta doppia (misurato su 19.3.253): ritorna `true`, e la
+      # `read_default` successiva restituisce `nil`. Un JSON, che di
+      # virgolette e' fatto, sparisce in silenzio. Quindi lo codifichiamo in
+      # Base64 (`pack('m0')`, che e' core: niente require) prima di scriverlo.
+      # Il costo e' che nel registro il valore non e' leggibile a occhio.
+      def calibration_data
+        empty = { 'active' => '', 'profiles' => {} }
+        raw = (Sketchup.read_default('SceneManagerPlus', CALIB_KEY, '') rescue '').to_s
+        return empty if raw.strip.empty?
+        json = raw.strip.start_with?('{') ? raw : raw.unpack('m0').first.to_s
+        h = JSON.parse(json)
+        return empty unless h.is_a?(Hash)
+        {
+          'active'   => h['active'].to_s,
+          'profiles' => (h['profiles'].is_a?(Hash) ? h['profiles'] : {})
+        }
+      rescue => e
+        warn "[SM+] print_scale calibration_data: #{e.class}: #{e.message}"
+        { 'active' => '', 'profiles' => {} }
+      end
+
+      def write_calibration_data(h)
+        blob = [JSON.generate(h)].pack('m0')
+        Sketchup.write_default('SceneManagerPlus', CALIB_KEY, blob)
+        # write_default ritorna true anche quando non ha scritto nulla: l'unica
+        # verifica sensata e' rileggere.
+        check = (Sketchup.read_default('SceneManagerPlus', CALIB_KEY, '') rescue '').to_s
+        check == blob
+      rescue => e
+        warn "[SM+] print_scale write_calibration_data: #{e.class}: #{e.message}"
+        false
+      end
+
+      # Fattore attivo, 1.0 se non c'e' taratura. Difensivo anche in lettura:
+      # un valore fuori forbice (file dei default modificato a mano) non deve
+      # poter sballare le tavole.
+      def calibration_factor
+        d = calibration_data
+        prof = d['profiles'][d['active']]
+        return 1.0 unless prof.is_a?(Hash)
+        f = prof['factor'].to_f
+        (f >= CALIB_MIN && f <= CALIB_MAX) ? f : 1.0
+      rescue
+        1.0
+      end
+
+      def calibration_name
+        d = calibration_data
+        d['profiles'].key?(d['active']) ? d['active'] : ''
+      rescue
+        ''
+      end
+
+      def set_active_calibration(name)
+        d = calibration_data
+        n = name.to_s
+        d['active'] = (n.empty? || d['profiles'].key?(n)) ? n : d['active']
+        write_calibration_data(d)
+      end
+
+      # [ok, factor_or_message]. `expected`/`measured` in mm dalla prova di
+      # stampa: la stessa lunghezza, come doveva venire e come e' venuta.
+      def save_calibration(name, expected, measured)
+        n = name.to_s.strip
+        return [false, 'Give the printer profile a name.'] if n.empty?
+        exp = parse_num(expected, 0.0)
+        got = parse_num(measured, 0.0)
+        return [false, 'Both lengths must be greater than zero.'] if exp <= 0 || got <= 0
+        f = got / exp
+        unless f >= CALIB_MIN && f <= CALIB_MAX
+          return [false, format('That gives a factor of %.4f, outside the sane range %.2f-%.2f. ' \
+                                'Check that both lengths are in millimetres.', f, CALIB_MIN, CALIB_MAX)]
+        end
+        d = calibration_data
+        d['profiles'][n] = {
+          'factor'   => f,
+          'expected' => exp,
+          'measured' => got
+        }
+        d['active'] = n
+        return [false, 'Could not save the printer profile.'] unless write_calibration_data(d)
+        [true, f]
+      end
+
+      def delete_calibration(name)
+        d = calibration_data
+        n = name.to_s
+        return false unless d['profiles'].key?(n)
+        d['profiles'].delete(n)
+        d['active'] = '' if d['active'] == n
+        write_calibration_data(d)
+      end
+
+      # Payload per la UI: profili + quello attivo + il fattore effettivo.
+      def calibration_payload
+        d = calibration_data
+        list = d['profiles'].map do |nm, p|
+          {
+            'name'     => nm,
+            'factor'   => p['factor'].to_f,
+            'expected' => p['expected'].to_f,
+            'measured' => p['measured'].to_f
+          }
+        end.sort_by { |p| p['name'].to_s.downcase }
+        {
+          'active'   => calibration_name,
+          'profiles' => list,
+          'factor'   => calibration_factor
+        }
+      end
+
+      # Le scene che hanno una scala. Serve per rimetterle tutte in quadro
+      # dopo un cambio di taratura: il fattore entra nell'altezza camera,
+      # quindi l'inquadratura salvata nelle scene non e' piu' quella giusta.
+      def scaled_pages(model = nil)
+        m = model || Sketchup.active_model
+        return [] unless m
+        m.pages.select { |p| scene_config?(p) }
+      rescue
+        []
+      end
+
+      # Rimette in scala e risalva l'inquadratura di tutte le scene che ne
+      # hanno una. Ritorna [fatte, [errori]].
+      def reapply_all_scaled
+        m = Sketchup.active_model
+        return [0, ['No active model']] unless m
+        pages = scaled_pages(m)
+        return [0, []] if pages.empty?
+        prev = m.pages.selected_page
+        done = 0
+        errs = []
+        pages.each do |p|
+          ok, err = reapply_and_store(p)
+          if ok
+            done += 1
+          else
+            errs << "#{p.name}: #{err}"
+          end
+        end
+        begin
+          if prev && m.pages.selected_page != prev
+            m.pages.selected_page = prev
+            on_scene_activated(prev)
+          end
+        rescue
+        end
+        [done, errs]
       end
 
       # Geometria della scena (nil se non ha una scala impostata).
@@ -1014,16 +1221,23 @@ module SceneManagerPlus
           company_lines:      TitleBlock.load_company_lines,
           logo_path:          logo,
           tavola_placeholder: '0' * pad,
-          # I due campi nuovi: la tavola dice da sé a che scala è e a quale
-          # condizione quella scala vale.
-          scala_value:        format_scale(geo[:denom]),
-          stampa_value:       format('%s %s al 100%%', geo[:paper],
-                                     geo[:landscape] ? 'orizz.' : 'vert.')
+          # La cella che rende la tavola autosufficiente: dice a che scala è e
+          # a quale condizione quella scala vale. Sta nella metà inferiore del
+          # box fase, sotto "PROGETTO:".
+          scala_line:         scala_line_for(geo)
         )
         [pngs['print_scale'], pngs]
       rescue => e
         warn "[SM+] print_scale titleblock: #{e.class}: #{e.message}"
         [nil, nil]
+      end
+
+      # Testo della cella SCALA del cartiglio. Una frase sola, perche' quello
+      # che conta e' la condizione: la scala vale SE stampi cosi'.
+      def scala_line_for(geo)
+        format('%s, se in %s %s al 100%%',
+               format_scale(geo[:denom]), geo[:paper],
+               geo[:landscape] ? 'orizzontale' : 'verticale')
       end
 
       # Numero tavola = stessa posizione 1-based dell'ordine logico usata dal

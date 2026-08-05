@@ -118,6 +118,8 @@ scene_manager_plus/
             ├── dnd.js              # drag&drop custom (no HTML5 native)
             ├── export.js           # logica dialog Export
             ├── properties.js      # logica dialog Properties (live commit)
+            ├── props_print_scale.js # sezione "Print to scale" della scheda scena
+            │                       # (file a parte, si aggancia a SMP.setState)
             ├── settings.js         # logica dialog Settings
             └── style_dialog.js     # logica Mini Style Manager (window.SMS)
 ```
@@ -335,6 +337,12 @@ Pattern naming: `{prefix}{sep}{nnn}{sep}{scene_name}` con `prefix_mode` =
 `skp_name` | `custom` | `none`.
 
 ## Export — smart output dir: `Immagini` / `Immagini/Superate/NN`
+
+> ⚠️ **Dal 2026-08-05 l'export non produce una sola forma di immagine.** Una
+> scena che ha una scala di stampa esce come **tavola in scala** (foglio a
+> misura fisica, DPI scritti nel file, cartiglio col box SCALA), non come
+> immagine a `export.width × height`. Vedi "Stampa in scala", sezione
+> "un percorso solo". Tutto quello che segue vale per le scene senza scala.
 
 Quando `export.output_dir` è vuoto:
 - **Caso A**: `Immagini/` non esiste accanto al `.skp` → la crea, esporta lì
@@ -1748,10 +1756,11 @@ gli spessori si esprimono in mm e si convertono in px dai DPI.
 | 0 ✅ | Misure preliminari (sopra) |
 | 1 ✅ | Motore: scala↔inquadratura↔pixel, A4→A0, margini, DPI con mm mostrati, spessori profili in mm. Singola scena, file a misura esatta. Verifica: A3 1:50, col metro sul foglio 20 cm = 10 m nel modello |
 | 2a ✅ | La scala diventa **proprietà della scena**: memoria sulla pagina, riapplicazione all'attivazione, icona in lista, inquadratura del foglio nel viewport |
-| 2b | Finestra vera al posto dell'harness a `UI.inputbox` (numeri live: area coperta, px, MB, mm del tratto) |
+| 2b-1 ✅ | Sezione **Print to scale** nella scheda della scena (Properties), coi numeri live |
+| 2b-2 | Finestra propria "Print to scale" (l'utente le vuole **entrambe**) |
 | 3a ✅ | Cartiglio dentro la fascia della tavola in scala, con il box **SCALA / STAMPA** |
 | 3b | Scaletta grafica da 200 mm che fa anche da righello di taratura + taratura stampante in percentuale (globale per macchina, applicata via il DPI scritto nel file) |
-| 4 | Serie sulle scene selezionate, ognuna col suo foglio e la sua scala, numerazione tavola esistente |
+| 4 ✅ | **Un percorso solo**: l'export a serie produce la tavola in scala per ogni scena che ha una scala |
 | 5 | Eventuali: PDF, stampa diretta, render a mattonelle per A1/A0 (possibile **solo** grazie alla proiezione parallela: spostando la vista di quantità esatte i pezzi combaciano al pixel) |
 
 ### Fase 1 — `Core::PrintScale`: le decisioni non ovvie
@@ -1955,18 +1964,28 @@ dell'export a serie. La differenza che conta: larghezza e altezza vengono dal
 che rende la tavola coerente con l'inquadratura mostrata nel viewport, e che
 chiude l'equivoco descritto nella sezione precedente.
 
-**Box nuovo `SCALA` / `STAMPA`**, in alto e in basso: `1:50` e
-`A3 orizz. al 100%`. Sta fra il box PROGETTO(fase) e TAVOLA nr.
+**La cella `SCALA` (versione definitiva, 2026-08-05).** Una riga sola, del
+tipo `SCALA:  1:1, se in A4 orizzontale al 100%`, e **non un box in più a sé
+stante**: vive nella **metà inferiore del box 1 (fase di progetto)**, cioè
+sotto `PROGETTO: Preliminare`. Quella metà normalmente non esiste come cella —
+è la prosecuzione della riga OGGETTO, che è unificata su box 0 + box 1. Quindi:
 
-⚠️ **Gli indici di `$widths` nello script PowerShell sono cambiati.** Ora sono
-`0 cliente, 1 fase, 2 SCALA, 3 tavola, 4 progetto, 5 dati, 6 logo`. Chi tocca
-quel layout deve ricordarsene: prima `tavola` era 2, `dati` 4, `logo` 5.
+- con la scala: il divisore verticale fra box 0 e box 1 va a **tutta altezza**,
+  OGGETTO si restringe al solo box 0, e sotto PROGETTO compare la cella SCALA;
+- senza scala: divisore **parziale** (solo metà superiore) e OGGETTO che
+  prosegue sotto il box fase — cioè **esattamente il cartiglio di sempre**.
+  Verificato rigenerando le due varianti e confrontandole.
 
-Il box è **presente solo se il chiamante passa `scala_value`**: l'export a
-serie non lo passa, quindi il suo cartiglio è rimasto identico — verificato
-generando le due varianti e confrontandole. Quando la scala manca il box vale
-**larghezza 0** e il divisore verticale corrispondente viene saltato (senza il
-`continue` si disegnerebbe una riga doppia sopra la precedente).
+Il testo è una frase unica perché quello che conta è la **condizione**: la
+scala vale *se* stampi così. Lo costruisce `PrintScale.scala_line_for(geo)` e
+viaggia nel campo `scala_line` (prima erano due campi `scala_value` +
+`stampa_value`, su due righe etichettate: **sostituiti**).
+
+⚠️ **Gli indici di `$widths` nello script PowerShell sono cambiati DUE volte.**
+Adesso sono `0 cliente, 1 fase(+scala), 2 tavola, 3 progetto, 4 dati, 5 logo`
+— cioè sono tornati a 6 voci come prima della Fase 3a, perché la colonna SCALA
+non esiste più. Chi tocca quel layout guardi gli indici veri nel file, non
+questa riga di un file che invecchia.
 
 **`Naming.prefix_for(settings, skp_title)`** estratto da `Naming.format`: è la
 regola del prefisso (che il cartiglio riusa come CLIENTE) in un posto solo.
@@ -1975,17 +1994,13 @@ regola vanno allineate. Era già uscito un bug da questa duplicazione.
 
 **Collaudo senza SketchUp**: lo script del cartiglio non usa l'API SU, quindi
 `TitleBlock.render_batch` si chiama da un Ruby normale e si guarda il PNG che
-esce. Provati: senza scala (identico a prima), con SCALA+STAMPA, con la sola
-SCALA, e con `1:1000` su A0 verticale — tutti 3150×197 px come richiesto.
+esce. È il modo più veloce per verificare un cambio di layout: due render, uno
+con `scala_line` e uno senza, e si confrontano a occhio.
 
-⚠️ **Non ancora verificato dal vivo**: che il PNG del cartiglio finisca nella
-fascia giusta della tavola vera (il blit in `compose_sheet`). Serve SketchUp
-aperto: la composizione usa `Sketchup::ImageRep`.
+✅ Il blit del cartiglio nella fascia (`compose_sheet`) è stato **verificato dal
+vivo il 2026-08-05**.
 
-### ⚠️ STATO APERTO a fine sessione 2026-08-04 — "non ci siamo ancora"
-
-Da qui riparte la prossima sessione. **Il motore è giusto, il percorso utente
-no.**
+### RISOLTO (2026-08-05): un percorso solo — l'export produce le tavole in scala
 
 **Cosa è verificato e regge** (non rimetterlo in discussione senza motivo):
 
@@ -1995,16 +2010,76 @@ no.**
 - DPI scritti nel file e riletti corretti (150 / 200 / 400);
 - la scala come proprietà della scena: salvata, riapplicata all'attivazione,
   badge, guardia sull'Update, esclusione Match Photo — 10 verifiche live;
-- il cartiglio col box SCALA/STAMPA, provato fuori da SketchUp su 4 varianti.
+- il cartiglio col box SCALA/STAMPA, provato fuori da SketchUp su 4 varianti;
+- ✅ **`compose_sheet` (il blit BGRA del cartiglio nella fascia) verificato dal
+  vivo il 2026-08-05** — era l'unico pezzo di Fase 3a mai eseguito in SketchUp.
 
-**Cosa NON è verificato**: che il PNG del cartiglio atterri nella fascia
-giusta della tavola vera (`compose_sheet`, blit BGRA). Serve SketchUp aperto.
-È l'unico pezzo di Fase 3a mai eseguito dal vivo.
+**La decisione presa (2026-08-05), con le parole dell'utente**: *"il viewport
+forza lo zoom in modo che le tavole in scala possano essere stampate solo a un
+certo livello di zoom; quelle tavole, compreso il cartiglio, se stampate in A3
+o A4 restituiranno i disegni alla scala selezionata. Che siano o meno in una
+serie con anche tavole non in scala poco importa."*
 
-**Il problema vero, che resta aperto.** L'utente ha stampato una tavola e il
-disegno è uscito al **68,3%**. Non era un bug del motore: aveva stampato
-l'**export a serie**, non la stampa in scala. Ricostruzione, che torna al
-decimo di millimetro:
+Cioè: **un percorso solo, e serie miste vanno benissimo.** Nessuna separazione
+fra i due comandi, nessun blocco incrociato — le due alternative che erano
+state proposte sono state scartate entrambe.
+
+#### Come è implementato (Fase 4, `Core::Exporter`)
+
+`targets_meta` porta un quinto campo, la cfg di stampa della scena
+(`PrintScale.scene_config`). Nel ciclo, se c'è, la scena prende il ramo
+`PrintScale.render(page, ps_cfg, fpath)` e salta del tutto write_image +
+composite. Punti non ovvi:
+
+- **la scena è già attiva** quando `render` parte (lo fa il ciclo), quindi
+  `render` non cambia pagina e non deve ripristinarla: `prev_page == page` e il
+  ramo di restore che riattiva la scena non scatta. È la ragione per cui il
+  riuso è pulito e non serve una variante di `render` per l'export;
+- **le tavole in scala escono dal batch del cartiglio** dell'export: quel batch
+  è a `export.width` × `titleblock.height_px`, mentre la tavola vuole la
+  larghezza del SUO foglio e la sua fascia in mm, più il box SCALA/STAMPA. Se
+  lo rende da sé (`PrintScale.render_titleblock`). Costo: una spawn PowerShell
+  per tavola invece di una per lotto — irrilevante accanto ai secondi di render,
+  ma se un domani pesa, raggruppare per `(print_w_px, band_px)` **richiede** di
+  rendere `scala_value`/`stampa_value` per-item (oggi sono parametri globali
+  del batch, quindi scale diverse non possono condividere una spawn);
+- **niente logo watermark né filename label** sulle tavole in scala: il
+  cartiglio è già l'etichetta del foglio. Se quelle opzioni sono attive, il
+  riepilogo dell'export lo dice invece di ignorarle in silenzio;
+- **il formato è quello della scena** (di default PNG: a quelle risoluzioni il
+  JPG sporca il tratto), non quello della serie. Nella stessa cartella
+  convivono estensioni diverse: è voluto;
+- **note di pre-volo**: per ogni tavola in scala il riepilogo dice scala,
+  foglio e *"print at 100%"*, più l'avviso di memoria sopra `PEAK_MB_WARN`.
+  È l'unica cosa che non si vede guardando i file, e va detta;
+- ⚠️ nel ramo in scala il `next` salta la coda del ciclo, quindi le due righe
+  che avanzano al target successivo sono **duplicate**. C'è un commento su
+  entrambe: se si cambia come si avanza, si cambia in due posti.
+
+**Misure sul campo (2026-08-05, 19.3.253)**, serie mista di due scene, quadrato
+di 10 m con spigoli nascosti (si misura il colore, non il tratto):
+
+| | |
+|---|---|
+| Tavola A3 orizz. 1:100 @200 DPI | **3307 × 2339 px** = esattamente il previsto |
+| DPI riletti dal file | **199,9996** (il pHYs è in pixel/metro interi) |
+| Quadrato da 10 m, misurato **sul bordo sfumato** | **787,0 px** contro 787,40 attesi (**−0,40 px**) |
+| Fascia cartiglio | popolata (blit verificato), box SCALA `1:100`, STAMPA `A3 orizz. al 100%` |
+| Cornice / margine bianco | nero a x=79, bianco a x=40 ✓ |
+| Scena senza scala, nella stessa serie | **3004 × 1664 px**, identica a prima ✓ |
+
+⚠️ **Il conteggio grezzo dei pixel "rossi" dà 786 e sembra un errore di 1,4 px.**
+Non lo è: l'antialias sfuma il bordo e una soglia secca scarta i pixel di
+transizione. Il valore giusto si ricava dalla **frazione di copertura** del
+pixel di bordo (qui G=102 su 204 → 50% → bordo a metà pixel). Stessa famiglia
+della trappola già documentata in Fase 1 ("con gli spigoli visibili la misura dà
++1,72 invece di −0,28"): **la scala si misura sul colore, e col sub-pixel.**
+
+#### Il problema che questo chiude
+
+L'utente aveva stampato una tavola e il disegno era uscito al **68,3%**. Non era
+un bug del motore: aveva stampato l'**export a serie**, non la stampa in scala.
+Ricostruzione, che torna al decimo di millimetro:
 
 | | |
 |---|---|
@@ -2017,31 +2092,138 @@ decimo di millimetro:
 ⚠️ **L'immagine dell'export non ha dimensione fisica**, quindi da lì una scala
 corretta non è ottenibile in nessun modo, nemmeno stampando al 100%.
 
-**Perché ci è finito, ed è un difetto di prodotto non dell'utente**: la fascia
-cartiglio partiva da **0**, quindi la stampa in scala produceva un foglio
+**Perché ci era finito, ed era un difetto di prodotto non dell'utente**: la
+fascia cartiglio partiva da **0**, quindi la stampa in scala produceva un foglio
 *senza* cartiglio; per avere una tavola vera l'unica strada era l'export, che
-la scala non ce l'ha. Cane che si morde la coda. Mitigato a fine sessione
-(default fascia 20 mm + avviso nel riepilogo se il cartiglio è acceso e la
-fascia è 0) ma **non risolto alla radice**: i due percorsi restano due, e
-producono fogli di forma diversa.
+la scala non ce l'aveva. Cane che si morde la coda — **è esattamente il cerchio
+che la Fase 4 chiude**: adesso la tavola col cartiglio E la scala escono dallo
+stesso comando.
 
-Stesso equivoco sulle bande grigie, due volte di fila: l'utente le confronta
-con la tavola che ha in mano, che viene dall'export (proporzione 2:1 o
-1,807:1) invece che dal foglio (1,414:1 per un A4). **Prima di cercare un bug
-nelle bande, guardare da quale dei due percorsi viene l'immagine.**
-
-**Da decidere la prossima volta** (è una scelta di prodotto, va chiesta):
-i due percorsi vanno *unificati* — l'export a serie che produce tavole in
-scala quando la scena ne ha una — oppure va reso impossibile confonderli?
-Finché convivono, l'errore si ripete.
+⚠️ **L'equivoco sulle bande grigie resta possibile finché in giro ci sono
+immagini vecchie.** Le bande mostrano il foglio (1,414:1 per un A4); un export
+fatto *prima* di questa modifica ha la proporzione di `export.width/height`
+(2:1, o 1,807:1 col cartiglio). Prima di cercare un bug nelle bande, guardare
+la **data** dell'immagine che si ha sotto gli occhi.
 
 ### Scelte assunte, non ancora confermate dall'utente
 
 - La scala **la impone l'utente** e il plugin ri-inquadra; la scala
   normalizzata più vicina è mostrata come suggerimento, non applicata da sola.
-- Punto di accesso: **voce autonoma nel menu Plugins** (così è anche
-  assegnabile a scorciatoia da Preferences → Shortcuts, vedi sezione
-  "Shortcut globali"), eventualmente più un bottone se si trova spazio.
+
+### Fase 2b-1 — la sezione "Print to scale" nella scheda della scena (2026-08-05)
+
+L'utente le vuole **entrambe** (sezione nella scheda **e** finestra propria):
+la sezione è quella fatta, la finestra resta da fare (Fase 2b-2).
+
+`ui/html/js/props_print_scale.js` è un **file a parte** che si aggancia a
+`SMP.setState` avvolgendola, invece di stare dentro `properties.js` (già lungo).
+Va incluso DOPO di lui in `properties.html`, altrimenti `window.SMP` non esiste
+ancora. Ruby: `print_scale_payload` / `print_scale_numbers` /
+`apply_print_scale` / `clear_print_scale` / `print_one_sheet`, callback
+`sm_props_ps_preview|apply|clear|print`.
+
+Decisioni non ovvie:
+
+- **I numeri li calcola Ruby, il JS li mostra e basta.** `compute` è matematica
+  pura e non scrive niente sul modello, quindi un giro completo a ogni tocco dei
+  controlli non costa nulla. Duplicare la matematica del foglio in JS sarebbe
+  stato più veloce e sbagliato: in questo progetto una regola duplicata ha già
+  prodotto un bug (il prefisso del cartiglio fra `Naming` ed `Exporter`).
+- **Il commit NON è live**, unica eccezione nel Properties dialog: una
+  `set_attribute` sulla pagina costa ~5s sui modelli con AttributeObserver di
+  plugin terzi. Anteprima gratis, scrittura solo con **Apply**, che si accende
+  (`.is-dirty`) quando i campi non corrispondono più a quanto salvato.
+- **Il confronto "ci sono modifiche?" è numerico, non testuale**: i campi sono
+  testo (`"50"`) e la cfg salvata ha numeri (`50.0`). Confrontando stringhe,
+  Apply resterebbe acceso per sempre.
+- **Togliere la spunta è immediato** (la scena torna a esportare come tutte le
+  altre), rimetterla richiede Apply. Asimmetrico di proposito: una è una
+  cancellazione a costo zero, l'altra è una scrittura.
+- **Apply passa da `reapply_and_store`**: salva la cfg, rimette la vista in
+  scala **e** salva l'inquadratura nella scena. Senza l'ultimo passo il badge
+  resterebbe ambra e riaprendo la scena non sarebbe già giusta.
+- `Core::PrintScale.coerce_field` normalizza i campi prima di scriverli sulla
+  pagina (accetta `"1:50"` e la virgola decimale italiana). Serve perché la cfg
+  finisce nel `.skp`: mezza stringa e mezza numero sarebbe una trappola per
+  qualunque confronto numerico futuro.
+- Lo **spessore del tratto più sottile in mm** è mostrato accanto al campo DPI,
+  non solo nel riepilogo: è la conseguenza meno intuitiva dei DPI (alzarli
+  *assottiglia* la linea, vedi la sezione sopra) e va vista dove si decide.
+
+**Collaudo del JS senza SketchUp** (pattern già usato per il Properties
+dialog): `properties.html` si apre in un browser normale, si rimpiazza
+`window.sketchup` con un Proxy che registra i payload, si inietta uno state
+finto con `SMP.setState({...})` e si simulano i `change`. Così dirty-state,
+picker delle scale comuni, disabilitazione e payload di Apply sono stati
+verificati **prima** di aprire SketchUp.
+
+⚠️ **Il browser cachea i `.js` anche su `file://`**, e ricaricare la pagina non
+basta: si finisce a collaudare la versione precedente credendo di provare la
+nuova (successo davvero, con un readout a 8 righe invece di 9). Rimedio: usare
+lo **stesso cache-bust del plugin** — rigenerare `properties.cb.html` con le
+tre righe di `prepare_index` (gsub che appende `?v=<timestamp>` a `<script
+src>` e `<link href>`) e aprire quello. È gitignorato.
+
+### Fase 3b — taratura della stampante (2026-08-05)
+
+Nessuna catena di stampa è esatta. Misura reale dell'utente: una tavola 1:1 su
+A4, stampata a "dimensione reale / 100%", doveva dare 150 mm e ha dato
+**143,84** → fattore `k = 143,84 / 150 = 0,9589` (−4,11%).
+
+Si misura una volta per stampante e si riusa: `Core::PrintScale` tiene dei
+**profili nominati**, globali per computer (`write_default`), non per file —
+la taratura è una proprietà della stampante, non del progetto. UI in fondo
+alla sezione Print to scale della scheda scena: dropdown dei profili, i due
+campi "should be / came out", Save/Delete.
+
+⚠️ **Il fattore si applica all'ALTEZZA CAMERA, non ai DPI scritti nel file.**
+È la decisione centrale e non è intercambiabile:
+
+| | foglio prodotto | esito |
+|---|---|---|
+| fattore sui DPI | dichiara 310 mm invece di 297 | il foglio **esce dall'A4**: o viene tagliato dai margini non stampabili, o il driver rimette "adatta alla pagina" — cioè **ricrea il problema che stiamo correggendo** |
+| fattore sull'altezza camera | resta **esattamente** A4 | il disegno dentro è più grande di 1/k, la stampante lo rimpicciolisce di k, la scala atterra esatta |
+
+E c'è una seconda ragione, più forte: la correzione sull'altezza camera
+**funziona sia se la stampante onora i DPI sia se adatta alla pagina**, perché
+`k` è per definizione il rapporto foglio→carta, qualunque ne sia la causa. È
+per questo che la misura converge in un solo giro: stampi, misuri, inserisci,
+ristampi.
+
+Conti (verificati dal vivo): A3 1:100 @200 DPI, altezza camera nominale
+1012,0000 in → tarata **970,4405 in** = esattamente ×0,958933; il canvas resta
+**3307×2339 px**; `Covers` passa da 40,00×25,70 m a 38,36×24,65 m.
+
+Altri punti non ovvi:
+
+- **`Sketchup.write_default` perde le stringhe con le virgolette** (scoperto
+  qui, dettagli e tabella in `docs/SU2019-LESSONS.md`): il JSON dei profili
+  spariva in silenzio pur ritornando `true`. Ora è codificato con
+  `pack('m0')`, e `write_calibration_data` **verifica rileggendo**.
+- **Forbice di sicurezza 0,80–1,25** su un fattore in ingresso: fuori di lì è
+  quasi certo un errore di battitura (cm al posto di mm), e falsare tutte le
+  tavole in silenzio sarebbe peggio che rifiutare. Difensiva anche in lettura.
+- **Cambiare taratura invalida l'inquadratura salvata** in tutte le scene in
+  scala (il fattore entra nell'altezza camera). `after_calibration_change`
+  offre di rimetterle tutte in quadro in un colpo solo, invece di lasciare N
+  badge ambra da cliccare uno a uno.
+- `scale_from_camera` **divide** per il fattore: deve restituire la scala
+  nominale, quella che l'utente scrive e che finisce nel cartiglio.
+- Il cartiglio continua a dire "al 100%": è l'istruzione giusta per l'utente,
+  la correzione è già dentro il disegno.
+
+### Da fare, in ordine
+
+1. **Verifica sul campo della taratura** — l'unica prova che conta: ristampare
+   la stessa tavola col profilo attivo e rimisurare col righello. I 150 mm
+   devono venire 150. Non è stato possibile verificarlo a video perché la
+   correzione vive fuori dal file (nella stampante).
+2. **Fase 2b-2** — finestra propria "Print to scale" (voce di menu già
+   esistente, oggi apre l'harness a `UI.inputbox` in `run_interactive`).
+   Deve leggere/scrivere lo stesso gruppo settings e le stesse cfg di scena.
+3. **Scaletta grafica da 200 mm** (l'altra metà della vecchia Fase 3b): fa
+   anche da righello di taratura stampato sulla tavola.
+4. **Fase 5** — eventuali: PDF, stampa diretta, render a mattonelle.
 
 ## Trappola Edit tool → smart quotes nei file JS (2026-05)
 

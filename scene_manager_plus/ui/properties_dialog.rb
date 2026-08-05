@@ -156,6 +156,244 @@ module SceneManagerPlus
         dlg.add_action_callback('sm_props_layer_op') do |_ctx, payload|
           handle_layer_op(parse(payload))
         end
+
+        # === Print to scale =================================================
+        # I numeri (area coperta, pixel, memoria, spessore del tratto) si
+        # aggiornano a ogni tocco dei controlli, ma NON scrivono niente sul
+        # modello: `compute` e' matematica pura. La scrittura sulla scena
+        # avviene solo con Apply, perche' una set_attribute puo' costare ~5s
+        # sui modelli con AttributeObserver di plugin terzi.
+        dlg.add_action_callback('sm_props_ps_preview') do |_ctx, payload|
+          data = parse(payload)
+          nums = print_scale_numbers(data['cfg'] || {})
+          begin
+            dlg.execute_script("window.SMP && SMP.setScaleNumbers(#{nums.to_json});")
+          rescue => e
+            warn "[SM+] props ps_preview: #{e.class}: #{e.message}"
+          end
+        end
+
+        dlg.add_action_callback('sm_props_ps_apply') do |_ctx, payload|
+          apply_print_scale(parse(payload)['cfg'] || {})
+        end
+
+        dlg.add_action_callback('sm_props_ps_clear') do |_ctx, _payload|
+          clear_print_scale
+        end
+
+        dlg.add_action_callback('sm_props_ps_print') do |_ctx, payload|
+          print_one_sheet(parse(payload)['cfg'] || {})
+        end
+
+        # Taratura stampante: globale per computer, non per file. Cambiarla
+        # sposta l'inquadratura di TUTTE le tavole, quindi dopo ogni modifica
+        # si offre di rimetterle in quadro in un colpo solo.
+        dlg.add_action_callback('sm_props_ps_calib_select') do |_ctx, payload|
+          Core::PrintScale.set_active_calibration(parse(payload)['name'].to_s)
+          after_calibration_change
+        end
+
+        dlg.add_action_callback('sm_props_ps_calib_save') do |_ctx, payload|
+          save_calibration_profile(parse(payload))
+        end
+
+        dlg.add_action_callback('sm_props_ps_calib_delete') do |_ctx, payload|
+          name = parse(payload)['name'].to_s
+          next if name.empty?
+          answer = ::UI.messagebox("Delete the printer profile '#{name}'?",
+                                   Object.const_defined?(:MB_OKCANCEL) ? MB_OKCANCEL : 1)
+          next unless answer == (Object.const_defined?(:IDOK) ? IDOK : 1)
+          Core::PrintScale.delete_calibration(name)
+          after_calibration_change
+        end
+      end
+
+      # =====================================================================
+      # Print to scale — la scala e' una proprieta' della scena
+      # =====================================================================
+
+      # Il nome profilo lo chiediamo con una inputbox: e' un'operazione che si
+      # fa una volta per stampante, non vale un campo in piu' nella scheda.
+      def save_calibration_profile(data)
+        suggested = data['name'].to_s
+        suggested = Core::PrintScale.calibration_name if suggested.empty?
+        suggested = 'Printer 1' if suggested.empty?
+        res = ::UI.inputbox(['Printer profile name'], [suggested], 'Printer calibration')
+        return unless res
+        ok, info = Core::PrintScale.save_calibration(res[0], data['expected'], data['measured'])
+        unless ok
+          ::UI.messagebox(info.to_s)
+          return push_state
+        end
+        ::UI.messagebox(format(
+          "Printer profile '%s' saved.\n\n" \
+          "Correction factor: %.4f (%+.2f%%)\n\n" \
+          'Sheets stay the exact size of the paper; the drawing inside them is ' \
+          "made bigger by the same amount, so once your printer shrinks it the\n" \
+          'scale lands exactly right. Print at 100%%, as you already do.',
+          res[0].to_s, info, (info - 1.0) * 100.0
+        ))
+        after_calibration_change
+      end
+
+      # Il fattore entra nell'altezza della camera, quindi l'inquadratura
+      # salvata nelle scene in scala non e' piu' quella giusta: si offre di
+      # rimetterle tutte in quadro invece di lasciare N badge ambra da cliccare.
+      def after_calibration_change
+        pages = Core::PrintScale.scaled_pages
+        if pages.empty?
+          Core::PrintScale.refresh_main_dialog
+          return push_state(status: 'Printer calibration updated')
+        end
+        answer = ::UI.messagebox(
+          format("The calibration changed, so the %d scene(s) with a scale are no longer framed\n" \
+                 "at their scale.\n\nPut them all back now?", pages.size),
+          Object.const_defined?(:MB_YESNO) ? MB_YESNO : 4
+        )
+        if answer == (Object.const_defined?(:IDYES) ? IDYES : 6)
+          done, errs = Core::PrintScale.reapply_all_scaled
+          Core::PrintScale.refresh_main_dialog
+          msg = "#{done} scene(s) put back at their scale"
+          ::UI.messagebox(([msg, ''] + errs).join("\n")) unless errs.empty?
+          push_state(status: msg)
+        else
+          Core::PrintScale.refresh_main_dialog
+          push_state(status: 'Calibration updated: scenes with a scale need Apply')
+        end
+      rescue => e
+        warn "[SM+] props after_calibration_change: #{e.class}: #{e.message}"
+        push_state(status: "#{e.class}: #{e.message}")
+      end
+
+      def print_scale_payload(page)
+        cfg = Core::PrintScale.scene_config(page)
+        on  = !cfg.nil?
+        # Senza scala i campi partono dagli ultimi valori usati nel file:
+        # impostare la seconda tavola non deve voler dire riscrivere tutto.
+        cfg ||= Core::Settings.get('print_scale')
+        fields = {}
+        Core::PrintScale::SCENE_FIELDS.each { |k| fields[k] = cfg[k] }
+        {
+          'enabled' => on,
+          'cfg'     => fields,
+          'papers'  => Core::PrintScale::PAPER_ORDER,
+          'scales'  => Core::PrintScale::NORMALIZED,
+          'badge'   => (on ? Core::PrintScale.scene_badge(page) : nil),
+          'numbers' => print_scale_numbers(cfg),
+          'calibration' => Core::PrintScale.calibration_payload
+        }
+      rescue => e
+        warn "[SM+] props print_scale_payload: #{e.class}: #{e.message}"
+        nil
+      end
+
+      # Tutti i numeri gia' formattati: il JS li mostra e basta, cosi' la
+      # matematica del foglio resta in un posto solo (Core::PrintScale).
+      def print_scale_numbers(cfg)
+        geo  = Core::PrintScale.compute(cfg)
+        errs = Array(geo[:errors])
+        return { 'errors' => errs } unless errs.empty?
+        {
+          'errors'   => [],
+          'notes'    => Array(geo[:notes]),
+          'scale'    => Core::PrintScale.format_scale(geo[:denom]),
+          'sheet'    => format('%s %s, %.0f x %.0f mm', geo[:paper],
+                               geo[:landscape] ? 'landscape' : 'portrait',
+                               geo[:sheet_w_mm], geo[:sheet_h_mm]),
+          'drawing'  => format('%.1f x %.1f mm', geo[:draw_w_mm], geo[:draw_h_mm]),
+          'covers'   => format('%.2f x %.2f m of model', geo[:cover_w_mm] / 1000.0,
+                               geo[:cover_h_mm] / 1000.0),
+          'image'    => format('%d x %d px%s', geo[:canvas_w_px], geo[:canvas_h_px],
+                               geo[:full_sheet] ? '' : ' (drawing area only)'),
+          'memory'   => format('~%d MB', geo[:peak_mb].round),
+          'heavy'    => geo[:peak_mb] > Core::PrintScale::PEAK_MB_WARN,
+          # Gli spigoli ordinari sono sempre 1 px: e' il DPI a decidere il
+          # tratto piu' sottile che finisce sulla carta. Alzarlo lo assottiglia.
+          'thinnest' => format('%.2f mm', geo[:edge_mm]),
+          # La taratura non e' un dettaglio da nascondere: sposta la scala del
+          # 4%, e chi guarda i numeri deve sapere che e' attiva.
+          'calib'    => (geo[:calib_factor].to_f == 1.0 ? 'none' :
+                         format('%s (%.4f, %+.2f%%)',
+                                geo[:calib_name].to_s.empty? ? 'active' : geo[:calib_name],
+                                geo[:calib_factor], (geo[:calib_factor] - 1.0) * 100.0)),
+          'calibrated' => geo[:calib_factor].to_f != 1.0,
+          'profile'  => (geo[:profile_px] > 0 ?
+                         format('%.2f mm (%d px)', geo[:profile_px] * geo[:mm_per_px],
+                                geo[:profile_px]) :
+                         'as saved in the style')
+        }
+      rescue => e
+        warn "[SM+] props print_scale_numbers: #{e.class}: #{e.message}"
+        { 'errors' => ["#{e.class}: #{e.message}"] }
+      end
+
+      def apply_print_scale(cfg)
+        p = @scene_id ? Core::SceneModel.find_by_id(@scene_id) : nil
+        return push_state(status: 'No scene') unless p
+        geo = Core::PrintScale.compute(cfg)
+        errs = Array(geo[:errors])
+        return push_state(status: errs.first) unless errs.empty?
+        Core::PrintScale.set_scene_config(p, cfg)
+        # reapply_and_store attiva la scena, la rimette in scala e salva
+        # l'inquadratura NELLA scena: senza l'ultimo passo il badge resterebbe
+        # ambra e riattivandola in futuro non sarebbe gia' giusta.
+        ok, err = Core::PrintScale.reapply_and_store(p)
+        Core::PrintScale.refresh_main_dialog
+        push_state(status: ok ?
+          "Scale #{Core::PrintScale.format_scale(geo[:denom])} saved in this scene" :
+          err.to_s)
+      rescue => e
+        warn "[SM+] props apply_print_scale: #{e.class}: #{e.message}"
+        push_state(status: "#{e.class}: #{e.message}")
+      end
+
+      def clear_print_scale
+        p = @scene_id ? Core::SceneModel.find_by_id(@scene_id) : nil
+        return unless p
+        Core::PrintScale.clear_scene_config(p)
+        Core::PrintScale.refresh_main_dialog
+        push_state(status: 'Print scale removed: this scene exports like any other')
+      rescue => e
+        warn "[SM+] props clear_print_scale: #{e.class}: #{e.message}"
+      end
+
+      # Stampa subito questa sola tavola. L'export a serie fa la stessa cosa
+      # su tutte le scene in scala; questo bottone serve quando si sta
+      # mettendo a punto UNA tavola e non si vuole rigenerare la serie.
+      def print_one_sheet(cfg)
+        p = @scene_id ? Core::SceneModel.find_by_id(@scene_id) : nil
+        return unless p
+        geo = Core::PrintScale.compute(cfg)
+        errs = Array(geo[:errors])
+        return push_state(status: errs.first) unless errs.empty?
+        m = Sketchup.active_model
+        return unless m
+        ext = cfg['format'].to_s.downcase == 'jpg' ? '.jpg' : '.png'
+        base = Core::Exporter.sanitize_filename(
+          format('%s_%s_1-%d', p.name, geo[:paper], geo[:denom].round)
+        )
+        dir = m.path.to_s.empty? ? nil : File.dirname(m.path)
+        chosen = ::UI.savepanel('Save this sheet', dir, base + ext)
+        return unless chosen
+        chosen += ext unless File.extname(chosen).downcase == ext
+        m.pages.selected_page = p if m.pages.selected_page != p
+        Sketchup.status_text = 'Scene Manager+: rendering the sheet...'
+        ok, notes = Core::PrintScale.render(p, cfg, chosen)
+        Sketchup.status_text = ''
+        if ok
+          out = ["Saved: #{chosen}", '',
+                 format('%d x %d px at %d DPI', geo[:canvas_w_px], geo[:canvas_h_px], geo[:dpi].round),
+                 format('Scale %s - print at 100%%, without "fit to page"',
+                        Core::PrintScale.format_scale(geo[:denom]))]
+          out += ['', 'Notes:'] + Array(notes).map { |n| "- #{n}" } unless Array(notes).empty?
+          ::UI.messagebox(out.join("\n"))
+        else
+          ::UI.messagebox((['Could not print this sheet.', ''] + Array(notes)).join("\n"))
+        end
+        push_state
+      rescue => e
+        warn "[SM+] props print_one_sheet: #{e.class}: #{e.message}"
+        ::UI.messagebox("Could not print this sheet.\n#{e.class}: #{e.message}")
       end
 
       # Tutte le operazioni sui layer sono MODEL-WIDE (come il pannello Layers
@@ -392,7 +630,8 @@ module SceneManagerPlus
           'is_matchphoto'=> Core::SceneModel.matchphoto?(p),
           'is_active'    => active_page_id == id,
           'fog'          => read_fog,
-          'layers'       => Core::Layers.payload_for_page(p)
+          'layers'       => Core::Layers.payload_for_page(p),
+          'print_scale'  => print_scale_payload(p)
         }
       end
 
