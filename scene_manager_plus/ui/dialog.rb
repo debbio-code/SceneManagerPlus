@@ -174,7 +174,9 @@ module SceneManagerPlus
         end
 
         @dialog = ::UI::HtmlDialog.new(
-          dialog_title:    PLUGIN_NAME,
+          # Versione nel titolo: e' il posto dove si guarda per essere sicuri
+          # che tutte le postazioni girino con la stessa build del plugin.
+          dialog_title:    "#{PLUGIN_NAME} v#{PLUGIN_VERSION}",
           preferences_key: 'SceneManagerPlus.MainDialog',
           scrollable:      false,
           resizable:       true,

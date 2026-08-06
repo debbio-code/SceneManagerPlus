@@ -33,14 +33,16 @@
                     .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
 
-  // chiave della cfg -> id del controllo
+  // chiave della cfg -> id del controllo.
+  // `titleblock_mm` NON c'e' piu': l'altezza della fascia la calcola Ruby dalla
+  // larghezza del foglio, per tenere al cartiglio le stesse proporzioni di
+  // sempre. Resta nella cfg salvata (vedi readCfg) solo per compatibilita'.
   var FIELDS = {
     paper:         'ps-paper',
     orientation:   'ps-orient',
     scale_denom:   'ps-denom',
     dpi:           'ps-dpi',
     margin_mm:     'ps-margin',
-    titleblock_mm: 'ps-band',
     profile_mm:    'ps-profile',
     sheet_mode:    'ps-sheetmode',
     format:        'ps-format'
@@ -61,8 +63,9 @@
     // Campi che questa sezione non espone ma che vanno conservati, altrimenti
     // ogni Apply li azzererebbe.
     var base = (psLast && psLast.cfg) ? psLast.cfg : {};
-    if (base.section_mm !== undefined && base.section_mm !== null) cfg.section_mm = base.section_mm;
-    if (base.antialias !== undefined && base.antialias !== null) cfg.antialias = base.antialias;
+    ['section_mm', 'antialias', 'titleblock_mm'].forEach(function (k) {
+      if (base[k] !== undefined && base[k] !== null) cfg[k] = base[k];
+    });
     return cfg;
   }
 
@@ -154,6 +157,10 @@
     // la linea invece di ingrossarla): si mostra accanto al campo che lo decide.
     var th = $('#ps-thinnest');
     if (th) th.textContent = nums.thinnest ? ('thinnest line ' + nums.thinnest) : '';
+
+    // Altezza della fascia cartiglio: calcolata, non scelta.
+    var bd = $('#ps-band-ro');
+    if (bd) bd.textContent = (nums.band === undefined || nums.band === null) ? '-' : nums.band;
   }
 
   function fillLists(ps) {
@@ -257,23 +264,61 @@
     }
     var del = $('#btn-ps-calib-del');
     if (del) del.disabled = !(cal.active || '');
-    var hint = $('#ps-calib-hint');
-    if (hint) {
-      var act = null;
-      profs.forEach(function (p) { if (p.name === cal.active) act = p; });
-      hint.textContent = act ?
-        ('factor ' + act.factor.toFixed(4) + ' (' +
-         ((act.factor - 1) * 100).toFixed(2) + '%)') :
-        'sheets print at their nominal size';
-    }
-    // Precompila i campi della prova con quelli del profilo attivo, cosi' si
-    // vede da dove viene il fattore e si puo' correggere la misura.
-    var e1 = $('#ps-calib-exp');
-    var e2 = $('#ps-calib-got');
     var actP = null;
     profs.forEach(function (p) { if (p.name === cal.active) actP = p; });
-    if (e1 && document.activeElement !== e1) e1.value = actP && actP.expected ? String(actP.expected) : '';
-    if (e2 && document.activeElement !== e2) e2.value = actP && actP.measured ? String(actP.measured) : '';
+
+    var hint = $('#ps-calib-hint');
+    if (hint) {
+      hint.textContent = !actP ? 'sheets print at their nominal size' :
+        (actP.use_y && actP.factor_y ?
+          ('H ' + actP.factor.toFixed(4) + '  V ' + actP.factor_y.toFixed(4)) :
+          ('factor ' + actP.factor.toFixed(4) + ' (' +
+           ((actP.factor - 1) * 100).toFixed(2) + '%)'));
+    }
+    // Con un profilo attivo, la misura RAFFINA il fattore (il foglio che stai
+    // misurando e' stato stampato con quel fattore). Senza, lo crea da zero.
+    var lbl = $('#ps-calib-from');
+    if (lbl) {
+      lbl.textContent = actP ?
+        'Measure the sheet you just printed: it refines the profile' :
+        'Print a sheet, measure a known length, type both numbers';
+    }
+    // Si riporta solo il "should be" (e' la stessa lunghezza di riferimento a
+    // ogni giro). Il "came out" resta VUOTO di proposito: il fattore ora si
+    // compone con quello attivo, quindi ri-salvare una misura gia' usata lo
+    // applicherebbe due volte.
+    setIfFree('#ps-calib-exp',   actP && actP.expected);
+    setIfFree('#ps-calib-exp-y', actP && actP.use_y && actP.expected_y);
+    setIfFree('#ps-calib-got',   null);
+    setIfFree('#ps-calib-got-y', null);
+
+    var uy = $('#ps-calib-usey');
+    if (uy && document.activeElement !== uy) uy.checked = !!(actP && actP.use_y);
+    paintCalibY();
+  }
+
+  function setIfFree(sel, v) {
+    var el = $(sel);
+    if (!el || document.activeElement === el) return;
+    el.value = v ? String(v) : '';
+  }
+
+  // Mostra/nasconde la riga della misura verticale e l'avviso che la spiega.
+  // La spunta e' opt-in perche' la meta' orizzontale della correzione vive
+  // nella risoluzione scritta nel file: se il programma di stampa la ignora
+  // (o "adatta alla pagina") quella meta' non ha effetto.
+  function paintCalibY() {
+    var uy  = $('#ps-calib-usey');
+    var box = document.querySelector('.ps-calib');
+    var on  = !!(uy && uy.checked);
+    if (box) box.classList.toggle('no-y', !on);
+    var lblH = $('#ps-calib-axis-h');
+    if (lblH) lblH.textContent = on ? 'horizontal' : '';
+    var w = $('#ps-calib-warn');
+    if (w) {
+      w.textContent = on ?
+        'the horizontal half only works if your printing software honours the DPI in the file' : '';
+    }
   }
 
   var baseSetState = SMP.setState;
@@ -327,15 +372,25 @@
       var s = $('#ps-calib');
       if (s && s.value) call('sm_props_ps_calib_delete', { name: s.value });
     });
+    var uy = $('#ps-calib-usey');
+    if (uy) uy.addEventListener('change', paintCalibY);
+
     var cv = $('#btn-ps-calib-save');
     if (cv) cv.addEventListener('click', function () {
-      var e1 = $('#ps-calib-exp'), e2 = $('#ps-calib-got'), s = $('#ps-calib');
+      var e1 = $('#ps-calib-exp'),   e2 = $('#ps-calib-got'), s = $('#ps-calib');
+      var y1 = $('#ps-calib-exp-y'), y2 = $('#ps-calib-got-y');
+      var u  = $('#ps-calib-usey');
       call('sm_props_ps_calib_save', {
-        name:     s ? s.value : '',
-        expected: e1 ? e1.value : '',
-        measured: e2 ? e2.value : ''
+        name:       s ? s.value : '',
+        expected:   e1 ? e1.value : '',
+        measured:   e2 ? e2.value : '',
+        use_y:      !!(u && u.checked),
+        expected_y: y1 ? y1.value : '',
+        measured_y: y2 ? y2.value : ''
       });
     });
+
+    paintCalibY();
   }
 
   if (document.readyState === 'loading') {

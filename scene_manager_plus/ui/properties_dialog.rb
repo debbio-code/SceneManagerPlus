@@ -220,19 +220,45 @@ module SceneManagerPlus
         suggested = 'Printer 1' if suggested.empty?
         res = ::UI.inputbox(['Printer profile name'], [suggested], 'Printer calibration')
         return unless res
-        ok, info = Core::PrintScale.save_calibration(res[0], data['expected'], data['measured'])
+        use_y = !!data['use_y']
+        ok, info = Core::PrintScale.save_calibration(
+          res[0], data['expected'], data['measured'],
+          data['expected_y'], data['measured_y'], use_y
+        )
         unless ok
           ::UI.messagebox(info.to_s)
           return push_state
         end
-        ::UI.messagebox(format(
-          "Printer profile '%s' saved.\n\n" \
-          "Correction factor: %.4f (%+.2f%%)\n\n" \
-          'Sheets stay the exact size of the paper; the drawing inside them is ' \
-          "made bigger by the same amount, so once your printer shrinks it the\n" \
-          'scale lands exactly right. Print at 100%%, as you already do.',
-          res[0].to_s, info, (info - 1.0) * 100.0
-        ))
+        f = info['factor']
+        msg = format("Printer profile '%s' saved.\n\n", res[0].to_s)
+        # L'aritmetica va mostrata: il fattore si COMPONE con quello che era
+        # attivo quando quel foglio e' stato stampato, e senza vederla scritta
+        # sembra che il numero salti fuori dal nulla (o che si sia perso).
+        if (info['base'] - 1.0).abs > 1e-9
+          msg += format("Correction factor: %.4f x %.4f = %.4f (%+.2f%%)\n" \
+                        "                   (previous)  (this print)\n\n",
+                        info['base'], info['ratio'], f, (f - 1.0) * 100.0)
+        else
+          msg += format("Correction factor: %.4f (%+.2f%%)\n\n", f, (f - 1.0) * 100.0)
+        end
+        msg += 'Sheets stay the exact size of the paper; the drawing inside them is ' \
+               "made bigger by the same amount, so once your printer shrinks it the\n" \
+               'scale lands exactly right. Print at 100%, as you already do.'
+        if use_y
+          fy = info['factor_y']
+          msg += format(
+            "\n\nVertical correction: %.4f (%+.2f%%)\n\n" \
+            "The vertical is corrected in the drawing itself, the horizontal through the\n" \
+            "resolution written into the file. That means the horizontal half only works if\n" \
+            "your printing software honours that resolution: print a test sheet and measure\n" \
+            'both directions again. If it got worse, switch the vertical correction off.',
+            fy, (fy - 1.0) * 100.0
+          )
+        end
+        msg += "\n\nPrint this sheet again and measure it: if it is right, you are done. " \
+               "If not,\ntype the new measurement here and save again - each round refines " \
+               'the profile.'
+        ::UI.messagebox(msg)
         after_calibration_change
       end
 
@@ -301,6 +327,9 @@ module SceneManagerPlus
                                geo[:landscape] ? 'landscape' : 'portrait',
                                geo[:sheet_w_mm], geo[:sheet_h_mm]),
           'drawing'  => format('%.1f x %.1f mm', geo[:draw_w_mm], geo[:draw_h_mm]),
+          # Altezza fascia calcolata (non piu' scelta a mano): la mostriamo
+          # accanto alla voce, cosi' si vede quanto foglio si porta via.
+          'band'     => format('%.1f', geo[:band_mm]),
           'covers'   => format('%.2f x %.2f m of model', geo[:cover_w_mm] / 1000.0,
                                geo[:cover_h_mm] / 1000.0),
           'image'    => format('%d x %d px%s', geo[:canvas_w_px], geo[:canvas_h_px],
@@ -312,11 +341,8 @@ module SceneManagerPlus
           'thinnest' => format('%.2f mm', geo[:edge_mm]),
           # La taratura non e' un dettaglio da nascondere: sposta la scala del
           # 4%, e chi guarda i numeri deve sapere che e' attiva.
-          'calib'    => (geo[:calib_factor].to_f == 1.0 ? 'none' :
-                         format('%s (%.4f, %+.2f%%)',
-                                geo[:calib_name].to_s.empty? ? 'active' : geo[:calib_name],
-                                geo[:calib_factor], (geo[:calib_factor] - 1.0) * 100.0)),
-          'calibrated' => geo[:calib_factor].to_f != 1.0,
+          'calib'    => calib_readout(geo),
+          'calibrated' => (geo[:calib_factor].to_f != 1.0 || geo[:calib_factor_y].to_f != 1.0),
           'profile'  => (geo[:profile_px] > 0 ?
                          format('%.2f mm (%d px)', geo[:profile_px] * geo[:mm_per_px],
                                 geo[:profile_px]) :
@@ -325,6 +351,21 @@ module SceneManagerPlus
       rescue => e
         warn "[SM+] props print_scale_numbers: #{e.class}: #{e.message}"
         { 'errors' => ["#{e.class}: #{e.message}"] }
+      end
+
+      # Riga "Printer" del riepilogo. Con la taratura sdoppiata mostra i due
+      # fattori separati: sono numeri diversi che agiscono su assi diversi, e
+      # mostrarne uno solo farebbe sembrare sbagliato "Covers".
+      def calib_readout(geo)
+        fx = geo[:calib_factor].to_f
+        fy = geo[:calib_factor_y].to_f
+        return 'none' if fx == 1.0 && fy == 1.0
+        name = geo[:calib_name].to_s.empty? ? 'active' : geo[:calib_name]
+        if geo[:calib_split]
+          format('%s (H %.4f, V %.4f)', name, fx, fy)
+        else
+          format('%s (%.4f, %+.2f%%)', name, fx, (fx - 1.0) * 100.0)
+        end
       end
 
       def apply_print_scale(cfg)

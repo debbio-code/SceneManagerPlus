@@ -100,11 +100,31 @@ module SceneManagerPlus
       # disegno sul foglio. nil se la camera e' in prospettiva.
       # Diviso per la taratura: l'altezza camera la contiene (vedi
       # "Taratura della stampante"), ma qui vogliamo la scala NOMINALE, quella
-      # che l'utente scrive e che finisce nel cartiglio.
+      # che l'utente scrive e che finisce nel cartiglio. Fattore VERTICALE,
+      # perche' e' l'altezza camera che stiamo leggendo.
       def scale_from_camera(cam, draw_h_mm)
         return nil if cam.nil? || draw_h_mm.nil? || draw_h_mm <= 0
         return nil if cam.perspective?
-        ((cam.height.to_f * MM_PER_INCH) / draw_h_mm) / calibration_factor
+        ((cam.height.to_f * MM_PER_INCH) / draw_h_mm) / calibration_factor_y
+      end
+
+      # Proporzioni del cartiglio, prese dall'export a serie: e' quello il
+      # cartiglio "di riferimento", quello che l'utente vede da sempre.
+      # Ritorna [abilitato, larghezza/altezza] oppure nil se i Settings non
+      # sono raggiungibili (collaudo fuori da SketchUp).
+      #
+      # Legandolo a `export.width` / `titleblock.height_px` invece che a una
+      # costante, i due percorsi restano allineati da soli se un domani si
+      # cambia il formato dell'export.
+      def titleblock_aspect
+        tb = Settings.get('titleblock')
+        return [false, 0.0] unless tb['enabled']
+        w = Settings.get('export')['width'].to_f
+        h = tb['height_px'].to_f
+        return [true, 18.75] unless w > 0 && h > 0
+        [true, w / h]
+      rescue
+        nil
       end
 
       # =====================================================================
@@ -131,8 +151,6 @@ module SceneManagerPlus
 
         margin_mm = parse_num(cfg_val(cfg, 'margin_mm', 10.0), 10.0)
         margin_mm = 0.0 if margin_mm < 0
-        band_mm   = parse_num(cfg_val(cfg, 'titleblock_mm', 0.0), 0.0)
-        band_mm   = 0.0 if band_mm < 0
         denom     = parse_num(cfg_val(cfg, 'scale_denom', 50.0), 50.0)
         dpi       = parse_num(cfg_val(cfg, 'dpi', 200.0), 200.0)
 
@@ -140,20 +158,49 @@ module SceneManagerPlus
         errors << 'DPI must be greater than 0'               if dpi <= 0
 
         draw_w_mm = sheet_w_mm - 2 * margin_mm
-        draw_h_mm = sheet_h_mm - 2 * margin_mm - band_mm
-        if draw_w_mm <= 0 || draw_h_mm <= 0
-          errors << format('Margins (%.0f mm) and title block band (%.0f mm) leave no drawing area on %s',
-                           margin_mm, band_mm, paper)
+        if draw_w_mm <= 0 || dpi <= 0
+          errors << format('Margins (%.0f mm) leave no drawing area on %s', margin_mm, paper)
         end
-
         return { errors: errors } unless errors.empty?
 
         draw_w_px = (draw_w_mm / MM_PER_INCH * dpi).round
-        draw_h_px = (draw_h_mm / MM_PER_INCH * dpi).round
         draw_w_px = 1 if draw_w_px < 1
+
+        # Altezza della fascia cartiglio: NON e' piu' un numero scelto a mano.
+        # Il cartiglio deve avere SEMPRE le stesse proporzioni (quelle
+        # dell'export a serie), altrimenti lo stesso cartiglio esce con font e
+        # caselle diverse a seconda del foglio - i font dello script PS sono
+        # frazioni dell'altezza, quindi cambiare il rapporto larghezza/altezza
+        # ridisegna tutto. Misurato: export 3000x160 = 18,75:1, mentre una
+        # tavola A4 orizzontale con fascia da 20 mm dava 2181x156 = 13,98:1.
+        #
+        # L'altezza si ricava dai PIXEL della larghezza, non dai mm nominali:
+        # e' il rapporto in pixel quello che il renderer del cartiglio vede
+        # (stessa logica con cui l'altezza camera esce dai pixel arrotondati).
+        asp = titleblock_aspect
+        band_auto = !asp.nil?
+        band_px =
+          if asp.nil?
+            # Settings non disponibile (collaudo fuori da SketchUp): resta il
+            # valore manuale, cosi' i test non dipendono dall'ambiente.
+            (parse_num(cfg_val(cfg, 'titleblock_mm', 0.0), 0.0) / MM_PER_INCH * dpi).round
+          elsif asp[0] && asp[1] > 0
+            (draw_w_px / asp[1]).round
+          else
+            0
+          end
+        band_px = 0 if band_px < 0
+        band_mm = band_px * MM_PER_INCH / dpi
+
+        draw_h_mm = sheet_h_mm - 2 * margin_mm - band_mm
+        if draw_h_mm <= 0
+          errors << format('Margins (%.0f mm) and title block band (%.0f mm) leave no drawing area on %s',
+                           margin_mm, band_mm, paper)
+          return { errors: errors }
+        end
+
+        draw_h_px = (draw_h_mm / MM_PER_INCH * dpi).round
         draw_h_px = 1 if draw_h_px < 1
-        band_px   = (band_mm / MM_PER_INCH * dpi).round
-        band_px   = 0 if band_px < 0
 
         # Misure effettive dell'immagine una volta stampata ai DPI dichiarati
         # (differiscono dalle nominali per il solo arrotondamento a pixel).
@@ -169,11 +216,28 @@ module SceneManagerPlus
         # inquadrare k volte meno modello. Vedi la sezione "Taratura della
         # stampante": il foglio resta di dimensione nominale, cambia solo
         # quanto modello ci sta dentro.
-        calib = calibration_factor
-        camera_height_in = draw_h_px.to_f / dpi * denom * calib
+        #
+        # Il fattore che entra nella camera e' quello VERTICALE: camera.height
+        # E' l'estensione verticale. L'orizzontale non puo' essere corretto qui
+        # (SketchUp renderizza a pixel quadrati, quindi il modello inquadrato in
+        # orizzontale e' vincolato dal rapporto dei pixel): si corregge
+        # dichiarando nel file una densita' X diversa dalla Y, vedi dpi_x.
+        calib   = calibration_factor      # orizzontale (X)
+        calib_y = calibration_factor_y    # verticale (Y); = calib se non sdoppiata
+        camera_height_in = draw_h_px.to_f / dpi * denom * calib_y
 
-        cover_h_mm = draw_h_mm_real * denom * calib
-        cover_w_mm = draw_w_mm_real * denom * calib
+        # Il modello inquadrato scala col fattore verticale in ENTRAMBE le
+        # direzioni: i pixel sono quadrati, quindi l'estensione orizzontale e'
+        # quella verticale x (draw_w_px / draw_h_px).
+        cover_h_mm = draw_h_mm_real * denom * calib_y
+        cover_w_mm = draw_w_mm_real * denom * calib_y
+
+        # Densita' X da scrivere nel file. Deriva imponendo che anche in
+        # orizzontale il rapporto modello/carta valga denom:
+        #   dpi_x = dpi * kX / kY
+        # Con taratura isotropa (kX == kY) e' esattamente dpi: il file esce
+        # identico a prima e questo ramo non si vede.
+        dpi_x = calib_y > 0 ? dpi * calib / calib_y : dpi
 
         # Spessori: 1 px = 25.4/DPI mm sulla carta. Gli spigoli ordinari sono
         # sempre 1 px, quindi edge_mm e' il tratto piu' sottile ottenibile.
@@ -228,8 +292,10 @@ module SceneManagerPlus
           margin_mm:         margin_mm,
           band_mm:           band_mm,
           band_px:           band_px,
+          band_auto:         band_auto,
           denom:             denom,
           dpi:               dpi,
+          dpi_x:             dpi_x,
           draw_w_mm:         draw_w_mm,
           draw_h_mm:         draw_h_mm,
           draw_w_mm_real:    draw_w_mm_real,
@@ -254,6 +320,8 @@ module SceneManagerPlus
           section_px:        section_px,
           peak_mb:           peak_mb,
           calib_factor:      calib,
+          calib_factor_y:    calib_y,
+          calib_split:       (calib_y - calib).abs > 1e-9,
           calib_name:        calibration_name
         }
       end
@@ -292,14 +360,14 @@ module SceneManagerPlus
           lines << format('Current view is about %s (nearest standard scale: %s)',
                           format_scale(current_denom), format_scale(nearest))
         end
-        # Cartiglio acceso ma nessuna fascia riservata: la tavola uscirebbe
-        # senza. E' il caso che spinge a ripiegare sull'export a serie, che
-        # pero' non e' in scala.
+        # Con la fascia automatica questo caso non si presenta piu' (la fascia
+        # c'e' se e solo se il cartiglio e' acceso), ma la guardia resta per le
+        # cfg vecchie con fascia manuale a 0.
         begin
           if geo[:band_mm] <= 0 && Settings.get('titleblock')['enabled']
             lines << ''
             lines << 'WARNING: the title block is enabled but no band is reserved.'
-            lines << 'Set "Title block band" to about 20 mm, or this sheet comes out without it.'
+            lines << 'This sheet comes out without it.'
           end
         rescue
         end
@@ -412,10 +480,21 @@ module SceneManagerPlus
           compose_notes = compose_sheet(tmp_png, geo, out_path, tb_png)
           notes.concat(compose_notes)
 
-          stamped = stamp_dpi!(out_path, geo[:dpi])
+          stamped = stamp_dpi!(out_path, geo[:dpi], geo[:dpi_x])
           unless stamped
             notes << 'Could not write the DPI tag into the file: print it at ' \
                      "#{geo[:canvas_w_px]} x #{geo[:canvas_h_px]} px / #{geo[:dpi].round} DPI, or set the size by hand."
+          end
+          # La correzione orizzontale vive SOLO nella densita' scritta nel file:
+          # se il programma di stampa la ignora (o adatta alla pagina) resta la
+          # sola correzione verticale. Va detto, perche' non si vede dal file.
+          if geo[:calib_split]
+            notes << 'Split calibration is on: the horizontal correction only works if the ' \
+                     'printing software honours the DPI stored in the file.'
+            if File.extname(out_path.to_s).downcase != '.png'
+              notes << 'JPG stores the resolution as a whole number of DPI, so a sub-percent ' \
+                       'horizontal correction is lost: use PNG for scaled sheets.'
+            end
           end
           ok = true
         rescue => e
@@ -602,10 +681,15 @@ module SceneManagerPlus
       # Senza, ogni programma di stampa inventa la sua (di solito 96 DPI) e la
       # scala salta. Qui la scriviamo a mano: PNG -> chunk pHYs, JPG -> campi
       # densita' dell'header JFIF.
-      def stamp_dpi!(path, dpi)
+      #
+      # `dpi_x` diverso da `dpi` esiste solo con la taratura sdoppiata: e' il
+      # solo modo di correggere l'orizzontale, visto che SketchUp renderizza a
+      # pixel quadrati. Entrambi i formati hanno campi X e Y separati.
+      def stamp_dpi!(path, dpi, dpi_x = nil)
+        dx = (dpi_x || dpi)
         case File.extname(path.to_s).downcase
-        when '.png'          then stamp_png_dpi!(path, dpi)
-        when '.jpg', '.jpeg' then stamp_jpg_dpi!(path, dpi)
+        when '.png'          then stamp_png_dpi!(path, dpi, dx)
+        when '.jpg', '.jpeg' then stamp_jpg_dpi!(path, dpi, dx)
         else false
         end
       rescue => e
@@ -632,12 +716,15 @@ module SceneManagerPlus
         [data.bytesize].pack('N') + body + [crc32(body)].pack('N')
       end
 
-      def stamp_png_dpi!(path, dpi)
+      def stamp_png_dpi!(path, dpi, dpi_x = nil)
         data = File.binread(path)
         return false unless data[0, 8] == "\x89PNG\r\n\x1A\n".b
         # pHYs: pixel per unita' X (4), Y (4), unita' (1). unita' 1 = metro.
-        ppm = (dpi.to_f / MM_PER_INCH * 1000.0).round
-        chunk = png_chunk('pHYs', [ppm].pack('N') + [ppm].pack('N') + [1].pack('C'))
+        # I pixel per METRO sono abbastanza fini da esprimere una taratura
+        # sdoppiata dello 0,2% (a 200 DPI sono 7874 ppm: lo 0,2% e' 16 ppm).
+        ppm_y = (dpi.to_f / MM_PER_INCH * 1000.0).round
+        ppm_x = ((dpi_x || dpi).to_f / MM_PER_INCH * 1000.0).round
+        chunk = png_chunk('pHYs', [ppm_x].pack('N') + [ppm_y].pack('N') + [1].pack('C'))
 
         out = data[0, 8].b.dup
         pos = 8
@@ -661,22 +748,33 @@ module SceneManagerPlus
         true
       end
 
-      def stamp_jpg_dpi!(path, dpi)
+      # ⚠️ Le densita' JFIF sono INTERE e in punti per pollice: a 200 DPI il
+      # passo minimo e' lo 0,5%, quindi una taratura sdoppiata sotto quella
+      # soglia si perde nell'arrotondamento. Sulle tavole in scala il default e'
+      # PNG (a queste risoluzioni il JPG sporca il tratto) e li' il problema non
+      # si pone; chi sceglie JPG viene avvisato da `render`.
+      def stamp_jpg_dpi!(path, dpi, dpi_x = nil)
         data = File.binread(path)
         return false unless data[0, 2] == "\xFF\xD8".b        # SOI
         return false unless data[2, 2] == "\xFF\xE0".b        # APP0
         return false unless data[6, 5] == "JFIF\x00".b
-        d = dpi.round
-        d = 1     if d < 1
-        d = 65535 if d > 65535
+        dy = clamp_density(dpi)
+        dx = clamp_density(dpi_x || dpi)
         out = data.dup
-        out.setbyte(13, 1)                  # unita' = punti per pollice
-        out.setbyte(14, (d >> 8) & 0xFF)    # Xdensity
-        out.setbyte(15, d & 0xFF)
-        out.setbyte(16, (d >> 8) & 0xFF)    # Ydensity
-        out.setbyte(17, d & 0xFF)
+        out.setbyte(13, 1)                   # unita' = punti per pollice
+        out.setbyte(14, (dx >> 8) & 0xFF)    # Xdensity
+        out.setbyte(15, dx & 0xFF)
+        out.setbyte(16, (dy >> 8) & 0xFF)    # Ydensity
+        out.setbyte(17, dy & 0xFF)
         File.binwrite(path, out)
         true
+      end
+
+      def clamp_density(v)
+        d = v.round
+        d = 1     if d < 1
+        d = 65535 if d > 65535
+        d
       end
 
       # =====================================================================
@@ -802,6 +900,30 @@ module SceneManagerPlus
       # la taratura e' una proprieta' della stampante, non del progetto.
       CALIB_KEY = 'print_calibration'.freeze
 
+      # --- Taratura sdoppiata X/Y (opt-in) ---------------------------------
+      #
+      # Se la stampante sbaglia in modo diverso nelle due direzioni (tipico:
+      # l'avanzamento della carta e' meno preciso della corsa della testina),
+      # un fattore solo non puo' correggerle entrambe. La spunta "vertical"
+      # abilita un secondo fattore.
+      #
+      # ⚠️ Le due direzioni NON si correggono allo stesso modo, e non e' una
+      # scelta di stile: SketchUp renderizza a PIXEL QUADRATI, quindi quanto
+      # modello sta in orizzontale e' vincolato dal rapporto dei pixel e non e'
+      # regolabile dalla camera. Percio':
+      #   - verticale  -> altezza camera x kY   (come la taratura di sempre)
+      #   - orizzontale-> densita' X scritta nel file = dpi x kX / kY
+      # Ricavata imponendo modello/carta = denom in entrambe le direzioni; con
+      # kX == kY la densita' X torna dpi e non cambia niente.
+      #
+      # ⚠️ Limite da dire all'utente: la parte orizzontale funziona SOLO se il
+      # programma di stampa onora la densita' scritta nel file. Se fa "adatta
+      # alla pagina" resta la sola correzione verticale (cioe' il
+      # comportamento di prima), e se legge la sola densita' X l'errore in
+      # verticale raddoppia. E' per questo che e' dietro una spunta, spenta di
+      # default: si accende, si stampa, si rimisura, e si tiene solo se e'
+      # migliorato.
+      #
       # Fuori da questa forbice e' quasi certamente un errore di battitura
       # (mm scambiati con cm, virgola sbagliata): meglio rifiutare che
       # falsare tutte le tavole in silenzio.
@@ -842,17 +964,49 @@ module SceneManagerPlus
         false
       end
 
+      def active_profile
+        d = calibration_data
+        p = d['profiles'][d['active']]
+        p.is_a?(Hash) ? p : nil
+      rescue
+        nil
+      end
+
+      def sane_factor(v)
+        f = v.to_f
+        (f >= CALIB_MIN && f <= CALIB_MAX) ? f : nil
+      end
+
       # Fattore attivo, 1.0 se non c'e' taratura. Difensivo anche in lettura:
       # un valore fuori forbice (file dei default modificato a mano) non deve
       # poter sballare le tavole.
+      #
+      # `calibration_factor` e' l'ORIZZONTALE (X), `calibration_factor_y` il
+      # VERTICALE. Sono lo stesso numero salvo che il profilo abbia la taratura
+      # sdoppiata accesa: i profili vecchi, che quel campo non ce l'hanno,
+      # continuano a comportarsi esattamente come prima.
       def calibration_factor
-        d = calibration_data
-        prof = d['profiles'][d['active']]
-        return 1.0 unless prof.is_a?(Hash)
-        f = prof['factor'].to_f
-        (f >= CALIB_MIN && f <= CALIB_MAX) ? f : 1.0
+        sane_factor(active_profile ? active_profile['factor'] : nil) || 1.0
       rescue
         1.0
+      end
+
+      def calibration_factor_y
+        p = active_profile
+        return 1.0 unless p
+        base = sane_factor(p['factor']) || 1.0
+        return base unless p['use_y']
+        sane_factor(p['factor_y']) || base
+      rescue
+        1.0
+      end
+
+      # La taratura sdoppiata e' attiva davvero (spunta accesa E un fattore
+      # verticale valido e diverso da quello orizzontale)?
+      def calibration_split?
+        (calibration_factor_y - calibration_factor).abs > 1e-9
+      rescue
+        false
       end
 
       def calibration_name
@@ -871,26 +1025,83 @@ module SceneManagerPlus
 
       # [ok, factor_or_message]. `expected`/`measured` in mm dalla prova di
       # stampa: la stessa lunghezza, come doveva venire e come e' venuta.
-      def save_calibration(name, expected, measured)
+      # Misura ORIZZONTALE. I parametri `_y` + `use_y` sono la taratura
+      # sdoppiata: opt-in, perche' ha senso solo se la stampante sbaglia
+      # davvero in modo diverso nelle due direzioni (vedi la sezione
+      # "Taratura sdoppiata" in CLAUDE.md: prima di accenderla, misurare due
+      # lunghezze molto diverse per distinguere un errore di scala da un
+      # offset fisso).
+      def save_calibration(name, expected, measured, expected_y = nil, measured_y = nil, use_y = false)
         n = name.to_s.strip
         return [false, 'Give the printer profile a name.'] if n.empty?
         exp = parse_num(expected, 0.0)
         got = parse_num(measured, 0.0)
         return [false, 'Both lengths must be greater than zero.'] if exp <= 0 || got <= 0
-        f = got / exp
-        unless f >= CALIB_MIN && f <= CALIB_MAX
-          return [false, format('That gives a factor of %.4f, outside the sane range %.2f-%.2f. ' \
-                                'Check that both lengths are in millimetres.', f, CALIB_MIN, CALIB_MAX)]
+
+        # ⚠️ IL FATTORE SI COMPONE, NON SI SOSTITUISCE.
+        #
+        # Il foglio che l'utente ha appena misurato e' stato stampato con la
+        # taratura ATTIVA in questo momento. Quindi il rapporto misurato dice
+        # di quanto quel foglio ha ancora sbagliato, non di quanto sbaglia la
+        # stampante da zero: il fattore nuovo e' vecchio x rapporto.
+        #
+        # Salvando il solo rapporto (com'era fino al 2026-08-06) ogni giro
+        # buttava via la correzione precedente, e il fattore rimbalzava invece
+        # di convergere. Misurato sui fogli di prova dell'utente: 0,9587 ->
+        # 1,0121 -> 0,9480 in tre giri, mentre componendo sarebbero stati
+        # 0,9587 -> 0,9703 -> 0,9595, cioe' convergenti.
+        #
+        # Alla prima taratura (nessun profilo attivo) la base e' 1.0 e il
+        # comportamento e' identico a prima.
+        base   = calibration_factor
+        base_y = calibration_factor_y
+        ratio  = got / exp
+        f = base * ratio
+        unless ratio >= CALIB_MIN && ratio <= CALIB_MAX
+          return [false, format('That measurement gives a ratio of %.4f, outside the sane range ' \
+                                '%.2f-%.2f. Check that both lengths are in millimetres.',
+                                ratio, CALIB_MIN, CALIB_MAX)]
         end
-        d = calibration_data
-        d['profiles'][n] = {
+        unless f >= CALIB_MIN && f <= CALIB_MAX
+          return [false, format('That would give a total factor of %.4f, outside the sane range ' \
+                                '%.2f-%.2f. If you measured a sheet printed WITHOUT any calibration, ' \
+                                'select "No calibration" first, then save.', f, CALIB_MIN, CALIB_MAX)]
+        end
+
+        prof = {
           'factor'   => f,
           'expected' => exp,
-          'measured' => got
+          'measured' => got,
+          'use_y'    => false
         }
+        if use_y
+          exp_y = parse_num(expected_y, 0.0)
+          got_y = parse_num(measured_y, 0.0)
+          if exp_y <= 0 || got_y <= 0
+            return [false, 'The vertical correction is on, so both vertical lengths must be ' \
+                           'greater than zero. Measure a vertical segment on the same print.']
+          end
+          ratio_y = got_y / exp_y
+          fy = base_y * ratio_y
+          unless ratio_y >= CALIB_MIN && ratio_y <= CALIB_MAX &&
+                 fy >= CALIB_MIN && fy <= CALIB_MAX
+            return [false, format('The vertical measurement gives a total factor of %.4f, outside ' \
+                                  'the sane range %.2f-%.2f. Check that both lengths are in ' \
+                                  'millimetres.', fy, CALIB_MIN, CALIB_MAX)]
+          end
+          prof['use_y']      = true
+          prof['factor_y']   = fy
+          prof['expected_y'] = exp_y
+          prof['measured_y'] = got_y
+        end
+
+        d = calibration_data
+        d['profiles'][n] = prof
         d['active'] = n
         return [false, 'Could not save the printer profile.'] unless write_calibration_data(d)
-        [true, f]
+        [true, { 'factor' => f, 'base' => base, 'ratio' => ratio,
+                 'factor_y' => (use_y ? prof['factor_y'] : f),
+                 'base_y' => base_y, 'ratio_y' => (use_y ? (parse_num(measured_y, 0.0) / parse_num(expected_y, 1.0)) : ratio) }]
       end
 
       def delete_calibration(name)
@@ -907,16 +1118,22 @@ module SceneManagerPlus
         d = calibration_data
         list = d['profiles'].map do |nm, p|
           {
-            'name'     => nm,
-            'factor'   => p['factor'].to_f,
-            'expected' => p['expected'].to_f,
-            'measured' => p['measured'].to_f
+            'name'       => nm,
+            'factor'     => p['factor'].to_f,
+            'expected'   => p['expected'].to_f,
+            'measured'   => p['measured'].to_f,
+            'use_y'      => !!p['use_y'],
+            'factor_y'   => p['factor_y'].to_f,
+            'expected_y' => p['expected_y'].to_f,
+            'measured_y' => p['measured_y'].to_f
           }
         end.sort_by { |p| p['name'].to_s.downcase }
         {
           'active'   => calibration_name,
           'profiles' => list,
-          'factor'   => calibration_factor
+          'factor'   => calibration_factor,
+          'factor_y' => calibration_factor_y,
+          'split'    => calibration_split?
         }
       end
 
@@ -1223,8 +1440,9 @@ module SceneManagerPlus
           tavola_placeholder: '0' * pad,
           # La cella che rende la tavola autosufficiente: dice a che scala è e
           # a quale condizione quella scala vale. Sta nella metà inferiore del
-          # box fase, sotto "PROGETTO:".
-          scala_line:         scala_line_for(geo)
+          # box fase, sotto "PROGETTO:", su due righe.
+          scala_value:        format_scale(geo[:denom]),
+          scala_cond:         scala_cond_for(geo)
         )
         [pngs['print_scale'], pngs]
       rescue => e
@@ -1232,12 +1450,13 @@ module SceneManagerPlus
         [nil, nil]
       end
 
-      # Testo della cella SCALA del cartiglio. Una frase sola, perche' quello
-      # che conta e' la condizione: la scala vale SE stampi cosi'.
-      def scala_line_for(geo)
-        format('%s, se in %s %s al 100%%',
-               format_scale(geo[:denom]), geo[:paper],
-               geo[:landscape] ? 'orizzontale' : 'verticale')
+      # Seconda riga della cella SCALA del cartiglio: la condizione, che e' la
+      # meta' che conta davvero (la scala vale SE stampi cosi'). Abbreviata
+      # perche' la cella deve stare nello stesso spazio della casella
+      # "PROGETTO:" sopra di lei, senza rubare larghezza al nome scena.
+      def scala_cond_for(geo)
+        format('se in %s %s al 100%%',
+               geo[:paper], geo[:landscape] ? 'orizz.' : 'vert.')
       end
 
       # Numero tavola = stessa posizione 1-based dell'ordine logico usata dal

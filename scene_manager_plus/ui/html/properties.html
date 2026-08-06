@@ -138,11 +138,14 @@
               <span class="ps-unit">mm</span>
             </span>
 
-            <label for="ps-band">Title block</label>
+            <!-- L'altezza della fascia NON e' scelta a mano: e' derivata dalla
+                 larghezza del foglio per tenere al cartiglio sempre le stesse
+                 proporzioni dell'export a serie. -->
+            <label>Title block</label>
             <span class="ps-inline">
-              <input type="text" id="ps-band" class="ps-num" spellcheck="false" autocomplete="off">
+              <span class="ps-num ps-ro" id="ps-band-ro">-</span>
               <span class="ps-unit">mm</span>
-              <span class="ps-hint">band reserved at the bottom of the sheet</span>
+              <span class="ps-hint">band at the bottom, sized to keep the title block's usual proportions</span>
             </span>
 
             <label for="ps-profile">Profile lines</label>
@@ -191,6 +194,10 @@
               <span class="ps-hint" id="ps-calib-hint"></span>
             </span>
 
+            <!-- ⚠️ Il foglio che si misura e' stato stampato CON la taratura
+                 attiva, quindi il rapporto misurato raffina il fattore invece
+                 di sostituirlo (vedi save_calibration). Il testo lo dice, o
+                 l'utente si aspetta di ripartire da zero a ogni giro. -->
             <label for="ps-calib-exp">From a test print</label>
             <span class="ps-inline">
               <span class="ps-hint">should be</span>
@@ -199,7 +206,38 @@
               <span class="ps-hint">came out</span>
               <input type="text" id="ps-calib-got" class="ps-num3" spellcheck="false" autocomplete="off">
               <span class="ps-unit">mm</span>
+              <span class="ps-hint" id="ps-calib-axis-h"></span>
+            </span>
+
+            <!-- Taratura sdoppiata: opt-in, spenta di default. Serve solo se la
+                 stampante sbaglia in modo DIVERSO nelle due direzioni, e la
+                 meta' orizzontale funziona solo se il programma di stampa
+                 onora la risoluzione scritta nel file. -->
+            <label for="ps-calib-usey">Vertical</label>
+            <span class="ps-inline">
+              <input type="checkbox" id="ps-calib-usey">
+              <label for="ps-calib-usey" class="ps-inline-lbl" title="Only if your printer is off by a different amount horizontally and vertically. Measure both directions on the same sheet first.">correct the vertical separately</label>
+            </span>
+
+            <label for="ps-calib-exp-y" id="ps-calib-y-lbl">Vertical measurement</label>
+            <span class="ps-inline" id="ps-calib-y-row">
+              <span class="ps-hint">should be</span>
+              <input type="text" id="ps-calib-exp-y" class="ps-num3" spellcheck="false" autocomplete="off">
+              <span class="ps-unit">mm</span>
+              <span class="ps-hint">came out</span>
+              <input type="text" id="ps-calib-got-y" class="ps-num3" spellcheck="false" autocomplete="off">
+              <span class="ps-unit">mm</span>
+            </span>
+
+            <label></label>
+            <span class="ps-inline">
               <button type="button" id="btn-ps-calib-save" class="ps-mini" title="Print a sheet at 100%, measure a known length with a ruler, type both numbers here.">Save profile...</button>
+              <span class="ps-hint" id="ps-calib-from"></span>
+            </span>
+
+            <label></label>
+            <span class="ps-inline">
+              <span class="ps-hint" id="ps-calib-warn"></span>
             </span>
           </div>
         </div>

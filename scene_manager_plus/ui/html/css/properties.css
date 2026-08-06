@@ -739,5 +739,26 @@ fieldset legend {
 }
 .ps-mini:hover { background: #4a4a4a; border-color: #4ea1ff; }
 .ps-mini:disabled { opacity: 0.4; cursor: default; }
+/* Valore calcolato dal plugin, non modificabile: stesso posto di un input ma
+   senza cornice, così si legge come un risultato e non come un campo. */
+.ps-ro {
+  color: #ddd;
+  padding: 3px 0;
+  flex: 0 0 auto;
+}
 #ps-calib { max-width: 150px; }
 .ps-readout .ps-r-val.is-calib { color: #9ec5f0; }
+
+/* Etichetta cliccabile accanto a una checkbox in linea (la <label> della
+   colonna sinistra della griglia e' gia' occupata dal titolo della riga). */
+.ps-inline-lbl {
+  color: #bbb;
+  font-size: 11px;
+  cursor: pointer;
+  flex: 0 1 auto;
+}
+/* Riga della misura verticale: nascosta finche' la spunta e' spenta. La
+   taratura sdoppiata e' l'eccezione, non la regola. */
+.ps-calib.no-y #ps-calib-y-row,
+.ps-calib.no-y #ps-calib-y-lbl { display: none; }
+#ps-calib-warn { color: #d8b26a; }

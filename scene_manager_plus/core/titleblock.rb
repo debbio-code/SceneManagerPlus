@@ -113,13 +113,38 @@ module SceneManagerPlus
           }
         }
 
+        # Fit della cella SCALA (2 righe: "SCALA: <val>" / "<condizione>")
+        # dentro $maxW. La cella deve occupare LO STESSO SPAZIO della casella
+        # superiore ("PROGETTO: <fase>"), quindi e' il testo della scala ad
+        # adattarsi, non il box ad allargarsi: allargarlo rubava larghezza al
+        # box CLIENTE/OGGETTO e schiacciava il nome scena.
+        # Ritorna @{ LabelFont=..; ValueFont=..; W1=..; W2=.. }: caller disposa.
+        function Fit-Scala($g, [string]$lbl, [string]$val, [string]$cond, [string]$fam, [single]$startLblSz, [single]$startValSz, [single]$maxW, [single]$minSz) {
+          $lSz = $startLblSz
+          $vSz = $startValSz
+          while ($true) {
+            $fl = New-Fnt $fam $lSz ([System.Drawing.FontStyle]::Bold)
+            $fv = New-Fnt $fam $vSz ([System.Drawing.FontStyle]::Regular)
+            $r1 = [single]($g.MeasureString($lbl, $fl).Width + 8 + $g.MeasureString($val, $fv).Width)
+            $r2 = [single]($g.MeasureString($cond, $fv).Width)
+            if (([Math]::Max($r1, $r2) -le $maxW) -or ($vSz -le $minSz)) {
+              return @{ LabelFont = $fl; ValueFont = $fv; W1 = $r1; W2 = $r2 }
+            }
+            $fl.Dispose(); $fv.Dispose()
+            $lSz = $lSz - 1
+            $vSz = $vSz - 1
+          }
+        }
+
         $tavolaPlaceholder = [string]$cfg.tavola_placeholder
         if ([string]::IsNullOrEmpty($tavolaPlaceholder)) { $tavolaPlaceholder = "00" }
-        # Box SCALA: presente SOLO se il chiamante passa scala_value. L'export
+        # Cella SCALA: presente SOLO se il chiamante passa scala_value. L'export
         # a serie non la passa (non ha una scala), quindi il suo cartiglio
-        # resta identico a prima.
-        $scalaLine = [string]$cfg.scala_line
-        $hasScala = -not [string]::IsNullOrEmpty($scalaLine)
+        # resta identico a prima. Due righe: "SCALA: <valore>" e sotto la
+        # condizione ("se in A4 orizz. al 100%").
+        $scalaValue = [string]$cfg.scala_value
+        $scalaCond  = [string]$cfg.scala_cond
+        $hasScala = -not [string]::IsNullOrEmpty($scalaValue)
         # Cliente: il valore è costante per tutto il batch (= prefix_custom).
         $clientStr = [string]$cfg.client
         # Nome scena più lungo nel batch (Ruby lo precalcola).
@@ -207,11 +232,11 @@ module SceneManagerPlus
           # Box FASE: riga superiore "PROGETTO: <fase>", riga inferiore la SCALA
           # (solo sulle tavole in scala). Senza scala la riga inferiore non
           # esiste: li' sotto passa la riga OGGETTO, unificata col box 0.
+          # La larghezza la decide SEMPRE e SOLO la riga superiore: la cella
+          # SCALA occupa lo stesso spazio della casella sopra e ci si adatta
+          # (2 righe + shrink, vedi Fit-Scala). Cosi' il box del cliente non
+          # perde larghezza e il nome scena non viene schiacciato.
           $wFase = Measure-LV $measureG "PROGETTO:" $phaseValue $midLabelFont $midValueFont
-          if ($hasScala) {
-            $wScala = Measure-LV $measureG "SCALA:" $scalaLine $midLabelFont $midValueFont
-            if ($wScala -gt $wFase) { $wFase = $wScala }
-          }
           $faseW = [int]([Math]::Ceiling($wFase * $boxBreath)) + 2 * $pad
 
           $autoSum = $clienteW + $faseW + $tavolaW + $progW + $datiW
@@ -387,18 +412,37 @@ module SceneManagerPlus
           # Senza scala la riga inferiore non esiste: e' la prosecuzione di
           # OGGETTO. Con la scala diventa la cella che rende la tavola
           # autosufficiente: dice a che scala e' e a quale condizione vale.
-          $wFr = (Measure-LV $g "PROGETTO:" $phaseValue $midLabelFont $midValueFont)
-          $blockFaseW = $wFr
+          $blockFaseW = (Measure-LV $g "PROGETTO:" $phaseValue $midLabelFont $midValueFont)
+          # La scala si adatta alla larghezza della casella (non viceversa):
+          # due righe, con shrink solo se nemmeno cosi' entrano.
+          $blockScW = 0.0
           if ($hasScala) {
-            $wScR = (Measure-LV $g "SCALA:" $scalaLine $midLabelFont $midValueFont)
-            if ($wScR -gt $blockFaseW) { $blockFaseW = $wScR }
+            $availSc = [single]($widths[1] - 2 * $pad)
+            $scFit = Fit-Scala $g "SCALA:" $scalaValue $scalaCond $fontFamily $midLabelSz $midValueSz $availSc 8.0
+            $fScL = $scFit.LabelFont
+            $fScV = $scFit.ValueFont
+            $blockScW = [single]([Math]::Max($scFit.W1, $scFit.W2))
           }
-          $startXf = $x + [int](($widths[1] - $blockFaseW) / 2)
+          # Le due righe partono dalla stessa X e il blocco e' centrato nel box,
+          # come nei box Tavola/Data e Progetto/Disegnato.
+          $block1W = [Math]::Max($blockFaseW, $blockScW)
+          $startXf = $x + [int](($widths[1] - $block1W) / 2)
           Draw-LV-At $g "PROGETTO:" $phaseValue $midLabelFont $midValueFont $brush $startXf 0 $halfH
           if ($hasScala) {
-            $lblScW = $g.MeasureString("SCALA:", $midLabelFont).Width
-            $g.DrawString("SCALA:", $midLabelFont, $brush, [single]$startXf, [single]($bY_bot - $mLblAsc))
-            $g.DrawString($scalaLine, $midValueFont, $brush, [single]($startXf + $lblScW + 8), [single]($bY_bot - $mValAsc))
+            $scAscL = Get-Asc $fScL
+            $scAscV = Get-Asc $fScV
+            $scDscV = Get-Dsc $fScV
+            $scAsc  = [single]([Math]::Max($scAscL, $scAscV))
+            $scLineH  = [single]($scAsc + $scDscV)
+            $scBlockH = [single]($scLineH * 2)
+            $scTopY   = [single]($halfH + (($H - $halfH) - $scBlockH) / 2.0)
+            $scBase1  = [single]($scTopY + $scAsc)
+            $scBase2  = [single]($scBase1 + $scLineH)
+            $lblScW = $g.MeasureString("SCALA:", $fScL).Width
+            $g.DrawString("SCALA:",   $fScL, $brush, [single]$startXf,                   [single]($scBase1 - $scAscL))
+            $g.DrawString($scalaValue, $fScV, $brush, [single]($startXf + $lblScW + 8), [single]($scBase1 - $scAscV))
+            $g.DrawString($scalaCond,  $fScV, $brush, [single]$startXf,                  [single]($scBase2 - $scAscV))
+            $fScL.Dispose(); $fScV.Dispose()
           }
           $x += $widths[1]
 
@@ -538,9 +582,11 @@ module SceneManagerPlus
           'designer'           => cfg[:designer].to_s,
           'project_phase'      => cfg[:project_phase].to_s,
           # Cella SCALA (meta' inferiore del box fase): presente solo se
-          # scala_line non è vuota. L'export a serie non la passa per le scene
+          # scala_value non è vuoto. L'export a serie non la passa per le scene
           # senza scala, quindi il loro cartiglio non cambia di una virgola.
-          'scala_line'         => cfg[:scala_line].to_s,
+          # Due righe: valore ("1:50") e condizione ("se in A3 orizz. al 100%").
+          'scala_value'        => cfg[:scala_value].to_s,
+          'scala_cond'         => cfg[:scala_cond].to_s,
           'company_lines'      => Array(cfg[:company_lines]).map(&:to_s),
           'logo_path'          => cfg[:logo_path].to_s,
           'tavola_placeholder' => placeholder,

@@ -248,6 +248,13 @@ Per il deploy ideale via symlink/junction (richiede admin) e altre note vedi
 
 Avvio: SketchUp 2019 → menu **Plugins → Scene Manager+** (o icona toolbar).
 
+**Versione nel titolo della finestra** (`Scene Manager+ v1.0.0`): serve a
+verificare a colpo d'occhio che le postazioni dei colleghi girino tutte con la
+stessa build. Sorgente unica `SceneManagerPlus::PLUGIN_VERSION` in
+`scene_manager_plus.rb` (la stessa che va in `ext.version`), letta da
+`ui/dialog.rb`. ⚠️ **Va alzata a mano prima di distribuire**: se resta ferma
+mentre il codice cambia, il numero mente e diventa peggio che non averlo.
+
 ## Defer mode (`Core::Buffer`)
 
 Quando attivo, le scritture vengono accumulate in RAM. Stato globale
@@ -1964,8 +1971,8 @@ dell'export a serie. La differenza che conta: larghezza e altezza vengono dal
 che rende la tavola coerente con l'inquadratura mostrata nel viewport, e che
 chiude l'equivoco descritto nella sezione precedente.
 
-**La cella `SCALA` (versione definitiva, 2026-08-05).** Una riga sola, del
-tipo `SCALA:  1:1, se in A4 orizzontale al 100%`, e **non un box in più a sé
+**La cella `SCALA` (versione definitiva, 2026-08-06).** Due righe —
+`SCALA: 1:100` e sotto `se in A3 orizz. al 100%` — e **non un box in più a sé
 stante**: vive nella **metà inferiore del box 1 (fase di progetto)**, cioè
 sotto `PROGETTO: Preliminare`. Quella metà normalmente non esiste come cella —
 è la prosecuzione della riga OGGETTO, che è unificata su box 0 + box 1. Quindi:
@@ -1976,10 +1983,21 @@ sotto `PROGETTO: Preliminare`. Quella metà normalmente non esiste come cella �
   prosegue sotto il box fase — cioè **esattamente il cartiglio di sempre**.
   Verificato rigenerando le due varianti e confrontandole.
 
-Il testo è una frase unica perché quello che conta è la **condizione**: la
-scala vale *se* stampi così. Lo costruisce `PrintScale.scala_line_for(geo)` e
-viaggia nel campo `scala_line` (prima erano due campi `scala_value` +
-`stampa_value`, su due righe etichettate: **sostituiti**).
+Il valore viaggia in `scala_value` (`PrintScale.format_scale`) e la condizione
+in `scala_cond` (`PrintScale.scala_cond_for`). ⚠️ È il terzo assetto di questi
+campi: prima `scala_value` + `stampa_value` su due righe etichettate, poi un
+unico `scala_line` a frase, ora di nuovo due campi ma su due righe **senza**
+seconda etichetta. Se trovi in giro `scala_line`, è vecchio.
+
+⚠️ **La larghezza del box 1 la decide SOLO la riga superiore (`PROGETTO:`); è
+la scala ad adattarsi al box, mai il contrario** (`Fit-Scala` nello script PS:
+due righe, e shrink dei font solo se nemmeno così entrano). Il motivo è che il
+box 0 (CLIENTE/OGGETTO) è il **remainder**: ogni pixel dato al box 1 lo perde
+il nome scena, che con la scala non può nemmeno più sconfinare sotto il box
+fase. Nella prima versione la frase lunga su una riga gonfiava il box 1 di
+~+80% e il nome scena usciva illeggibile — è il difetto segnalato il
+2026-08-06. Per la stessa ragione la condizione è **abbreviata**
+(`orizz.`/`vert.`, non `orizzontale`/`verticale`).
 
 ⚠️ **Gli indici di `$widths` nello script PowerShell sono cambiati DUE volte.**
 Adesso sono `0 cliente, 1 fase(+scala), 2 tavola, 3 progetto, 4 dati, 5 logo`
@@ -1993,9 +2011,12 @@ regola del prefisso (che il cartiglio riusa come CLIENTE) in un posto solo.
 regola vanno allineate. Era già uscito un bug da questa duplicazione.
 
 **Collaudo senza SketchUp**: lo script del cartiglio non usa l'API SU, quindi
-`TitleBlock.render_batch` si chiama da un Ruby normale e si guarda il PNG che
-esce. È il modo più veloce per verificare un cambio di layout: due render, uno
-con `scala_line` e uno senza, e si confrontano a occhio.
+`TitleBlock.render_batch` si chiama da un Ruby normale (`C:\Ruby33-x64`) e si
+guarda il PNG che esce. È il modo più veloce per verificare un cambio di
+layout. Le quattro varianti che contano: **con e senza** `scala_value`, per
+**nome scena corto e lungo** (il lungo è l'unico che mostra se il box 0 è
+abbastanza largo). Utile anche un giro a foglio piccolo (A4 verticale @150 DPI
+≈ 1240 px di larghezza), dove i font si rimpiccioliscono tutti insieme.
 
 ✅ Il blit del cartiglio nella fascia (`compose_sheet`) è stato **verificato dal
 vivo il 2026-08-05**.
@@ -2212,12 +2233,168 @@ Altri punti non ovvi:
 - Il cartiglio continua a dire "al 100%": è l'istruzione giusta per l'utente,
   la correzione è già dentro il disegno.
 
+### RISOLTO (2026-08-06): la taratura si COMPONE, non si sostituisce
+
+**Sintomo**: "il fattore correttivo non sembra funzionare, eppure stampo
+sempre dalla stessa stampante e senza adatta alla pagina".
+
+**Diagnosi fatta sui file, non sui racconti**: le tavole di prova sono tutte
+A4 orizzontale @200 DPI a 1:1 con lo stesso quadrato da 15 cm, quindi il
+fattore applicato si legge misurando il disegno (nominale a 200 DPI:
+1181 px = 15 cm).
+
+| cartella | 15 cm disegnati | fattore che era attivo |
+|---|---|---|
+| 03–06 | 1232 px | 0,9587 |
+| 07–08 | 1167 px | **1,0121** |
+| ultima | 1246 px | **0,9480** |
+
+Il fattore **rimbalzava invece di convergere**. Causa: `save_calibration`
+salvava il rapporto `misurato/atteso` **sostituendo** il fattore precedente.
+Ma il foglio che l'utente misura è stato stampato **con la taratura già
+attiva**, quindi quel rapporto dice quanto quel foglio ha *ancora* sbagliato,
+non quanto sbaglia la stampante da zero. Ogni giro buttava via il giro prima.
+
+Componendo (`nuovo = vecchio × rapporto`) le stesse tre misure danno
+0,9587 → 0,9705 → 0,9595: convergenti, e tutte attorno al valore vero della
+stampante (≈0,96). Verificato anche con una simulazione: partendo da 1,0 con
+una stampante che rimpicciolisce di 0,96, il primo giro trova 0,96 e i
+successivi non lo muovono più.
+
+Conseguenze nel codice e nella UI:
+
+- `save_calibration` moltiplica per `calibration_factor` / `calibration_factor_y`
+  **attivi al momento del salvataggio** (alla prima taratura sono 1.0 → identico
+  a prima). La forbice di sicurezza vale ora sia sul rapporto sia sul totale.
+- ⚠️ Il campo **"came out" non viene più riproposto** dal profilo: con la
+  composizione, ri-salvare una misura già usata la applicherebbe due volte.
+  Il "should be" invece resta (è la stessa lunghezza di riferimento).
+- Il messaggio di conferma **mostra l'aritmetica** (`0,9587 × 1,0121 = 0,9705`):
+  senza, il numero sembra uscire dal nulla o essersi perso.
+- `save_calibration` ritorna un **hash** (`factor/base/ratio/...`), non più un
+  float: se qualcuno aggiunge un chiamante, deve leggere `info['factor']`.
+
+⚠️ Assunto su cui poggia tutto: **il foglio misurato è stato stampato con la
+taratura attiva adesso**. Se si stampa, poi si cambia profilo, poi si misura,
+il conto è sbagliato. La UI lo dice ("Measure the sheet you just printed").
+
+**Metodo diagnostico riusabile**: su una tavola in scala il fattore applicato
+si **rilegge dall'immagine**, senza SketchUp e senza sapere cosa c'era nei
+campi. Basta un elemento di lunghezza nota nel modello: `px_misurati /
+(mm_modello / denom / 25.4 × DPI)` = `1 / fattore`. Con System.Drawing da
+PowerShell si contano i pixel scuri per colonna e si trovano gli spigoli
+verticali. È così che è saltata fuori la sequenza qui sopra. ⚠️ Misurare
+**sul colore**, non sul tratto (vedi la trappola dell'antialias in Fase 4).
+
+⚠️ **I valori di `Sketchup.write_default` non si trovano su disco a SketchUp
+chiuso** (cercati il 2026-08-06): non sono nel registro
+(`HKCU\Software\SketchUp\SketchUp 2019\…`, che contiene solo MainFrame/
+Workspace/Recent File List) né in `SharedPreferences.json`. Quindi il profilo
+di taratura **non è ispezionabile dall'esterno**: per sapere cosa c'è dentro
+o si guarda dalla UI, o si misura l'immagine prodotta col metodo qui sopra.
+Non perderci tempo una seconda volta.
+
+### RISOLTO (2026-08-06): il cartiglio non cambia più proporzioni
+
+**Sintomo**: il cartiglio della tavola in scala non somigliava a quello
+dell'export a serie — font e caselle diversi.
+
+**Causa**: la fascia era alta `titleblock_mm` (un numero scelto a mano, 20 mm)
+mentre la larghezza veniva dal foglio. Misurato: export **3000×160 = 18,75:1**,
+tavola A4 orizzontale **2181×156 = 13,98:1**. I font dello script PowerShell
+sono frazioni dell'**altezza** (`$H * 0.18`…), quindi cambiare il rapporto
+larghezza/altezza ridisegna tutto: più la fascia è "grassa", più i font sono
+grandi rispetto alla larghezza e più l'auto-shrink li comprime in modo diverso.
+
+**Fix**: l'altezza della fascia non si sceglie più. `titleblock_aspect` legge
+il rapporto di riferimento da `export.width / titleblock.height_px` (così i due
+percorsi restano allineati da soli se un domani cambia il formato dell'export)
+e `compute` fa `band_px = (draw_w_px / aspect).round`, poi `band_mm` dai pixel.
+Su A4 orizzontale la fascia passa da 20,0 a 14,7 mm e il rapporto torna 18,80:1.
+
+- `band_px` si ricava dai **pixel** della larghezza, non dai mm nominali: è il
+  rapporto in pixel quello che il renderer del cartiglio vede (stessa logica per
+  cui l'altezza camera esce dai pixel arrotondati). Resta uno scarto di 0,3% per
+  l'arrotondamento a pixel interi — invisibile.
+- Fascia = 0 **se e solo se** il cartiglio è spento nei Settings.
+- `titleblock_mm` resta nella cfg di scena (il JS la conserva in `readCfg`) ma
+  è **ignorata** quando i Settings sono raggiungibili; serve solo come fallback
+  nei collaudi fuori da SketchUp, dove `titleblock_aspect` ritorna `nil`.
+- Nella scheda scena il campo è diventato un **valore in sola lettura**
+  (`#ps-band-ro`, riempito da `nums.band`).
+
+### Taratura sdoppiata X/Y (2026-08-06) — opt-in, e per una ragione
+
+L'utente ha misurato uno scarto **diverso fra orizzontale e verticale**, "una
+frazione di mm". Plausibile fisicamente (l'avanzamento della carta è meno
+preciso della corsa della testina), quindi il fattore si può sdoppiare:
+checkbox **Vertical** nella sezione taratura + una seconda coppia di campi
+"should be / came out" misurata su un segmento **verticale** dello stesso
+foglio. Profili vecchi (senza i campi `_y`) → spunta spenta → **comportamento
+identico a prima**.
+
+⚠️ **Le due direzioni NON si correggono allo stesso modo, e non è una scelta
+di stile.** SketchUp renderizza a **pixel quadrati**: quanto modello sta in
+orizzontale è vincolato dal rapporto dei pixel e non è regolabile dalla
+camera. Quindi:
+
+| direzione | dove entra la correzione |
+|---|---|
+| verticale (kY) | `camera.height × kY` — la taratura di sempre |
+| orizzontale (kX) | **densità X scritta nel file** = `dpi × kX / kY` |
+
+Ricavata imponendo modello/carta = `denom` in entrambe le direzioni. Con
+`kX == kY` la densità X torna esattamente `dpi` e non cambia un byte.
+`stamp_dpi!` scrive densità X e Y separate (il PNG le ha nel chunk **pHYs**,
+il JPG nei campi **JFIF**).
+
+⚠️ **La metà orizzontale funziona SOLO se il programma di stampa onora la
+densità scritta nel file.** Se fa "adatta alla pagina" resta la sola
+correzione verticale (= comportamento di prima); se legge la sola densità X,
+l'errore in verticale **raddoppia**. È per questo che è dietro una spunta
+spenta di default, e che il messaggio dopo il salvataggio dice esplicitamente
+di ristampare, rimisurare, e spegnerla se è peggiorato.
+
+⚠️ **Il JPG memorizza la risoluzione come DPI INTERI**: a 200 DPI il passo
+minimo è lo 0,5%, quindi una correzione sotto quella soglia sparisce
+nell'arrotondamento. Il PNG usa pixel/metro (7874 a 200 DPI) e ci arriva senza
+problemi. `render` lo dice nelle note quando il formato non è PNG.
+
+⚠️ **Prima di accendere la spunta, distinguere errore di scala da offset
+fisso**: è la stessa lezione già inciampata due volte qui (Fase 0 e Fase 1 —
+"una misura presa a una sola risoluzione non distingue un arrotondamento da
+una deriva"). Si misura una lunghezza **corta e una lunga** per ogni
+direzione: se lo scarto X−Y **cresce in proporzione** è anisotropia vera e la
+spunta serve; se resta una frazione di mm costante è larghezza del tratto o
+posizione del righello, e sdoppiare cementerebbe rumore in ogni tavola futura.
+
+`calibration_factor` = **X**, `calibration_factor_y` = **Y** (= X se la spunta
+è spenta), `calibration_split?` = i due differiscono davvero.
+⚠️ Chi legge o scrive `camera.height` deve usare quello **Y** —
+`scale_from_camera` è già stato corretto una volta per questo.
+
+**Collaudato senza SketchUp** (`Sketchup.read_default` stubbato per iniettare
+un profilo): scala che atterra esatta in **entrambe** le direzioni con
+kX ≠ kY, `dpi_x` che torna `dpi` quando i fattori coincidono, profilo legacy
+invariato, forbice di sicurezza, e pHYs riletto dal file con X ≠ Y. Il lato JS
+verificato in browser col solito Proxy su `window.sketchup`.
+
 ### Da fare, in ordine
 
 1. **Verifica sul campo della taratura** — l'unica prova che conta: ristampare
    la stessa tavola col profilo attivo e rimisurare col righello. I 150 mm
    devono venire 150. Non è stato possibile verificarlo a video perché la
-   correzione vive fuori dal file (nella stampante).
+   correzione vive fuori dal file (nella stampante). Nello stesso giro,
+   misurare **corto e lungo in entrambe le direzioni** per decidere se la
+   spunta "Vertical" serve davvero (vedi "Taratura sdoppiata X/Y").
+   ⚠️ Il profilo salvato sulla postazione dell'utente vale **0,948**, ed è il
+   prodotto del vecchio comportamento che sostituiva il fattore. Non serve
+   azzerarlo: ora che si compone, **un solo giro** (stampa → misura → salva) lo
+   riporta al valore vero (≈0,96).
+   ⚠️ La fascia cartiglio è cambiata (20 → ~14,7 mm su A4), quindi **le scene
+   già in scala mostrano il badge ambra** finché non si preme Apply una volta:
+   l'area di disegno è diversa, quindi l'inquadratura salvata non è più quella
+   giusta. È esattamente il caso per cui il badge esiste.
 2. **Fase 2b-2** — finestra propria "Print to scale" (voce di menu già
    esistente, oggi apre l'harness a `UI.inputbox` in `run_interactive`).
    Deve leggere/scrivere lo stesso gruppo settings e le stesse cfg di scena.

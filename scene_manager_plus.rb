@@ -4,7 +4,10 @@ require 'extensions.rb'
 module SceneManagerPlus
   PLUGIN_ID      = 'SceneManagerPlus'.freeze
   PLUGIN_NAME    = 'Scene Manager+'.freeze
-  PLUGIN_VERSION = '0.1.0'.freeze
+  # Mostrata nel titolo della finestra principale ("Scene Manager+ v1.0.0"):
+  # serve a verificare a colpo d'occhio che tutte le postazioni usino la
+  # stessa build. VA ALZATA A MANO a ogni distribuzione, altrimenti mente.
+  PLUGIN_VERSION = '1.0.0'.freeze
   PLUGIN_DIR     = File.join(File.dirname(__FILE__), 'scene_manager_plus').freeze
 
   unless file_loaded?(__FILE__)
