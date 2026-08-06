@@ -2416,25 +2416,34 @@ larghezza — vedi il metodo nella sezione sopra.
 > funziona".** Resta opt-in — vale per la sua stampante e per la sua catena di
 > stampa, non è detto valga per tutte (vedi i limiti in fondo alla sezione).
 >
-> ⚠️ **Perché funzioni non è del tutto chiaro, e la spiegazione ovvia non
-> regge.** La correzione orizzontale agisce **scrivendo nel file una densità X
-> diversa dalla Y** — ma l'utente stampa da "Stampa immagini" di Windows, che
-> **le densità le ignora** e adatta il rettangolo di pixel alla pagina in modo
-> uniforme (vedi la sezione sul percorso di stampa). Su quella strada il pezzo
-> `dpi_x` dovrebbe essere un **no-op**.
+> ⚠️ **Perché funzioni non è ancora deciso, e la misura fatta non lo decide.**
+> La correzione orizzontale agisce **scrivendo nel file una densità X diversa
+> dalla Y** — ma l'utente stampa da "Stampa immagini" di Windows, che **le
+> densità le ignora** e adatta il rettangolo di pixel alla pagina in modo
+> uniforme (vedi la sezione sul percorso di stampa). Su quella strada `dpi_x`
+> dovrebbe essere un **no-op**. Due letture, entrambe compatibili con
+> "funziona":
 >
-> Ipotesi più probabile, **non verificata**: a migliorare non è la metà
-> orizzontale ma **kY**, che sdoppiando viene misurato su un segmento
-> *verticale* invece che su uno orizzontale — cioè sull'asse che corregge
-> davvero. Prima, con un fattore solo, una misura presa in orizzontale finiva
-> ad aggiustare l'altezza camera.
+> - **(A) `dpi_x` fa presa davvero** — il programma di stampa la densità la
+>   legge, le due correzioni si sommano, ed è quanto scritto qui sopra sul
+>   dialog di Windows a essere sbagliato.
+> - **(B) `dpi_x` è un no-op e il merito è tutto di kY**, che sdoppiando viene
+>   misurato su un segmento *verticale* invece che orizzontale, cioè sull'asse
+>   che corregge davvero. ⚠️ In questo caso però l'orizzontale **non resta
+>   fermo: peggiora**, perché l'altezza camera passa da kX a kY e senza `dpi_x`
+>   nulla glielo restituisce. Peggiora esattamente di kX/kY — la stessa
+>   "frazione di mm" di partenza, invisibile su 150 mm.
 >
-> Previsione falsificabile, se un domani si vuole chiudere la questione: su
-> quella catena di stampa, accendere la spunta deve migliorare **solo il
-> verticale** e lasciare l'orizzontale dov'era. Se migliorasse anche
-> l'orizzontale, il modello di "Stampa immagini" scritto qui è sbagliato e va
-> rimisurato. Non toccare il codice sulla base della sola teoria: **qui
-> funziona**, ed è misurato col righello.
+> **Il discriminante è un segmento orizzontale LUNGO**, misurato con la spunta
+> accesa e spenta: se resta uguale siamo in (A), se cambia di kX/kY siamo in
+> (B). Su 15 cm l'effetto si confonde col tratto, su 25 cm si vede, su un A0
+> sono 3-4 mm. È la terza volta che in questo file la risposta è "misura corto
+> **e** lungo": una misura presa a una sola lunghezza non distingue un errore
+> di scala da un offset costante (vedi Fase 0 e Fase 1).
+>
+> Finché non è deciso: **non toccare il codice sulla base della teoria.** Sui
+> formati in uso funziona in entrambe le letture, ed è misurato col righello.
+> Diventa rilevante solo su tavole grandi o cambiando programma di stampa.
 
 L'utente ha misurato uno scarto **diverso fra orizzontale e verticale**, "una
 frazione di mm". Plausibile fisicamente (l'avanzamento della carta è meno
