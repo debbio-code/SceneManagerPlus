@@ -2412,6 +2412,30 @@ larghezza — vedi il metodo nella sezione sopra.
 
 ### Taratura sdoppiata X/Y (2026-08-06) — opt-in, e per una ragione
 
+> ✅ **Confermata sul campo dall'utente (2026-08-06): "X e Y divise aiuta e
+> funziona".** Resta opt-in — vale per la sua stampante e per la sua catena di
+> stampa, non è detto valga per tutte (vedi i limiti in fondo alla sezione).
+>
+> ⚠️ **Perché funzioni non è del tutto chiaro, e la spiegazione ovvia non
+> regge.** La correzione orizzontale agisce **scrivendo nel file una densità X
+> diversa dalla Y** — ma l'utente stampa da "Stampa immagini" di Windows, che
+> **le densità le ignora** e adatta il rettangolo di pixel alla pagina in modo
+> uniforme (vedi la sezione sul percorso di stampa). Su quella strada il pezzo
+> `dpi_x` dovrebbe essere un **no-op**.
+>
+> Ipotesi più probabile, **non verificata**: a migliorare non è la metà
+> orizzontale ma **kY**, che sdoppiando viene misurato su un segmento
+> *verticale* invece che su uno orizzontale — cioè sull'asse che corregge
+> davvero. Prima, con un fattore solo, una misura presa in orizzontale finiva
+> ad aggiustare l'altezza camera.
+>
+> Previsione falsificabile, se un domani si vuole chiudere la questione: su
+> quella catena di stampa, accendere la spunta deve migliorare **solo il
+> verticale** e lasciare l'orizzontale dov'era. Se migliorasse anche
+> l'orizzontale, il modello di "Stampa immagini" scritto qui è sbagliato e va
+> rimisurato. Non toccare il codice sulla base della sola teoria: **qui
+> funziona**, ed è misurato col righello.
+
 L'utente ha misurato uno scarto **diverso fra orizzontale e verticale**, "una
 frazione di mm". Plausibile fisicamente (l'avanzamento della carta è meno
 preciso della corsa della testina), quindi il fattore si può sdoppiare:
@@ -2468,14 +2492,11 @@ verificato in browser col solito Proxy su `window.sketchup`.
 
 ### Da fare, in ordine
 
-1. ~~**Verifica sul campo della taratura**~~ — ✅ **confermata dall'utente il
-   2026-08-06**: le tavole stampate "vengono effettivamente giuste e identiche"
-   fra percorso in scala ed export a serie. Resta aperta la sola sotto-domanda
-   della **taratura sdoppiata X/Y**: per deciderla serve misurare **corto e
-   lungo in entrambe le direzioni** sullo stesso foglio (vedi "Taratura
-   sdoppiata X/Y" — se lo scarto X−Y cresce in proporzione è anisotropia vera,
-   se resta una frazione di mm costante è larghezza del tratto e sdoppiare
-   cementerebbe rumore).
+1. ~~**Verifica sul campo della taratura**~~ — ✅ **chiusa il 2026-08-06.** Le
+   tavole stampate "vengono effettivamente giuste e identiche" fra percorso in
+   scala ed export a serie, e la **taratura sdoppiata X/Y "aiuta e funziona"**
+   (resta opt-in, e con un punto aperto sul *perché*: vedi il riquadro in cima
+   a "Taratura sdoppiata X/Y").
    ⚠️ L'area di disegno è cambiata due volte lo stesso giorno (fascia legata
    all'export, poi disegno bloccato a 2:1), quindi **le scene già in scala
    mostrano il badge ambra** finché non si preme Apply una volta:
