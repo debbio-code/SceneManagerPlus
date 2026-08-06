@@ -54,6 +54,10 @@ module SceneManagerPlus
       # in una String Ruby (A0@300DPI = ~560 MB solo per il foglio).
       PEAK_MB_WARN = 700
 
+      # Margine sotto il quale la cornice rischia di finire nell'area non
+      # stampabile del foglio (inkjet ~3-6 mm, laser ~4-5 mm).
+      MIN_SAFE_MARGIN_MM = 5.0
+
       # =====================================================================
       # Parsing / utility numeriche
       # =====================================================================
@@ -127,6 +131,29 @@ module SceneManagerPlus
         nil
       end
 
+      # Proporzioni dell'AREA DI DISEGNO, anch'esse prese dall'export a serie.
+      #
+      # Scelta dell'utente (2026-08-06): la tavola in scala deve essere la
+      # stessa tavola di sempre, non una tavola di forma diversa. Prima l'area
+      # di disegno era "quello che avanza del foglio", quindi cambiava forma a
+      # ogni formato (su A4 orizzontale 1,58:1 contro il 2:1 dell'export) e con
+      # essa cambiavano l'inquadratura e le bande del viewport.
+      #
+      # Prezzo, accettato consapevolmente: il foglio non viene piu' riempito
+      # tutto. Su A4/A3 orizzontale avanza circa il 20% dell'altezza, che resta
+      # carta bianca attorno al disegno (vedi `blank_*_mm`).
+      DEFAULT_DRAWING_ASPECT = 2.0 # = export 3000x1500
+
+      def drawing_aspect
+        ex = Settings.get('export')
+        w = ex['width'].to_f
+        h = ex['height'].to_f
+        return DEFAULT_DRAWING_ASPECT unless w > 0 && h > 0
+        w / h
+      rescue
+        DEFAULT_DRAWING_ASPECT
+      end
+
       # =====================================================================
       # Geometria: foglio -> area di disegno -> pixel -> camera
       # =====================================================================
@@ -157,49 +184,67 @@ module SceneManagerPlus
         errors << 'Scale denominator must be greater than 0' if denom <= 0
         errors << 'DPI must be greater than 0'               if dpi <= 0
 
-        draw_w_mm = sheet_w_mm - 2 * margin_mm
-        if draw_w_mm <= 0 || dpi <= 0
+        avail_w_mm = sheet_w_mm - 2 * margin_mm
+        avail_h_mm = sheet_h_mm - 2 * margin_mm
+        if avail_w_mm <= 0 || avail_h_mm <= 0 || dpi <= 0
           errors << format('Margins (%.0f mm) leave no drawing area on %s', margin_mm, paper)
         end
         return { errors: errors } unless errors.empty?
 
-        draw_w_px = (draw_w_mm / MM_PER_INCH * dpi).round
-        draw_w_px = 1 if draw_w_px < 1
-
-        # Altezza della fascia cartiglio: NON e' piu' un numero scelto a mano.
+        # Altezza della fascia cartiglio: NON e' un numero scelto a mano.
         # Il cartiglio deve avere SEMPRE le stesse proporzioni (quelle
         # dell'export a serie), altrimenti lo stesso cartiglio esce con font e
         # caselle diverse a seconda del foglio - i font dello script PS sono
         # frazioni dell'altezza, quindi cambiare il rapporto larghezza/altezza
         # ridisegna tutto. Misurato: export 3000x160 = 18,75:1, mentre una
         # tavola A4 orizzontale con fascia da 20 mm dava 2181x156 = 13,98:1.
-        #
-        # L'altezza si ricava dai PIXEL della larghezza, non dai mm nominali:
-        # e' il rapporto in pixel quello che il renderer del cartiglio vede
-        # (stessa logica con cui l'altezza camera esce dai pixel arrotondati).
-        asp = titleblock_aspect
-        band_auto = !asp.nil?
-        band_px =
-          if asp.nil?
-            # Settings non disponibile (collaudo fuori da SketchUp): resta il
-            # valore manuale, cosi' i test non dipendono dall'ambiente.
-            (parse_num(cfg_val(cfg, 'titleblock_mm', 0.0), 0.0) / MM_PER_INCH * dpi).round
-          elsif asp[0] && asp[1] > 0
-            (draw_w_px / asp[1]).round
+        asp        = titleblock_aspect
+        band_auto  = !asp.nil?
+        band_ratio = (!asp.nil? && asp[0] && asp[1] > 0) ? asp[1] : nil
+        # Fascia in mm assoluti: solo cfg vecchie e collaudo fuori da SketchUp
+        # (dove `Settings` non e' raggiungibile), cosi' i test non dipendono
+        # dall'ambiente.
+        manual_band_mm = asp.nil? ? parse_num(cfg_val(cfg, 'titleblock_mm', 0.0), 0.0) : 0.0
+        manual_band_mm = 0.0 if manual_band_mm < 0
+
+        # Larghezza dell'area di stampa (disegno + fascia): la piu' grande che
+        # sta nel foglio MANTENENDO le proporzioni dell'export. Si prende il
+        # minore fra il vincolo di larghezza e quello di altezza; su A4/A3
+        # orizzontale vince l'altezza, ed e' li' che avanza la carta bianca.
+        draw_asp = drawing_aspect
+        draw_asp = DEFAULT_DRAWING_ASPECT unless draw_asp.is_a?(Numeric) && draw_asp > 0
+        fit_w_mm =
+          if band_ratio
+            # fascia proporzionale: h_tot = w/draw_asp + w/band_ratio
+            avail_h_mm / (1.0 / draw_asp + 1.0 / band_ratio)
           else
-            0
+            (avail_h_mm - manual_band_mm) * draw_asp
+          end
+        if fit_w_mm <= 0
+          errors << format('Margins (%.0f mm) and title block band (%.0f mm) leave no drawing area on %s',
+                           margin_mm, manual_band_mm, paper)
+          return { errors: errors }
+        end
+        draw_w_mm = [avail_w_mm, fit_w_mm].min
+
+        draw_w_px = (draw_w_mm / MM_PER_INCH * dpi).round
+        draw_w_px = 1 if draw_w_px < 1
+
+        # Fascia e altezza disegno si ricavano dai PIXEL della larghezza, non
+        # dai mm nominali: e' il rapporto in pixel quello che il renderer del
+        # cartiglio vede (stessa logica con cui l'altezza camera esce dai pixel
+        # arrotondati).
+        band_px =
+          if band_ratio
+            (draw_w_px / band_ratio).round
+          else
+            (manual_band_mm / MM_PER_INCH * dpi).round
           end
         band_px = 0 if band_px < 0
         band_mm = band_px * MM_PER_INCH / dpi
 
-        draw_h_mm = sheet_h_mm - 2 * margin_mm - band_mm
-        if draw_h_mm <= 0
-          errors << format('Margins (%.0f mm) and title block band (%.0f mm) leave no drawing area on %s',
-                           margin_mm, band_mm, paper)
-          return { errors: errors }
-        end
-
-        draw_h_px = (draw_h_mm / MM_PER_INCH * dpi).round
+        draw_h_mm = draw_w_mm / draw_asp
+        draw_h_px = (draw_w_px / draw_asp).round
         draw_h_px = 1 if draw_h_px < 1
 
         # Misure effettive dell'immagine una volta stampata ai DPI dichiarati
@@ -278,6 +323,31 @@ module SceneManagerPlus
           offset_y_px = 0
         end
 
+        # Carta bianca che resta attorno all'area di stampa. Con l'area di
+        # disegno bloccata alle proporzioni dell'export il foglio non si riempie
+        # piu' tutto: e' il prezzo dichiarato della scelta, e va mostrato prima
+        # invece che scoperto a stampa fatta. In `drawing_only` il bianco non e'
+        # nell'immagine (lo mette la stampante coi suoi margini) e qui e' zero.
+        blank_x_mm = [(canvas_w_px - print_w_px), 0].max / 2.0 * MM_PER_INCH / dpi
+        blank_y_mm = [(canvas_h_px - print_h_px), 0].max / 2.0 * MM_PER_INCH / dpi
+        # Cornice a filo del bordo carta: nessuna stampante comune stampa piu'
+        # vicino di ~5 mm, quindi o la taglia o il driver passa da solo a
+        # "adatta alla pagina" - e li' la scala se ne va senza dirlo. E' il caso
+        # in cui si finisce mettendo i margini a 0, che sul foglio intero vuol
+        # dire "area di stampa fino allo spigolo".
+        if full_sheet && [blank_x_mm, blank_y_mm].min < MIN_SAFE_MARGIN_MM
+          notes << format('The frame comes %.1f mm from the paper edge: most printers cannot print ' \
+                          'closer than about %.0f mm and will clip it, or silently switch to ' \
+                          '"fit to page" and lose the scale. Use margins of %.0f mm or more.',
+                          [blank_x_mm, blank_y_mm].min, MIN_SAFE_MARGIN_MM, MIN_SAFE_MARGIN_MM)
+        end
+        if full_sheet && canvas_h_px > 0 && (canvas_h_px - print_h_px) > canvas_h_px * 0.35
+          notes << format('%d%% of the sheet stays empty: %s %s cannot hold a %.2f:1 drawing area. ' \
+                          'A landscape sheet uses the paper much better.',
+                          ((canvas_h_px - print_h_px) * 100.0 / canvas_h_px).round,
+                          paper, landscape ? 'landscape' : 'portrait', draw_asp)
+        end
+
         # Picco di memoria: buffer del foglio + buffer del render, vivi
         # insieme durante il composite.
         peak_mb = ((canvas_w_px.to_f * canvas_h_px + draw_w_px.to_f * draw_h_px) * 4) / (1024.0 * 1024.0)
@@ -302,8 +372,13 @@ module SceneManagerPlus
           draw_h_mm_real:    draw_h_mm_real,
           draw_w_px:         draw_w_px,
           draw_h_px:         draw_h_px,
+          draw_aspect:       draw_asp,
           print_w_px:        print_w_px,
           print_h_px:        print_h_px,
+          print_w_mm:        print_w_px * MM_PER_INCH / dpi,
+          print_h_mm:        print_h_px * MM_PER_INCH / dpi,
+          blank_x_mm:        blank_x_mm,
+          blank_y_mm:        blank_y_mm,
           canvas_w_px:       canvas_w_px,
           canvas_h_px:       canvas_h_px,
           offset_x_px:       offset_x_px,
@@ -334,8 +409,10 @@ module SceneManagerPlus
         lines << format('Sheet:          %s %s  (%.0f x %.0f mm)',
                         geo[:paper], geo[:landscape] ? 'landscape' : 'portrait',
                         geo[:sheet_w_mm], geo[:sheet_h_mm])
-        lines << format('Drawing area:   %.1f x %.1f mm  (margins %.0f mm, title block %.0f mm)',
-                        geo[:draw_w_mm], geo[:draw_h_mm], geo[:margin_mm], geo[:band_mm])
+        lines << format('Drawing area:   %.1f x %.1f mm  (title block band %.1f mm)',
+                        geo[:draw_w_mm], geo[:draw_h_mm], geo[:band_mm])
+        lines << format('White around:   %.1f mm sides, %.1f mm top and bottom',
+                        geo[:blank_x_mm].to_f, geo[:blank_y_mm].to_f)
         lines << format('Scale:          %s', format_scale(geo[:denom]))
         lines << format('Model covered:  %.2f x %.2f m', geo[:cover_w_mm] / 1000.0, geo[:cover_h_mm] / 1000.0)
         lines << ''

@@ -124,6 +124,9 @@
       ['Scale',    nums.scale,    ''],
       ['Sheet',    nums.sheet,    ''],
       ['Drawing',  nums.drawing,  ''],
+      // Il disegno ha le proporzioni dell'export, quindi il foglio non si
+      // riempie tutto: il bianco che avanza si vede qui, non a stampa fatta.
+      ['White',    nums.white,    ''],
       ['Covers',   nums.covers,   ''],
       ['Image',    nums.image,    ''],
       ['Memory',   nums.memory,   nums.heavy ? ' is-heavy' : ''],

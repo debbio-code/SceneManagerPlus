@@ -1706,11 +1706,12 @@ rimandati — la stampa diretta è dove la scala si perde in silenzio (basta un
 In proiezione parallela `camera.height` è **esattamente** l'estensione
 verticale inquadrata (in pollici). Quindi:
 
-1. foglio (es. A3 orizzontale) − margini − fascia cartiglio = area di disegno
-   in mm (es. 400 × 252);
-2. scala 1:50 → l'area deve coprire 20000 × 12600 mm di modello;
-3. si impone `camera.height` = 12600 mm;
-4. si esporta a DPI scelti: 400 mm @300 DPI = 4724 px, 252 mm = 2976 px.
+1. foglio (es. A3 orizzontale) − margini = spazio disponibile, dentro il quale
+   si iscrive l'area di stampa **con le proporzioni dell'export** (vedi
+   "l'area di disegno ha la forma dell'export"): area di disegno 400 × 200 mm;
+2. scala 1:50 → l'area deve coprire 20000 × 10000 mm di modello;
+3. si impone `camera.height` = 10000 mm;
+4. si esporta a DPI scelti: 400 mm @300 DPI = 4724 px, 200 mm = 2362 px.
 
 1 mm su carta = 50 mm nel modello **per costruzione**. Il verso inverso
 ("questa inquadratura che scala è?") arrotonda alla scala normalizzata più
@@ -2323,6 +2324,92 @@ Su A4 orizzontale la fascia passa da 20,0 a 14,7 mm e il rapporto torna 18,80:1.
 - Nella scheda scena il campo è diventato un **valore in sola lettura**
   (`#ps-band-ro`, riempito da `nums.band`).
 
+### L'area di disegno ha la forma dell'export (2026-08-06)
+
+Scelta esplicita dell'utente, e chiude il filone aperto dalla fascia: la tavola
+in scala deve essere **la stessa tavola di sempre**, non una tavola di forma
+diversa che porta lo stesso cartiglio.
+
+Prima l'area di disegno era "quello che avanza del foglio", quindi cambiava
+forma a ogni formato (A4 orizzontale 1,58:1 contro il 2:1 dell'export) e con
+essa cambiavano l'inquadratura e le bande del viewport. Ora `drawing_aspect`
+legge `export.width / export.height` — stesso trucco di `titleblock_aspect`,
+così i due percorsi restano allineati da soli — e `compute` **iscrive** nel
+foglio un'area di stampa di proporzioni fisse:
+
+```
+area di stampa = disegno (2:1) + fascia (18,75:1)  →  1,8072:1  = l'export
+larghezza = min(spazio_disponibile_w, spazio_disponibile_h × 1,8072)
+```
+
+Misurato rendendo i due cartigli e rileggendo i divisori sui PNG: cadono negli
+stessi punti entro **0,1%** (33,7/46,4/56,9/74,7/90,0% contro
+33,8/46,5/56,9/74,7/90,0%). L'unica differenza voluta resta la casella SCALA,
+che porta il divisore box0/box1 a tutta altezza e confina l'OGGETTO nel box 0.
+
+⚠️ **Il foglio non si riempie più tutto, ed è il prezzo dichiarato della
+scelta.** Su A3 orizzontale con margini 10 mm restano 37,8 mm di bianco sopra e
+sotto (il disegno perde ~21% di altezza rispetto a prima). `blank_x_mm` /
+`blank_y_mm` sono nel risultato di `compute` e mostrati nel readout ("White"):
+va **visto prima**, non scoperto a stampa fatta. Sui formati **verticali** la
+resa è pessima (A4 verticale: 65% di foglio vuoto) — c'è una nota automatica
+che lo dice, ma la strada giusta lì è il foglio orizzontale.
+
+Nota collaterale: `apply_bands` deriva il ratio da `draw_w_px/draw_h_px`, quindi
+le bande del viewport ora sono **sempre 2:1** invece di seguire il foglio.
+
+⚠️ **`MIN_SAFE_MARGIN_MM` (5 mm)**: con `full_sheet` e margini a 0 l'area di
+stampa arriva allo spigolo della carta, dove nessuna stampante comune stampa —
+o taglia la cornice, o il driver passa da solo a "adatta alla pagina" e **la
+scala se ne va in silenzio**. Era la configurazione dell'utente (misurata sul
+file: A4 esatto con la cornice a riga 0 / colonna 0), e ora `compute` avvisa.
+Se ricapita una taratura che non torna, controllare **prima** questo.
+
+### Il percorso di stampa dell'utente: "Stampa immagini" di Windows (2026-08-06)
+
+Non è un dettaglio di contorno: è **la** catena su cui la taratura è misurata.
+
+- L'utente stampa dal dialog **"Stampa immagini" di Windows** (Kyocera TASKalfa
+  2552ci, A4). ⚠️ **Quel dialog non ha il 100%**: la spunta "Adatta immagine al
+  frame" non decide *se* scalare ma *come* — spenta = contieni senza tagli,
+  accesa = riempi tagliando. Scala **sempre**, e i DPI scritti nel file li
+  ignora **sempre** (come le voci "Foto a pagina intera", "13×18", …).
+- **Funziona lo stesso, e non per caso**: ora che l'immagine **è** il foglio
+  (A4 esatto), l'adattamento A4→A4 è un rimpicciolimento **costante** — l'area
+  non stampabile della stampante — uguale tavola dopo tavola. E la taratura,
+  che per definizione è "quanto è uscito / quanto doveva uscire", lo assorbe
+  qualunque ne sia la causa. Prima, con l'immagine 1,81:1 adattata su un foglio
+  1,41:1, il fattore dipendeva dalle proporzioni e non era recuperabile.
+- ⚠️ **Regola operativa**: tarare e stampare dalla **stessa strada**. Passare a
+  un programma che il 100% ce l'ha davvero (IrfanView "Original size (from
+  DPI)", Acrobat "Dimensioni effettive", Photoshop/GIMP) cambia il fattore e la
+  scala slitta di quei punti percentuali. Il cartiglio dice "al 100%" ed è
+  l'istruzione giusta in generale, ma la correzione è già dentro il disegno.
+
+### ⚠️ "A video le due tavole sono diverse": è un confronto fra ritagli diversi
+
+Segnalato il 2026-08-06 — e le stampe erano già identiche. Stessa famiglia
+dell'equivoco delle bande grigie, e stessa causa: **a schermo si confrontano
+due immagini che contengono cose diverse.**
+
+| | tavola in scala | export a serie |
+|---|---|---|
+| cosa c'è nel file | il **foglio intero**, bianco compreso | la **sola tavola** |
+| pixel | 2339 × 1654 | 3004 × 1664 |
+| misura fisica dichiarata | 297 × 210 mm @ 200 DPI | nessuna (risulta 96 DPI) |
+| proporzione | 1,41:1 | 1,81:1 |
+
+Nessun visualizzatore rispetta i DPI: adatta alla finestra. Con altezze in pixel
+quasi uguali (1654 contro 1664) le due escono **grandi uguali a schermo**, ma in
+una quell'altezza è tutto l'A4 e nell'altra la sola tavola — quindi il cartiglio
+dell'export *sembra* più alto (9,6% dell'immagine contro 7%). Su carta
+coincidono, perché il foglio è lo stesso.
+
+Regola: **il cartiglio si confronta in millimetri, non in pixel.** Per un
+confronto onesto a video serve un programma che rispetti la dimensione fisica
+(un'anteprima di stampa), oppure si misurano i divisori in percentuale della
+larghezza — vedi il metodo nella sezione sopra.
+
 ### Taratura sdoppiata X/Y (2026-08-06) — opt-in, e per una ragione
 
 L'utente ha misurato uno scarto **diverso fra orizzontale e verticale**, "una
@@ -2381,18 +2468,17 @@ verificato in browser col solito Proxy su `window.sketchup`.
 
 ### Da fare, in ordine
 
-1. **Verifica sul campo della taratura** — l'unica prova che conta: ristampare
-   la stessa tavola col profilo attivo e rimisurare col righello. I 150 mm
-   devono venire 150. Non è stato possibile verificarlo a video perché la
-   correzione vive fuori dal file (nella stampante). Nello stesso giro,
-   misurare **corto e lungo in entrambe le direzioni** per decidere se la
-   spunta "Vertical" serve davvero (vedi "Taratura sdoppiata X/Y").
-   ⚠️ Il profilo salvato sulla postazione dell'utente vale **0,948**, ed è il
-   prodotto del vecchio comportamento che sostituiva il fattore. Non serve
-   azzerarlo: ora che si compone, **un solo giro** (stampa → misura → salva) lo
-   riporta al valore vero (≈0,96).
-   ⚠️ La fascia cartiglio è cambiata (20 → ~14,7 mm su A4), quindi **le scene
-   già in scala mostrano il badge ambra** finché non si preme Apply una volta:
+1. ~~**Verifica sul campo della taratura**~~ — ✅ **confermata dall'utente il
+   2026-08-06**: le tavole stampate "vengono effettivamente giuste e identiche"
+   fra percorso in scala ed export a serie. Resta aperta la sola sotto-domanda
+   della **taratura sdoppiata X/Y**: per deciderla serve misurare **corto e
+   lungo in entrambe le direzioni** sullo stesso foglio (vedi "Taratura
+   sdoppiata X/Y" — se lo scarto X−Y cresce in proporzione è anisotropia vera,
+   se resta una frazione di mm costante è larghezza del tratto e sdoppiare
+   cementerebbe rumore).
+   ⚠️ L'area di disegno è cambiata due volte lo stesso giorno (fascia legata
+   all'export, poi disegno bloccato a 2:1), quindi **le scene già in scala
+   mostrano il badge ambra** finché non si preme Apply una volta:
    l'area di disegno è diversa, quindi l'inquadratura salvata non è più quella
    giusta. È esattamente il caso per cui il badge esiste.
 2. **Fase 2b-2** — finestra propria "Print to scale" (voce di menu già

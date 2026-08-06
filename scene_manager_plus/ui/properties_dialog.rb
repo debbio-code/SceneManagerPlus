@@ -327,6 +327,11 @@ module SceneManagerPlus
                                geo[:landscape] ? 'landscape' : 'portrait',
                                geo[:sheet_w_mm], geo[:sheet_h_mm]),
           'drawing'  => format('%.1f x %.1f mm', geo[:draw_w_mm], geo[:draw_h_mm]),
+          # L'area di disegno ha le proporzioni dell'export, quindi il foglio
+          # non si riempie tutto: quanto bianco resta va detto qui, non
+          # scoperto a stampa fatta.
+          'white'    => format('%.1f mm ai lati, %.1f mm sopra e sotto',
+                               geo[:blank_x_mm].to_f, geo[:blank_y_mm].to_f),
           # Altezza fascia calcolata (non piu' scelta a mano): la mostriamo
           # accanto alla voce, cosi' si vede quanto foglio si porta via.
           'band'     => format('%.1f', geo[:band_mm]),
