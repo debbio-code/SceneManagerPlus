@@ -289,10 +289,20 @@ module SceneManagerPlus
         # Dopo ogni scrittura si ri-pusha lo stato LETTO dal pannello: se la
         # scrittura non ha fatto presa, la UI torna da sola al valore reale
         # invece di mostrare una bugia.
+        #
+        # Poi si COMMITTA lo stile (update_selected_style), come fa
+        # apply_changes per le altre rendering options: senza, la modifica
+        # vive solo nel viewport e sparisce al primo cambio di scena
+        # (misurato 2026-09-20 con confronto di render). Per lo slider il
+        # commit avviene solo sul valore finale (`final` dal JS), non a ogni
+        # tick del drag. La vecchia motivazione "committare lo stile su una
+        # scena MP e' rischioso" era figlia della diagnosi sbagliata sul
+        # null-deref (vedi CLAUDE.md, "Style and Fog").
         dlg.add_action_callback('sm_style_mp_enable') do |_ctx, payload|
           data = parse(payload)
           select_style!(@style_name) if @style_name && !@style_name.empty?
           Core::NativePanel.match_photo_set_enabled(data['which'], data['on'])
+          commit_style!
           push_state
         end
 
@@ -300,6 +310,7 @@ module SceneManagerPlus
           data = parse(payload)
           select_style!(@style_name) if @style_name && !@style_name.empty?
           Core::NativePanel.match_photo_set_opacity(data['which'], data['value'].to_i)
+          commit_style! if data['final']
           push_state
         end
 
@@ -360,6 +371,19 @@ module SceneManagerPlus
         n = (ctx && ctx.style ? ctx.style.name.to_s : nil) rescue nil
         n ||= (m.styles.selected_style ? m.styles.selected_style.name.to_s : nil) rescue nil
         n
+      end
+
+      # Salva nello stile selezionato le modifiche pendenti (= il bottone
+      # "Update" del pannello Styles nativo). No-op se non c'e' niente da
+      # salvare, cosi' non si sporca l'undo per niente.
+      def commit_style!
+        m = Sketchup.active_model
+        return false unless m && m.styles.active_style_changed
+        m.styles.update_selected_style
+        true
+      rescue => e
+        warn "[SM+] commit_style!: #{e.class}: #{e.message}"
+        false
       end
 
       def select_style!(name)

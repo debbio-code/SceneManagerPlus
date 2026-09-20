@@ -23,10 +23,16 @@ module SceneManagerPlus
     # finestre), quindi sono chiamate sincrone dirette alla window proc.
     #
     # TRAPPOLA PRINCIPALE
-    # TBM_SETPOS sposta il cursore ma NON notifica il parent: senza il
-    # WM_HSCROLL che segue, SketchUp non sa che il valore e' cambiato e non
-    # succede assolutamente niente. Stessa cosa per le checkbox: BM_SETCHECK
-    # cambia solo l'aspetto, serve il WM_COMMAND/BN_CLICKED al parent.
+    # TBM_SETPOS sposta il cursore ma NON notifica il parent. E non basta
+    # nemmeno il WM_HSCROLL: il viewport reagisce, ma SketchUp non segna lo
+    # stile come modificato e il valore evapora al cambio di scena. Serve un
+    # click emulato sul cursore (vedi trackbar_write) e poi
+    # `styles.update_selected_style`. Per le checkbox invece BM_SETCHECK +
+    # WM_COMMAND/BN_CLICKED bastano: segnano lo stile dirty (verificato).
+    #
+    # SECONDA TRAPPOLA: le LETTURE sono aggiornate solo se la scheda Edit del
+    # pannello e' stata mostrata dopo l'ultimo cambio. Vedi
+    # refresh_styles_panel!, che lo simula (funziona anche a tray nascosto).
     #
     # IDENTIFICAZIONE DEI CONTROLLI
     # Gli ID numerici non sono documentati da Trimble e possono cambiare tra
@@ -49,6 +55,15 @@ module SceneManagerPlus
       TBM_GETRANGEMIN = 0x0401
       TBM_GETRANGEMAX = 0x0402
       TBM_SETPOS      = 0x0405
+      TBM_GETTHUMBRECT = 0x0419
+
+      WM_LBUTTONDOWN = 0x0201
+      WM_LBUTTONUP   = 0x0202
+      MK_LBUTTON     = 1
+      WM_KEYDOWN     = 0x0100
+      WM_KEYUP       = 0x0101
+      VK_LEFT        = 0x25
+      VK_RIGHT       = 0x27
 
       BM_GETCHECK = 0x00F0
       BM_SETCHECK = 0x00F1
@@ -63,7 +78,16 @@ module SceneManagerPlus
       BST_UNCHECKED = 0
       BST_CHECKED   = 1
 
+      TCM_GETCURSEL = 0x130B
+      TCM_SETCURSEL = 0x130C
+      WM_NOTIFY     = 0x004E
+      # TCN_SELCHANGE = -551, come UINT a 32 bit nel campo `code` dell'NMHDR.
+      TCN_SELCHANGE = 0xFFFFFDD9
+
       STYLES_PANEL = 'Styles'.freeze
+      # Schede del pannello Styles: 0 Select, 1 Edit, 2 Mix. I controlli Match
+      # Photo stanno nella pagina "Modeling" della scheda Edit.
+      STYLES_EDIT_TAB = 1
 
       # Etichette (via primaria) + ID di fallback, mappati su SU 2019 19.3.253.
       MP_CONTROLS = {
@@ -297,8 +321,18 @@ module SceneManagerPlus
         nil
       end
 
-      # TBM_SETPOS da solo sposta il cursore e basta: il WM_HSCROLL che segue
-      # e' cio' che fa reagire SketchUp. Senza, non cambia niente a video.
+      # TBM_SETPOS da solo sposta il cursore e basta. La prima versione lo
+      # faceva seguire da WM_HSCROLL (THUMBPOSITION + ENDSCROLL): il viewport
+      # reagiva, ma SketchUp NON segnava lo stile come modificato, quindi
+      # `update_selected_style` non aveva niente da salvare e il valore
+      # spariva al primo cambio di scena (misurato 2026-09-20, con confronto
+      # di render: 100 -> 30 -> cambio scena -> 100). Stessa sorte con la
+      # tastiera (VK_RIGHT) e con la notifica TRBN_THUMBPOSCHANGING.
+      # L'unica via che SketchUp tratta come "l'utente ha mosso lo slider" e'
+      # il MOUSE: dopo il TBM_SETPOS silenzioso al valore esatto, un click a
+      # spostamento zero sul cursore (WM_LBUTTONDOWN/UP al centro del
+      # TBM_GETTHUMBRECT) fa generare al trackbar le sue notifiche e lo stile
+      # diventa dirty. Il chiamante poi committa con update_selected_style.
       def trackbar_write(h, value)
         return false unless h
         v   = value.to_i
@@ -306,10 +340,26 @@ module SceneManagerPlus
         max = send_msg(h, TBM_GETRANGEMAX)
         v = min if v < min
         v = max if v > max
-        parent = @fn[:parent].call(h)
         send_msg(h, TBM_SETPOS, 1, v)
-        send_msg(parent, WM_HSCROLL, (v << 16) | SB_THUMBPOSITION, h)
-        send_msg(parent, WM_HSCROLL, SB_ENDSCROLL, h)
+        rect = "\0" * 16
+        send_msg(h, TBM_GETTHUMBRECT, 0, Fiddle::Pointer[rect])
+        l, t, r, b = rect.unpack('llll')
+        x = (l + r) / 2
+        y = (t + b) / 2
+        lp = (y << 16) | (x & 0xFFFF)
+        send_msg(h, WM_LBUTTONDOWN, MK_LBUTTON, lp)
+        send_msg(h, WM_LBUTTONUP, 0, lp)
+        # Il click ricalcola la posizione dal pixel del mouse e puo' sbagliare
+        # di 1 (chiesto 35, letto 34). Si corregge con le frecce: la tastiera
+        # non segna lo stile dirty (lo ha gia' fatto il click) ma il valore lo
+        # applica, come verificato col confronto di render.
+        4.times do
+          cur = send_msg(h, TBM_GETPOS)
+          break if cur == v
+          vk = cur < v ? VK_RIGHT : VK_LEFT
+          send_msg(h, WM_KEYDOWN, vk, 0)
+          send_msg(h, WM_KEYUP, vk, 0)
+        end
         true
       rescue => e
         warn "[SM+] trackbar_write(#{value}): #{e.class}: #{e.message}"
@@ -378,14 +428,18 @@ module SceneManagerPlus
       # deve aver gia' selezionato lo stile che vuole leggere/scrivere).
       # nil = controlli non raggiungibili -> la UI si disabilita.
       #
-      # 'panel_visible' = false significa che il pannello Styles c'e' ma sta
-      # su una scheda del tray non mostrata: i controlli rispondono, ma i
-      # valori LETTI possono essere vecchi (il pannello li rinfresca solo
-      # quando viene mostrato -- misurato 2026-09-20: 0/0 da nascosto, 80/100
-      # appena visibile, senza che nulla fosse cambiato). Le SCRITTURE invece
-      # fanno presa comunque. La UI lo dice invece di mostrare numeri falsi.
+      # I controlli rispondono anche a pannello nascosto, ma SketchUp li
+      # rinfresca solo quando la scheda Edit viene MOSTRATA: a tray nascosto o
+      # con la scheda Select davanti i valori letti sono vecchi (misurato
+      # 2026-09-20: 0/0 da nascosto contro 80/100 reali). Per questo prima di
+      # leggere si passa da refresh_styles_panel!, che simula il cambio di
+      # scheda via messaggi: funziona anche a tray nascosto (letto 60 vecchio,
+      # poi 100 vero subito dopo la simulazione). 'refreshed' = false se non e'
+      # stato possibile (tab control non trovato): la UI allora avvisa.
+      # 'panel_visible' resta per diagnostica. Le SCRITTURE fanno presa sempre.
       def match_photo_state
         return nil unless available?
+        refreshed = refresh_styles_panel!
         out = {}
         MP_CONTROLS.each_key do |which|
           pair = mp_pair(which)
@@ -401,7 +455,46 @@ module SceneManagerPlus
           }
         end
         out['panel_visible'] = visible?(panel(STYLES_PANEL))
+        out['refreshed'] = refreshed
         out
+      end
+
+      # Fa rinfrescare a SketchUp i controlli della scheda Edit del pannello
+      # Styles simulando la selezione della scheda: TCM_SETCURSEL sposta la
+      # linguetta, ma e' il WM_NOTIFY/TCN_SELCHANGE al parent che fa reagire
+      # il dialog (stessa famiglia di trappole di TBM_SETPOS/WM_HSCROLL).
+      # Poi la scheda viene rimessa com'era. A pannello visibile e gia' sulla
+      # scheda Edit non si fa niente: SketchUp la tiene aggiornata da solo, e
+      # il balletto Select->Edit sarebbe solo uno sfarfallio.
+      #
+      # NON gestito: la sotto-pagina della scheda Edit (Edge/Face/.../Modeling).
+      # I suoi bottoni non rispondono ne' a BM_CLICK ne' a WM_COMMAND, quindi
+      # si legge la pagina che l'utente ha lasciato attiva; se non e' Modeling
+      # i controlli Match Photo potrebbero non essere rinfrescati. Nei test la
+      # pagina attiva era sempre Modeling.
+      def refresh_styles_panel!
+        return false unless available?
+        pnl = panel(STYLES_PANEL)
+        return false unless pnl
+        tab = controls(STYLES_PANEL).find { |c| c[:klass] == 'SysTabControl32' }
+        return false unless tab
+        parent = @fn[:parent].call(tab[:hwnd])
+        cur = send_msg(tab[:hwnd], TCM_GETCURSEL)
+        return true if visible?(pnl) && cur == STYLES_EDIT_TAB
+        select_tab(tab, parent, cur == STYLES_EDIT_TAB ? 0 : STYLES_EDIT_TAB)
+        select_tab(tab, parent, STYLES_EDIT_TAB) if cur == STYLES_EDIT_TAB
+        select_tab(tab, parent, cur) if cur != STYLES_EDIT_TAB && cur >= 0
+        true
+      rescue => e
+        warn "[SM+] refresh_styles_panel!: #{e.class}: #{e.message}"
+        false
+      end
+
+      def select_tab(tab, parent, index)
+        send_msg(tab[:hwnd], TCM_SETCURSEL, index, 0)
+        # NMHDR x64: HWND hwndFrom (8), UINT_PTR idFrom (8), UINT code (4) + pad.
+        hdr = [tab[:hwnd].to_i, tab[:id], TCN_SELCHANGE, 0].pack('QQLL')
+        send_msg(parent, WM_NOTIFY, tab[:id], Fiddle::Pointer[hdr])
       end
 
       def match_photo_set_enabled(which, on)

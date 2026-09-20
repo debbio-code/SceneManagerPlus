@@ -1234,9 +1234,23 @@ Dettagli non ovvi:
   la scena da cui il dialog è stato aperto (fallback: la scena attiva).
   `match_photo_state` viene letto solo se serve — sulle scene normali non
   cammina nemmeno l'albero delle finestre.
-- **Niente `update_selected_style`**: misurato che una modifica regge al cambio
-  scena anche senza commit, e su scene MP committare lo stile è la mossa
-  storicamente rischiosa.
+- ⚠️ **`update_selected_style` SERVE, e serve che lo stile sia dirty**
+  (2026-09-20, sostituisce la nota precedente "regge al cambio scena anche
+  senza commit", che era **falsa**: misurato con confronto di render, 100 →
+  30 → cambio scena → 100). Due condizioni, entrambe necessarie:
+  1. la scrittura deve far segnare a SketchUp lo stile come modificato
+     (`active_style_changed == true`). Per la **checkbox** basta il
+     `BM_SETCHECK + WM_COMMAND` di sempre. Per lo **slider** no: né
+     `WM_HSCROLL`, né la tastiera (`VK_RIGHT`), né `TRBN_THUMBPOSCHANGING`
+     lo segnano — cambiano il viewport e basta. L'unica via è un **click
+     emulato col mouse sul cursore** (`TBM_SETPOS` silenzioso al valore
+     esatto, poi `WM_LBUTTONDOWN/UP` al centro del `TBM_GETTHUMBRECT`);
+  2. poi `styles.update_selected_style` (= il bottone Update del pannello
+     nativo). `StyleDialog.commit_style!` lo fa dopo ogni checkbox e sul
+     valore **finale** dello slider (`final: true` dal JS), non a ogni tick.
+  Con entrambe la modifica regge al cambio scena (render identico prima e
+  dopo). Il salvataggio su `.skp` e rilettura **non è stato verificato**, ma
+  ora passa dalla stessa strada del pannello nativo (stile dirty + Update).
 - Drag throttlato a 60ms: ogni invio è un messaggio Win32 + un redraw.
 - Dopo ogni scrittura si ri-pusha lo stato **letto dal pannello**: se la
   scrittura non fa presa la UI torna al valore reale invece di mentire.
@@ -1249,13 +1263,25 @@ modifiche pendenti**. `StyleDialog.select_style!` ora esce subito se il target
 Photo (che passa da `select_style!` prima di scrivere) azzerava la scrittura
 precedente. Vale per qualunque codice futuro che tocchi `selected_style=`.
 
+### Rinfresco delle letture (2026-09-20)
+
+SketchUp aggiorna i controlli della scheda Edit **solo quando la scheda viene
+mostrata**: a tray nascosto, o con la scheda Select davanti, si leggono valori
+vecchi (0/0 su un pannello mai mostrato). `refresh_styles_panel!` simula la
+selezione della scheda (`TCM_SETCURSEL` + `WM_NOTIFY/TCN_SELCHANGE` al parent,
+stessa famiglia della trappola `TBM_SETPOS`) e la rimette com'era: **funziona
+anche a tray nascosto** (letto 60 vecchio, poi 100 vero). Non si fa niente se
+il pannello è visibile e già su Edit. Non gestita la **sotto-pagina**
+(Edge/Face/…/Modeling): i suoi bottoni ignorano `BM_CLICK` e `WM_COMMAND`;
+nei test era sempre Modeling. `match_photo_state` espone `refreshed`, e la UI
+avvisa se è `false`.
+
 ### Non verificato
 
-Se il valore finisca nel `.skp` salvato. `model.modified?` non diventa mai
-`true`, nemmeno dopo `update_selected_style`, quindi i proxy non bastano:
-serve salvare e rileggere da disco. Nota però che stiamo pilotando **lo stesso
-identico controllo** dello slider nativo, quindi il comportamento è per
-costruzione quello di SketchUp.
+Se il valore finisca nel `.skp` salvato e riletto. `model.modified?` non
+diventa mai `true`, quindi i proxy non bastano: serve salvare e rileggere da
+disco. Ora però la scrittura passa dalla stessa strada del pannello nativo
+(stile dirty + Update), e regge al cambio scena.
 
 ## Stili nativi: creazione + rinomina (2026-08-01 — sostituisce il pool)
 

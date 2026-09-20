@@ -301,10 +301,11 @@ window.SMS = (function () {
     var avail = !!mp;
     var note = $('mp-unavailable');
     if (note) note.classList.toggle('hidden', avail);
-    // Pannello presente ma su una scheda nascosta del tray: i valori letti
-    // possono essere vecchi (vedi Core::NativePanel.match_photo_state).
+    // Ruby prima di leggere fa rinfrescare il pannello (vedi
+    // Core::NativePanel.refresh_styles_panel!); se non ci e' riuscito i
+    // valori letti possono essere vecchi e lo diciamo.
     var stale = $('mp-stale');
-    if (stale) stale.classList.toggle('hidden', !(avail && mp.panel_visible === false));
+    if (stale) stale.classList.toggle('hidden', !(avail && mp.refreshed === false));
     ['foreground', 'background'].forEach(function (which) {
       var cb = $('ctrl-mp-' + which + '-on');
       var sl = $('slider-mp-' + which);
@@ -366,9 +367,11 @@ window.SMS = (function () {
           if (nu) nu.value = sl.value;
           scheduleMpApply(which, sl.value);
         });
+        // `final: true` = valore definitivo: Ruby committa lo stile solo qui,
+        // non a ogni tick del drag (che passa da scheduleMpApply).
         sl.addEventListener('change', function () {
           cancelMpApply();
-          call('sm_style_mp_opacity', { which: which, value: parseInt(sl.value, 10) });
+          call('sm_style_mp_opacity', { which: which, value: parseInt(sl.value, 10), final: true });
         });
       }
 
@@ -381,7 +384,7 @@ window.SMS = (function () {
           nu.value = String(n);
           if (sl) sl.value = String(n);
           cancelMpApply();
-          call('sm_style_mp_opacity', { which: which, value: n });
+          call('sm_style_mp_opacity', { which: which, value: n, final: true });
         };
         nu.addEventListener('change', commitNum);
         nu.addEventListener('blur', commitNum);
