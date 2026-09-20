@@ -105,6 +105,7 @@ module SceneManagerPlus
             ctrlid:  Fiddle::Function.new(u['GetDlgCtrlID'], [Fiddle::TYPE_VOIDP], Fiddle::TYPE_INT),
             iswin:   Fiddle::Function.new(u['IsWindow'], [Fiddle::TYPE_VOIDP], Fiddle::TYPE_INT),
             isenab:  Fiddle::Function.new(u['IsWindowEnabled'], [Fiddle::TYPE_VOIDP], Fiddle::TYPE_INT),
+            isvis:   Fiddle::Function.new(u['IsWindowVisible'], [Fiddle::TYPE_VOIDP], Fiddle::TYPE_INT),
             wtext:   Fiddle::Function.new(u['GetWindowTextA'], [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT], Fiddle::TYPE_INT),
             wclass:  Fiddle::Function.new(u['GetClassNameA'], [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT], Fiddle::TYPE_INT),
             procid:  Fiddle::Function.new(u['GetWindowThreadProcessId'], [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP], Fiddle::TYPE_LONG),
@@ -182,16 +183,53 @@ module SceneManagerPlus
         true
       end
 
-      # Finestra top-level del NOSTRO processo con quel titolo. I pannelli
-      # ancorati in un tray restano finestre top-level separate, e si trovano
-      # anche quando il tray mostra un'altra scheda: in quel caso i controlli
-      # sono invisibili ma rispondono ai messaggi lo stesso (verificato).
+      # Finestra del pannello con quel titolo, nel NOSTRO processo. Dove sta
+      # dipende da come l'utente ha sistemato i tray (misurato 2026-09-20):
+      #   - pannello flottante           -> finestra top-level col titolo;
+      #   - tray flottante ("Tray N")    -> MiniFrame top-level, e il pannello
+      #     e' un dialog #32770 figlio, col titolo come testo;
+      #   - tray agganciato alla finestra principale ("Default Tray") -> il
+      #     dialog #32770 e' un discendente della finestra principale di SU.
+      # La prima versione cercava solo il primo caso: su una postazione con il
+      # tray agganciato il pannello Styles "non esisteva" e la sezione Match
+      # Photo restava disabilitata. Ora si cercano tutti e tre.
+      #
+      # I controlli rispondono ai messaggi anche quando il pannello e' su una
+      # scheda non visibile, MA in quello stato i loro valori possono essere
+      # VECCHI: il pannello li aggiorna solo quando viene mostrato (letto
+      # 0/0 su un pannello nascosto che, reso visibile, diceva 80/100). Vedi
+      # visible? e la nota in match_photo_state.
       def panel(title)
         return nil unless available?
         mypid = Process.pid
-        children(@fn[:desktop].call).find do |h|
-          window_text(h) == title && pid_of(h) == mypid
+        tops = children(@fn[:desktop].call).select { |h| pid_of(h) == mypid }
+        hit = tops.find { |h| window_text(h) == title }
+        return hit if hit
+        tops.each do |t|
+          r = find_dialog_titled(t, title, 0)
+          return r if r
         end
+        nil
+      end
+
+      # Dialog (#32770) con quel testo tra i discendenti di h. Il pannello
+      # agganciato sta a profondita' 3 (frame -> ControlBar -> #32770 ->
+      # #32770 "Styles"); il limite 6 lascia margine senza camminare tutto
+      # l'albero della finestra principale.
+      def find_dialog_titled(h, title, depth)
+        return nil if depth > 6
+        children(h).each do |c|
+          return c if window_class(c) == '#32770' && window_text(c) == title
+          r = find_dialog_titled(c, title, depth + 1)
+          return r if r
+        end
+        nil
+      end
+
+      def visible?(h)
+        !h.nil? && !h.null? && @fn[:isvis].call(h) != 0
+      rescue
+        false
       end
 
       # Come panel(), ma se non la trova chiede a SketchUp di aprire
@@ -339,6 +377,13 @@ module SceneManagerPlus
       # (il pannello nativo mostra sempre selected_style, quindi il chiamante
       # deve aver gia' selezionato lo stile che vuole leggere/scrivere).
       # nil = controlli non raggiungibili -> la UI si disabilita.
+      #
+      # 'panel_visible' = false significa che il pannello Styles c'e' ma sta
+      # su una scheda del tray non mostrata: i controlli rispondono, ma i
+      # valori LETTI possono essere vecchi (il pannello li rinfresca solo
+      # quando viene mostrato -- misurato 2026-09-20: 0/0 da nascosto, 80/100
+      # appena visibile, senza che nulla fosse cambiato). Le SCRITTURE invece
+      # fanno presa comunque. La UI lo dice invece di mostrare numeri falsi.
       def match_photo_state
         return nil unless available?
         out = {}
@@ -355,6 +400,7 @@ module SceneManagerPlus
             'enabled' => tb[:enabled]
           }
         end
+        out['panel_visible'] = visible?(panel(STYLES_PANEL))
         out
       end
 

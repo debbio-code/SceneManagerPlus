@@ -301,6 +301,10 @@ window.SMS = (function () {
     var avail = !!mp;
     var note = $('mp-unavailable');
     if (note) note.classList.toggle('hidden', avail);
+    // Pannello presente ma su una scheda nascosta del tray: i valori letti
+    // possono essere vecchi (vedi Core::NativePanel.match_photo_state).
+    var stale = $('mp-stale');
+    if (stale) stale.classList.toggle('hidden', !(avail && mp.panel_visible === false));
     ['foreground', 'background'].forEach(function (which) {
       var cb = $('ctrl-mp-' + which + '-on');
       var sl = $('slider-mp-' + which);

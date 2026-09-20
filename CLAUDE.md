@@ -799,6 +799,20 @@ API che prima richiedevano `tools/dump-*.rb` + copia/incolla dalla Ruby Console.
 >   di cercare un bug che non c'è.
 > - Il `CLAUDE.md` di 3dg_photomatch contiene la stessa storia da
 >   prospettiva opposta — leggi entrambi se devi toccare il dominio MP.
+>
+> **Stato al 2026-09-20.** La versione di riferimento di 3dg_photomatch è la
+> **1.2.8 di Guido Bazzotti** (solver PnP in Ruby, niente più Python). Misurato
+> su 19.0.685: `add_matchphoto_page` crea una scena che ricorda **solo**
+> camera e layer visibili, `page.style == nil`; il `send_action('pageUpdate:')`
+> che la 1.2.8 chiama subito dopo **ritorna `true` anche su Windows** (non
+> tutti i selector Mac falliscono qui) ma un Update salva solo le proprietà
+> già spuntate, quindi non cambia nulla. La copia patchata nel repo sibling
+> (1.2.8 + un blocco in `apply_camera_to_sketchup`, proposta a Bazzotti in
+> `PATCH-scena-completa-per-Bazzotti.md`) accende gli 8 flag e fa
+> `page.update(PAGE_USE_ALL)` con la scena attiva: la stessa sequenza di
+> `capture_style!`. Con quella versione le scene MP nascono complete e
+> `capture_style!` / `style_missing?` diventano no-op su di esse — restano
+> necessari per i file creati prima.
 
 
 **Sintomo**: creare una nuova scena dal plugin partendo da una scena Match
@@ -1185,12 +1199,26 @@ Mappa su 19.3.253: `Button 2881 "Foreground Photo"` + trackbar `2884`,
 
 ### Note operative
 
-- Il pannello resta una finestra **top-level** anche se ancorato in un tray, e
-  si trova per titolo (`"Styles"`) filtrando per PID. I controlli rispondono ai
-  messaggi **anche quando sono invisibili** (tray su un'altra scheda) —
-  verificato: non serve che l'utente abbia il pannello aperto sulla scheda
-  giusta. Se la finestra non esiste proprio, `panel!` la apre con
+- **Dove sta il pannello dipende da come l'utente ha sistemato i tray**
+  (misurato 2026-09-20 su 19.0.685, dopo che su questa postazione la sezione
+  Match Photo risultava "not reachable"): pannello flottante → finestra
+  top-level col titolo; tray flottante ("Tray N") → MiniFrame top-level con
+  dentro un dialog `#32770` il cui testo è il titolo; tray **agganciato** alla
+  finestra principale ("Default Tray") → il dialog `#32770` è un discendente
+  della finestra principale di SU. La prima versione cercava solo il primo
+  caso. `NativePanel.panel` ora prova tutti e tre (`find_dialog_titled`,
+  profondità ≤ 6). Se non esiste proprio, `panel!` lo apre con
   `UI.show_inspector`.
+- I controlli rispondono ai messaggi **anche quando il pannello è su una
+  scheda nascosta** del tray, e le **scritture** fanno presa comunque. ⚠️ Ma
+  le **letture** in quello stato possono essere **vecchie**: il pannello
+  rinfresca i suoi controlli solo quando viene mostrato (letto 0/0 da
+  nascosto, 80/100 appena visibile, senza che nulla fosse cambiato).
+  `match_photo_state` espone `panel_visible`, e la sezione Match Photo del
+  Mini Style Manager mostra una nota "valori forse non aggiornati" quando è
+  `false`. Da studiare se serve: forzare il refresh da codice
+  (`show_inspector` ritorna `true` ma non rende visibile la scheda nello
+  stesso tick).
 - Gli hwnd sono cachati e validati con `IsWindow`, così la chiusura del
   pannello non lascia handle morti.
 - Tutto degrada: se `fiddle` manca o il controllo non si trova, i chiamanti
