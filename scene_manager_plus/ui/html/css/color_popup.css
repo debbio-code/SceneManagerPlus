@@ -74,6 +74,7 @@
 }
 .cp-hex {
   flex: 1;
+  min-width: 0; /* con None + OK sulla stessa riga l'input deve potersi stringere */
   background: #1a1a1a;
   color: #ddd;
   border: 1px solid #1e1e1e;
@@ -110,6 +111,19 @@
   flex-shrink: 0;
 }
 .cp-none-btn:hover { background: #4a4a4a; border-color: #4ea1ff; }
+
+.cp-ok-btn {
+  background: #2f6fb3;
+  color: #fff;
+  border: 1px solid #1e1e1e;
+  border-radius: 2px;
+  padding: 3px 10px;
+  font-size: 11px;
+  font-weight: bold;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.cp-ok-btn:hover { background: #3d82cc; border-color: #4ea1ff; }
 
 .cp-recent {
   display: flex;

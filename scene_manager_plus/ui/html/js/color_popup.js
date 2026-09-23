@@ -5,7 +5,7 @@
 //
 // HTML markup atteso nel DOM (id fissi):
 //   #sm-color-popup, #cp-sb, #cp-sb-marker, #cp-hue, #cp-hue-marker,
-//   #cp-hex, #cp-preview, #cp-presets
+//   #cp-hex, #cp-preview, #cp-presets (+ opzionali #cp-none, #cp-ok, #cp-recent)
 // CSS in css/color_popup.css.
 //
 // API:
@@ -164,6 +164,12 @@ window.SMColorPopup = (function () {
       if (popup.classList.contains('hidden')) return;
       if (e.key === 'Escape') hide();
     });
+
+    // OK = conferma esplicita. Chiudere il popup è già il commit (in
+    // commitOnEnd hide() applica pendingHex; in live mode il colore è già
+    // applicato), quindi OK fa la stessa cosa di Enter nel campo hex.
+    var okBtnEl = $('cp-ok');
+    if (okBtnEl) okBtnEl.addEventListener('click', function () { hide(); });
 
     if (noneBtnEl) {
       noneBtnEl.addEventListener('click', function () {

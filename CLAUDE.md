@@ -70,7 +70,7 @@ Feature aggiunte post-Fase 4:
 | Persistenza settings | `Sketchup.write_default` per-leaf (vedi `SU2019-LESSONS.md`) |
 | Lingua UI | Inglese (UX standard) |
 | Preview scene | NON implementata nel pannello, per richiesta utente (no rallentamento refresh). Esiste come thumbnails inline opzionali. |
-| Export-include per-scena | Checkbox in row (tra ⟳ e idx). Flag persistente come page attribute `SceneManagerPlus/export_included` (default true). Filtra solo scope `'all'` in `Exporter.collect_targets`; scope `selected` e `folders` lo ignorano per design. Click su checkbox di scena in multi-selezione → bulk: target = `!tutte_incluse` (mixed→tutte; all-on→all-off). Singola `start_operation` per il bulk = un Ctrl+Z. **Numerazione `{nnn}` / "Tavola nr." mantiene i buchi** (es. escludendo la 3 i numeri sono 1,2,4,5): l'index resta la posizione 1-based in `Naming.ordered_scene_pairs` (ordine logico globale), non un counter sui soli target — la posizione tavola resta stabile a prescindere dall'inclusione. |
+| Export-include per-scena | Checkbox in row (tra ⟳ e idx). Flag persistente come page attribute `SceneManagerPlus/export_included` (default true). Filtra solo scope `'all'` in `Exporter.collect_targets`; scope `selected` e `folders` lo ignorano per design. Click su checkbox di scena in multi-selezione → bulk: target = `!tutte_incluse` (mixed→tutte; all-on→all-off). Singola `start_operation` per il bulk = un Ctrl+Z. **Numerazione `{nnn}` / "Tavola nr." mantiene i buchi** (es. escludendo la 3 i numeri sono 1,2,4,5): l'index resta la posizione 1-based in `Naming.ordered_scene_pairs` (ordine logico globale), non un counter sui soli target — la posizione tavola resta stabile a prescindere dall'inclusione. Il numero mostrato in lista (`render()` in `app.js`) segue la stessa regola: le scene di una cartella **chiusa** vengono contate lo stesso (`counter += item.scenes.length`), altrimenti chiudere una cartella rinumerava tutte le scene successive (bug corretto 2026-09-23). Cartelle aperte/chiuse non influiscono né sul numero né sull'export. |
 
 ## Struttura repo
 
@@ -2718,7 +2718,10 @@ vivono nello stesso modulo `SMColorPopup`. CEF di SU 2019 supporta
 localStorage (verificato).
 
 **Enter/Esc nel campo hex** chiudono il popup (= commit in `commitOnEnd`,
-no-op altrimenti perché il colore è già stato applicato live).
+no-op altrimenti perché il colore è già stato applicato live). Il bottone
+**OK** (`#cp-ok`, richiesta utente 2026-09-23) fa esattamente lo stesso:
+chiama `hide()`, che è già il commit. Il markup `#cp-ok` va aggiunto in ogni
+dialog che include il popup (oggi `index.html`, `style.html`, `properties.html`).
 
 **Style dialog**: `style_dialog.js` aveva una IIFE privata `ColorPopup`
 identica; ora aliassata a `window.SMColorPopup` (il legacy `_ColorPopupLegacy`

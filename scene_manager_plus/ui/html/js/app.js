@@ -692,6 +692,10 @@ window.SM = (function () {
       listEl.appendChild(empty);
       return;
     }
+    // Il numero è la posizione nell'ordine logico globale, la stessa di
+    // {nnn} / "Tavola nr." in Naming.ordered_scene_pairs: le scene di una
+    // cartella CHIUSA contano lo stesso, altrimenti chiudere una cartella
+    // rinumererebbe tutte le scene che la seguono.
     var counter = 0;
     state.tree.forEach(function (item) {
       if (item.kind === 'folder') {
@@ -701,6 +705,8 @@ window.SM = (function () {
             counter++;
             listEl.appendChild(makeSceneRow(s, counter, item.id));
           });
+        } else {
+          counter += item.scenes.length;
         }
       } else if (item.kind === 'scene') {
         counter++;
