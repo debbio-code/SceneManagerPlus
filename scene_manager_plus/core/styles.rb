@@ -128,44 +128,13 @@ module SceneManagerPlus
         m = model
         return nil unless m
 
-        # Snapshot rendering options prima di toccare nulla.
-        ro = m.rendering_options
-        snapshot = {}
-        ro.each_pair { |k, v| snapshot[k] = v }
-
         m.start_operation('SM+ New style from viewport', true)
         begin
-          loaded = import_template(m)
+          loaded = build_style_from_viewport!(m, name)
           unless loaded
             m.abort_operation
             return nil
           end
-          loaded.name = unique_style_name(
-            name.to_s.strip.empty? ? DEFAULT_NEW_NAME : name
-          )
-
-          # Switching active style: scrive le RO del template su
-          # model.rendering_options (droppando dirty edit precedenti).
-          m.styles.selected_style = loaded
-
-          # Restore snapshot → ora model.rendering_options ricalca il viewport
-          # come prima dello switch.
-          snapshot.each do |k, v|
-            begin
-              ro[k] = v
-            rescue
-              # alcune chiavi possono essere read-only o non riassegnabili al
-              # valore corrente — ignoriamo, best-effort.
-            end
-          end
-
-          # Fix orizzonte nero del template (vedi normalize_horizon!).
-          normalize_horizon!(ro)
-
-          # Committa: il nuovo stile ora contiene esattamente la vista
-          # catturata. È persistente sullo stile, non più "dirty".
-          m.styles.update_selected_style
-
           m.commit_operation
           loaded
         rescue => e
@@ -174,6 +143,46 @@ module SceneManagerPlus
           warn e.backtrace.first(3).join("\n")
           nil
         end
+      end
+
+      # Il corpo di create_style_from_viewport SENZA operazione: per i chiamanti
+      # che vogliono lo stile nuovo dentro la propria (un solo Ctrl+Z per tutto,
+      # es. Core::SurveyCheck). Lascia il nuovo stile come selected_style.
+      # Ritorna lo Style o nil.
+      def build_style_from_viewport!(m, name)
+        # Snapshot rendering options prima di toccare nulla.
+        ro = m.rendering_options
+        snapshot = {}
+        ro.each_pair { |k, v| snapshot[k] = v }
+
+        loaded = import_template(m)
+        return nil unless loaded
+        loaded.name = unique_style_name(
+          name.to_s.strip.empty? ? DEFAULT_NEW_NAME : name
+        )
+
+        # Switching active style: scrive le RO del template su
+        # model.rendering_options (droppando dirty edit precedenti).
+        m.styles.selected_style = loaded
+
+        # Restore snapshot → ora model.rendering_options ricalca il viewport
+        # come prima dello switch.
+        snapshot.each do |k, v|
+          begin
+            ro[k] = v
+          rescue
+            # alcune chiavi possono essere read-only o non riassegnabili al
+            # valore corrente — ignoriamo, best-effort.
+          end
+        end
+
+        # Fix orizzonte nero del template (vedi normalize_horizon!).
+        normalize_horizon!(ro)
+
+        # Committa: il nuovo stile ora contiene esattamente la vista
+        # catturata. È persistente sullo stile, non più "dirty".
+        m.styles.update_selected_style
+        loaded
       end
 
       # Come create_style_from_viewport ma applica uno snapshot di

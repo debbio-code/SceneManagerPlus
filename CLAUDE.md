@@ -18,7 +18,12 @@ Feature aggiunte fuori-fase (Fase 3):
 - **Per-scene previews** (`Core::Previews`): PNG persistenti per-modello
   (`~/.scene_manager_plus/previews/<model_guid>/`). Generazione asincrona con
   progress bar.
-- **Inline thumbnails** nella lista (toggle Thumbs).
+- **Inline thumbnails** nella lista — dal 2026-09-24 non più un bottone della
+  toolbar ma una checkbox in Settings → Interface (flag per-macchina
+  `write_default('SceneManagerPlus','show_thumbs')`, arriva al JS come
+  `state.show_thumbs`). Il posto in toolbar l'ha preso il Controllo rilievo.
+- **Controllo rilievo** (📍 in toolbar, `Core::SurveyCheck`): vedi sezione
+  "Controllo rilievo (3D Disto)".
 - **Polling 250ms** per syncare in plugin la scena attivata da tab nativi SU.
 
 Feature aggiunte post-Fase 4:
@@ -95,6 +100,7 @@ scene_manager_plus/
 │   ├── scene_model.rb              # wrapper su Sketchup.active_model.pages
 │   ├── settings.rb                 # config persistente con defaults
 │   ├── styles.rb                   # pool slot + nickname per-modello
+│   ├── survey_check.rb             # Controllo rilievo: import DWG 3D Disto pulito
 │   ├── text_render.rb              # PowerShell+System.Drawing per filename label
 │   ├── titleblock.rb               # PowerShell+System.Drawing per cartiglio
 │   └── variants.rb                 # varianti colore per-scena (override materiali)
@@ -3520,6 +3526,60 @@ compariva mai). Regola: campo per-scena → `scene_hash` + `list_ordered`
 (trappola due-payload esistente); campo top-level → `ui_payload` + la
 field-list in `Dialog.push_state`.
 
+## Controllo rilievo (3D Disto) — `Core::SurveyCheck` (2026-09-24)
+
+Controllo di fine esecutivo: il DWG del Leica 3D Disto viene reimportato,
+ripulito, e messo su layer + scena dedicati; l'utente lo sovrappone a mano al
+modello per vedere se qualche punto è stato spostato. Bottone 📍
+(`btn-survey-check` → `sm_survey_check` → `SurveyCheck.run`). Riferimento del
+risultato atteso: `Esempi per controllo rilievo/Modello Pulito.skp` (non
+versionato) e la scena "Controllo Rilievo" del file Cenciarini.
+
+Sequenza: picker DWG (cartella ricordata in `survey_check_dir`) → import →
+pulizia → componente all'origine, dipinto `[Color A04]` (255,50,50), sul layer
+**`LEICA_Controllo Rilievo`** (visibile solo nelle scene `Controllo Rilievo( N)?`,
+`page_behavior` hidden-on-new-pages) → stile **`Controllo Rilievo`** (dalla vista
++ `EdgeColorMode = 0` By material; riusato se esiste) → scena **`Controllo
+Rilievo`** in coda. Se esiste già un controllo: Replace (via il vecchio rilievo,
+la scena resta com'è) / Add ("Controllo Rilievo 2") / Cancel.
+
+Fatti misurati (SU 19.0.685) che spiegano il codice:
+
+- **Unità**: `model.import(dwg, units: 'cm')` è l'UNICA forma che funziona.
+  `'centimeters'`, `'centimeter'` sono ignorate **in silenzio** e l'importer usa
+  l'ultima unità scelta a mano nel dialog (qui: metri → rilievo 100× più
+  grande); un numero (3) dà un'altra scala ancora.
+- L'import è **sincrono**, non attacca nulla al cursore, crea UN componente al
+  primo livello con trasformazione identità (`preserve_origin: true`).
+- ⚠️ **L'import DWG non si annulla con Ctrl+Z e chiude l'operazione aperta dal
+  chiamante.** Quindi si importa PRIMA, fuori operazione, e tutta la pulizia
+  vive in una `start_operation` separata (un Ctrl+Z la annulla, l'import resta).
+  Per questo `build_style_from_viewport!` (Styles) e `build_page_from_view!`
+  (SceneModel) sono estratti SENZA operazione dai rispettivi `create_*`/
+  `add_from_view`: servono dentro l'operazione unica.
+- Struttura del DWG 3D Disto: spigoli su `LEICA_3DDISTO_3D` /
+  `_SURFACESCAN`, punti di costruzione su `_POINT_ENTITY`, e le **X** sono
+  componenti `point` / `single_point` di 2 spigoli (su `_POINT_ENTITY` /
+  `_POINT`). La pulizia (`clean!`): immagini e layer `*PHOTO*` → via; blocchi
+  di soli spigoli (≤ 8) → via (marker); altri blocchi → esplosi; poi tutto
+  Layer0 e materiali nil. Materiali/layer/definizioni **nuovi** creati
+  dall'import vengono rimossi; quelli preesistenti (vecchi import del rilievo
+  nel file) non si toccano.
+- La scena nasce senza aspect ratio sulla camera (azzerato prima di
+  `pages.add`, via `PrintScale.force_clear_bands`): partendo da una scena
+  Match Photo o in scala verrebbe salvato e la scena scambiata per MP.
+- `run(path:, mode:, show_report: false)` bypassa i dialog modali: serve al
+  collaudo via MCP, dove un messagebox bloccherebbe l'`eval_ruby`.
+
+Collaudato via MCP su Modello Pulito: risultato identico al file di
+riferimento (344 punti, 335 spigoli, bounds al centesimo), Replace e Add
+compresi. Non ancora provato su un DWG con foto (quello d'esempio non ne ha).
+
+**Trucco MCP con due istanze SketchUp aperte**: il server ascolta sempre sulla
+9876, quindi risponde una sola istanza. Per passare all'altra: fermarlo dalla
+prima via eval (`UI.start_timer(1.0,false){ ::SU_MCP.instance_variable_get(:@server).stop }`),
+poi Extensions → MCP Server → Start Server nella seconda.
+
 ## Generazione manuale utente (docx/pdf) — toolchain su questa postazione
 
 Manuale utente in `Scene Manager+ - Manuale utente.docx` + `.pdf` (root repo),
@@ -3553,7 +3613,7 @@ Trappole ambiente (dev machine):
   vale per i riepiloghi, non per i commenti nel codice o per questo file.
 - L'utente preferisce sviluppo **per fasi con verifica intermedia**, non big-bang.
 - Niente preview scene nel pannello (esplicita richiesta per performance —
-  ma esistono thumbnails inline come opt-in).
+  ma esistono thumbnails inline come opt-in, da Settings → Interface).
 - **Non committare** se non esplicitamente richiesto.
 - Quando affronti bug/feature toccando un'area "delicata" (composite watermark,
   CEF/HtmlDialog, predicate API, settings UI), apri prima `docs/SU2019-LESSONS.md`

@@ -1041,52 +1041,7 @@ module SceneManagerPlus
 
         m.start_operation('SM+ New scene', true)
         begin
-          page = m.pages.add(name.to_s)
-
-          # Forza tutti i flag use_* a true sulla nuova page. pages.add
-          # rispetta i "Default Scene Properties" globali di SU: se l'utente
-          # li ha personalizzati (es. Style and Fog disattivato), la nuova
-          # scena nascerebbe con quei flag OFF e SU non salverebbe quelle
-          # parti di state. Forziamo tutto ON così la scena cattura
-          # l'intero state del viewport.
-          FLAG_KEYS.each do |k|
-            setter = "#{k}="
-            page.send(setter, true) if page.respond_to?(setter)
-          rescue => e
-            warn "[SM+] add_from_view: setting #{k}=true failed: #{e.message}"
-          end
-
-          # Ripristina il model state pre-add (caso AVT: LM observer ha
-          # spento dei layer globalmente) e applica lo stesso state alla
-          # nuova page tramite override. In caso di mismatch tra page
-          # override stale e layer.visible? — drift causato da toggle
-          # manuale dal Layer Manager — il viewport mostra layer.visible?,
-          # quindi quella è la fonte di verità.
-          pre_visible.each do |layer, was_visible|
-            begin
-              layer.visible = was_visible if layer.visible? != was_visible
-            rescue
-              # ignore, best-effort
-            end
-            begin
-              page.set_visibility(layer, was_visible)
-            rescue => e
-              warn "[SM+] add_from_view: set_visibility failed for #{layer.name rescue '?'}: #{e.message}"
-            end
-          end
-
-          # Se pages.add non ha salvato alcuno stile (succede quando i "Default
-          # Scene Properties" di SU hanno "Style and Fog" spento), i due flag
-          # appena accesi puntano al nulla: alla prossima attivazione SU mette
-          # model.styles.selected_style a nil e da li' qualunque operazione puo'
-          # splattare. capture_style! salva nella pagina lo stile del viewport.
-          # Richiede che la pagina sia quella attiva -- pages.add la seleziona,
-          # ma se cosi' non fosse meglio saltare che attivarla in quello stato.
-          if style_missing?(page) && m.pages.selected_page == page
-            capture_style!(page)
-          end
-
-          page_id(page) # ensure uid attribute exists
+          page = build_page_from_view!(m, name, pre_visible)
           m.commit_operation
           finish.call(page)
         rescue => e
@@ -1094,6 +1049,65 @@ module SceneManagerPlus
           warn "[SM+] add_from_view: #{e.class}: #{e.message}"
           finish.call(nil)
         end
+      end
+
+      # Il cuore sincrono di add_from_view: pages.add + tutti i flag accesi +
+      # visibilita' layer allineata al viewport + cattura stile se manca.
+      # NON apre operazioni (va chiamato dentro quella del chiamante) e non
+      # conosce ne' il ramo Match Photo ne' il dialog dello stile dirty: chi lo
+      # usa direttamente (es. Core::SurveyCheck) ha deciso da se' come
+      # comportarsi in quei casi.
+      #
+      # pre_visible: { layer => visible? } fotografato PRIMA di pages.add (vedi
+      # il commento in add_from_view sul perche' dopo sarebbe troppo tardi).
+      def build_page_from_view!(m, name, pre_visible)
+        page = m.pages.add(name.to_s)
+
+        # Forza tutti i flag use_* a true sulla nuova page. pages.add
+        # rispetta i "Default Scene Properties" globali di SU: se l'utente
+        # li ha personalizzati (es. Style and Fog disattivato), la nuova
+        # scena nascerebbe con quei flag OFF e SU non salverebbe quelle
+        # parti di state. Forziamo tutto ON così la scena cattura
+        # l'intero state del viewport.
+        FLAG_KEYS.each do |k|
+          setter = "#{k}="
+          page.send(setter, true) if page.respond_to?(setter)
+        rescue => e
+          warn "[SM+] add_from_view: setting #{k}=true failed: #{e.message}"
+        end
+
+        # Ripristina il model state pre-add (caso AVT: LM observer ha
+        # spento dei layer globalmente) e applica lo stesso state alla
+        # nuova page tramite override. In caso di mismatch tra page
+        # override stale e layer.visible? — drift causato da toggle
+        # manuale dal Layer Manager — il viewport mostra layer.visible?,
+        # quindi quella è la fonte di verità.
+        pre_visible.each do |layer, was_visible|
+          begin
+            layer.visible = was_visible if layer.visible? != was_visible
+          rescue
+            # ignore, best-effort
+          end
+          begin
+            page.set_visibility(layer, was_visible)
+          rescue => e
+            warn "[SM+] add_from_view: set_visibility failed for #{layer.name rescue '?'}: #{e.message}"
+          end
+        end
+
+        # Se pages.add non ha salvato alcuno stile (succede quando i "Default
+        # Scene Properties" di SU hanno "Style and Fog" spento), i due flag
+        # appena accesi puntano al nulla: alla prossima attivazione SU mette
+        # model.styles.selected_style a nil e da li' qualunque operazione puo'
+        # splattare. capture_style! salva nella pagina lo stile del viewport.
+        # Richiede che la pagina sia quella attiva -- pages.add la seleziona,
+        # ma se cosi' non fosse meglio saltare che attivarla in quello stato.
+        if style_missing?(page) && m.pages.selected_page == page
+          capture_style!(page)
+        end
+
+        page_id(page) # ensure uid attribute exists
+        page
       end
 
       # Ramo Match Photo di add_from_view: invoca "View > Animation > Add

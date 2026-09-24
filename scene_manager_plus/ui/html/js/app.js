@@ -11,7 +11,7 @@ window.SM = (function () {
   var lastClickTs = 0;
   var DBLCLICK_MS = 400;
   var pendingSelectTimer = null; // debounce attivazione scena (vedi scheduleSelectPage)
-  var thumbsOn = false; // session-only toggle
+  var thumbsOn = false; // da state.show_thumbs (Settings → Interface)
   var listEl, statusEl;
   var sceneByIdMap = {};
   var styleByNameMap = {};
@@ -86,6 +86,10 @@ window.SM = (function () {
     styleByNameMap = {};
     state.styles.forEach(function (s) { styleByNameMap[s.name] = s; });
     if (state.active_id) activeId = state.active_id;
+    // Thumbnails inline: la preferenza vive nei Settings (flag per-macchina),
+    // non piu' in un bottone della toolbar.
+    var wantThumbs = !!state.show_thumbs;
+    if (wantThumbs !== thumbsOn) { thumbsOn = wantThumbs; updateThumbsButton(); }
     // preview_ts viene usato come cache-buster nell'<img src>. Bumparlo a
     // ogni setState (cosa che facevamo prima) forzava CEF a ri-richiedere
     // ogni PNG dopo OGNI operazione (rename, reorder, update_from_view,
@@ -171,9 +175,6 @@ window.SM = (function () {
   }
 
   function updateThumbsButton() {
-    var btn = $('btn-thumbs');
-    if (!btn) return;
-    if (thumbsOn) btn.classList.add('active'); else btn.classList.remove('active');
     if (listEl) {
       if (thumbsOn) listEl.classList.add('with-thumbs');
       else          listEl.classList.remove('with-thumbs');
@@ -953,11 +954,11 @@ window.SM = (function () {
         render();
       });
     }
-    var btnThumbs = $('btn-thumbs');
-    if (btnThumbs) {
-      btnThumbs.addEventListener('click', function () {
-        thumbsOn = !thumbsOn;
-        updateThumbsButton();
+    var btnSurvey = $('btn-survey-check');
+    if (btnSurvey) {
+      btnSurvey.addEventListener('click', function () {
+        setStatus('Survey check: choose the DWG…');
+        SMBridge.surveyCheck();
       });
     }
     var btnPreviews = $('btn-previews');

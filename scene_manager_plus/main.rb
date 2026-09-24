@@ -16,6 +16,7 @@ module SceneManagerPlus
   require File.join(PLUGIN_DIR, 'core', 'exporter')
   require File.join(PLUGIN_DIR, 'core', 'print_scale')
   require File.join(PLUGIN_DIR, 'core', 'clipboard')
+require File.join(PLUGIN_DIR, 'core', 'survey_check')
   require File.join(PLUGIN_DIR, 'ui', 'dialog')
   require File.join(PLUGIN_DIR, 'ui', 'settings_dialog')
   require File.join(PLUGIN_DIR, 'ui', 'properties_dialog')

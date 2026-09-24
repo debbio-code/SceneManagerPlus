@@ -426,6 +426,17 @@ module SceneManagerPlus
           ClipboardDialog.show(selected_ids: Array(data['selected']))
         end
 
+        # Controllo rilievo: DWG del 3D Disto → rilievo pulito, rosso,
+        # all'origine, su layer e scena dedicati (vedi Core::SurveyCheck).
+        dlg.add_action_callback('sm_survey_check') do |_ctx|
+          page = Core::SurveyCheck.run
+          push_state
+          if page
+            uid = Core::SceneModel.page_id(page)
+            dlg.execute_script("window.SM && SM.selectId && SM.selectId(#{uid.to_s.inspect});")
+          end
+        end
+
         dlg.add_action_callback('sm_export_cancel_running') do |_ctx|
           Core::Exporter.request_cancel!
         end
@@ -540,7 +551,9 @@ module SceneManagerPlus
           previews:  Core::Previews.url_map,
           model_info: payload[:model_info],
           native_order_divergent: payload[:native_order_divergent],
-          variant_clipboard: payload[:variant_clipboard]
+          variant_clipboard: payload[:variant_clipboard],
+          # Flag per-macchina, si cambia da Settings → Interface.
+          show_thumbs: Sketchup.read_default('SceneManagerPlus', 'show_thumbs', false) ? true : false
         }
         puts "[SM+] push_state: model=#{state[:model_info][:title].inspect} " \
              "native_pages=#{state[:model_info][:pages_count]} " \

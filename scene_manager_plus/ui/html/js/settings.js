@@ -197,6 +197,8 @@
     // Debug-on-startup: flag globale (non nel gruppo 'ui'), arriva al
     // top-level dello state.
     setIfNotFocused($('#ui-debug-on-open'), 'checked', !!state.debug_mode_on_open);
+    // Idem per le thumbnails inline della lista (flag per-macchina).
+    setIfNotFocused($('#ui-show-thumbs'), 'checked', !!state.show_thumbs);
     requestPreview();
   };
 
@@ -537,6 +539,13 @@
       debugChk.addEventListener('change', () => {
         if (debugChk.checked) setDebugStatus('Starting…');
         call('sm_settings_debug_on_open', { enabled: debugChk.checked });
+      });
+    }
+
+    const thumbsChk = document.getElementById('ui-show-thumbs');
+    if (thumbsChk) {
+      thumbsChk.addEventListener('change', () => {
+        call('sm_settings_show_thumbs', { enabled: thumbsChk.checked });
       });
     }
 

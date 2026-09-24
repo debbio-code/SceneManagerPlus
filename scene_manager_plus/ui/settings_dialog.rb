@@ -221,6 +221,15 @@ module SceneManagerPlus
             )
           end
         end
+
+        # Thumbnails inline nella lista scene. Prima era un bottone della
+        # toolbar (stato solo di sessione); spostato qui (2026-09-24) per far
+        # posto al "Controllo rilievo". Flag per-macchina come il debug.
+        dlg.add_action_callback('sm_settings_show_thumbs') do |_ctx, payload|
+          data = parse(payload)
+          Sketchup.write_default('SceneManagerPlus', 'show_thumbs', data['enabled'] ? true : false)
+          Dialog.push_state if defined?(Dialog)
+        end
       end
 
       # Apre la Ruby Console e avvia il server MCP (se il plugin `su_mcp` è
@@ -276,7 +285,8 @@ module SceneManagerPlus
           default_logo_name:  (default_logo ? File.basename(default_logo) : nil),
           # Flag globale per-macchina (write_default), non per-file: vedi
           # callback sm_settings_debug_on_open.
-          debug_mode_on_open: Sketchup.read_default('SceneManagerPlus', 'debug_mode_on_open', false)
+          debug_mode_on_open: Sketchup.read_default('SceneManagerPlus', 'debug_mode_on_open', false),
+          show_thumbs:        Sketchup.read_default('SceneManagerPlus', 'show_thumbs', false) ? true : false
         }
         js = "window.SMS && SMS.setState(#{state.to_json});"
         @dialog.execute_script(js)
