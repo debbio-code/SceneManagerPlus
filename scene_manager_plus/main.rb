@@ -66,6 +66,22 @@ require File.join(PLUGIN_DIR, 'core', 'survey_check')
     jump_cmd.menu_text = 'Jump to active scene'
     ::UI.menu('Plugins').add_item(jump_cmd)
 
+    # "Next/Previous scene": le frecce della lista funzionano solo col focus
+    # dentro la finestra (limite CEF, vedi sopra). Questi due comandi fanno
+    # lo stesso passo nell'ORDINE DEL PLUGIN (non quello dei tab nativi) e,
+    # avendo una voce di menu, si possono legare a un tasto da Window →
+    # Preferences → Shortcuts: a quel punto funzionano col focus ovunque.
+    [['Next scene', 'PageDown', 'Activate the next scene in Scene Manager+ order'],
+     ['Previous scene', 'PageUp', 'Activate the previous scene in Scene Manager+ order']].each do |label, key, tip|
+      nav_cmd = ::UI::Command.new("#{PLUGIN_NAME}: #{label}") do
+        SceneManagerPlus::UI::Dialog.navigate(key)
+      end
+      nav_cmd.tooltip = tip
+      nav_cmd.status_bar_text = tip
+      nav_cmd.menu_text = label
+      ::UI.menu('Plugins').add_item(nav_cmd)
+    end
+
     # "Save all properties on active scene": setta a true tutti gli 8 flag
     # use_* della scena attualmente attiva (= equivalente a ticcare tutti i
     # checkbox "Properties to save" nel pannello Window → Scenes nativo).

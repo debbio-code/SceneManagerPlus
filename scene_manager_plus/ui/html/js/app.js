@@ -743,35 +743,41 @@ window.SM = (function () {
     return arr;
   }
 
-  // Salto di "una schermata" (PagSu/PagGiu'): ritorna l'id della scena che
-  // dista circa un'altezza di lista da quella corrente, muovendo di almeno
-  // una riga e senza uscire dagli estremi.
-  //
-  // Misurato sulla GEOMETRIA vera delle row, non su un conteggio di scene:
-  // l'altezza di riga cambia con le thumbnails on/off, e le intestazioni di
-  // cartella occupano spazio pur non essendo scene. Contare gli elementi
-  // darebbe un salto sbagliato in entrambi i casi.
-  function pageJumpTarget(order, idx, dir) {
-    function topOf(id) {
-      var el = listEl && listEl.querySelector('.scene-row[data-id="' + id + '"]');
-      return el ? el.offsetTop : null;
+  // Un passo di navigazione (PageUp/Down = una scena, Home/End = prima/
+  // ultima) lungo l'ordine visibile: sposta la selezione e attiva la scena.
+  // Ritorna true se ha fatto qualcosa. Usata dal keydown della finestra E dai
+  // comandi "Next/Previous scene" di Ruby (SM.navigate), che funzionano anche
+  // col focus nel viewport: un solo punto che decide dove si va.
+  function navigateKey(k) {
+    var isJump = (k === 'Home' || k === 'End');
+    var order = visibleSceneOrder();
+    if (order.length === 0) return false;
+    var target = null;
+    if (isJump) {
+      target = (k === 'Home') ? order[0] : order[order.length - 1];
+    } else {
+      // Se la scena selezionata non è nell'ordine visibile (es. dentro
+      // cartella chiusa), idx = -1 e cadiamo nel caso "fuori lista" per
+      // convenzione: giù parte dalla prima, su dall'ultima.
+      var dir = (k === 'PageDown') ? +1 : -1;
+      var curId = selection[0];
+      var idx = curId ? order.indexOf(curId) : -1;
+      if (idx < 0) {
+        target = dir > 0 ? order[0] : order[order.length - 1];
+      } else {
+        target = order[Math.max(0, Math.min(order.length - 1, idx + dir))];
+      }
     }
-    var best = Math.max(0, Math.min(order.length - 1, idx + dir));
-    var h = listEl ? listEl.clientHeight : 0;
-    var curTop = topOf(order[idx]);
-    // Lista non ancora misurabile (finestra minimizzata, row fuori dal DOM):
-    // ripiego su un salto a righe fisse invece di non fare nulla.
-    if (!h || curTop === null) {
-      return order[Math.max(0, Math.min(order.length - 1, idx + dir * 10))];
+    if (!target) return false;
+    selection = [target];
+    anchorId = target;
+    selectPageLocal(target);
+    render();
+    var row = listEl && listEl.querySelector('.scene-row[data-id="' + target + '"]');
+    if (row && row.scrollIntoView) {
+      try { row.scrollIntoView({ block: 'nearest' }); } catch (er) {}
     }
-    var wantTop = curTop + dir * h;
-    for (var i = best; i >= 0 && i < order.length; i += dir) {
-      var t = topOf(order[i]);
-      if (t === null) continue;
-      if (dir > 0 ? t <= wantTop : t >= wantTop) best = i;
-      else break;
-    }
-    return order[best];
+    return true;
   }
 
   function onRowClick(e, id) {
@@ -1165,65 +1171,38 @@ window.SM = (function () {
     // cosi' funziona ovunque il focus stia dentro la finestra; si esce dal
     // gestore se l'utente sta digitando in un campo testuale.
     //
-    //   Freccia Su/Giu'      -> sposta la SELEZIONE di una riga
-    //   PageUp/PageDown      -> una schermata su/giu' (vedi pageJumpTarget)
-    //   Home/End             -> prima / ultima scena visibile
-    //   Ctrl + Freccia Su/Giu' -> SPOSTA la scena (riordino)
+    //   PagSu/PagGiu'          -> scena precedente / successiva
+    //   Home/End               -> prima / ultima scena visibile
+    //   Ctrl + PagSu/PagGiu'   -> SPOSTA la scena (riordino)
     //
-    // Il riordino sta sotto Ctrl di proposito: con le frecce nude era troppo
-    // facile riordinare credendo di navigare. Funziona sia per scene a root
-    // sia dentro la stessa cartella; selezione multipla supportata solo se
-    // contigua sotto lo stesso parent.
+    // Le frecce NON fanno niente (2026-09-25, scelta dell'utente): in
+    // SketchUp servono ai blocchi d'asse degli strumenti, e PagSu/PagGiu'
+    // sono i tasti "scena" storici, legabili anche ai comandi Plugins →
+    // Next/Previous scene per averli col focus nel viewport. Il riordino sta
+    // sotto Ctrl di proposito: senza modificatore era troppo facile riordinare
+    // credendo di navigare. Funziona sia per scene a root sia dentro la stessa
+    // cartella; selezione multipla supportata solo se contigua sotto lo stesso
+    // parent.
     document.addEventListener('keydown', function (e) {
       var k = e.key;
-      var isArrow = (k === 'ArrowUp' || k === 'ArrowDown');
       var isPage  = (k === 'PageUp' || k === 'PageDown');
       var isJump  = (k === 'Home' || k === 'End');
-      if (!isArrow && !isPage && !isJump) return;
+      if (!isPage && !isJump) return;
       var t = document.activeElement;
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
 
-      // Ctrl (o Cmd) + freccia = riordino, cioe' il vecchio comportamento
-      // delle frecce nude.
-      if (isArrow && (e.ctrlKey || e.metaKey)) {
+      if (isPage && (e.ctrlKey || e.metaKey)) {
         if (!selection.length) return;
         e.preventDefault();
         e.stopPropagation();
-        moveSelection(k === 'ArrowDown' ? +1 : -1);
+        moveSelection(k === 'PageDown' ? +1 : -1);
         return;
       }
-      if ((isPage || isJump) && (e.ctrlKey || e.metaKey)) return;
+      if (isJump && (e.ctrlKey || e.metaKey)) return;
 
-      var order = visibleSceneOrder();
-      if (order.length === 0) return;
-      var target = null;
-      if (isJump) {
-        target = (k === 'Home') ? order[0] : order[order.length - 1];
-      } else {
-        // Se la scena selezionata non è nell'ordine visibile (es. dentro
-        // cartella chiusa), idx = -1 e cadiamo nel caso "fuori lista" per
-        // convenzione: giù parte dalla prima, su dall'ultima.
-        var dir = (k === 'ArrowDown' || k === 'PageDown') ? +1 : -1;
-        var curId = selection[0];
-        var idx = curId ? order.indexOf(curId) : -1;
-        if (idx < 0) {
-          target = dir > 0 ? order[0] : order[order.length - 1];
-        } else if (isPage) {
-          target = pageJumpTarget(order, idx, dir);
-        } else {
-          target = order[Math.max(0, Math.min(order.length - 1, idx + dir))];
-        }
-      }
-      if (!target) return;
-      e.preventDefault();
-      e.stopPropagation();
-      selection = [target];
-      anchorId = target;
-      selectPageLocal(target);
-      render();
-      var row = listEl && listEl.querySelector('.scene-row[data-id="' + target + '"]');
-      if (row && row.scrollIntoView) {
-        try { row.scrollIntoView({ block: 'nearest' }); } catch (er) {}
+      if (navigateKey(k)) {
+        e.preventDefault();
+        e.stopPropagation();
       }
     });
 
@@ -1362,6 +1341,7 @@ window.SM = (function () {
     setPreviewProgress: setPreviewProgress,
     setExportProgress: setExportProgress,
     setActiveFromNative: setActiveFromNative,
-    selectId: selectId
+    selectId: selectId,
+    navigate: navigateKey
   };
 })();

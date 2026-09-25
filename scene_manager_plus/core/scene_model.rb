@@ -101,7 +101,10 @@ module SceneManagerPlus
       # mancante. Tutto in 1 start_operation. Da chiamare prima di
       # scritture su disco che usano uid come chiave di riferimento
       # (logical_order, folder.scene_ids).
-      def persist_uids_for_ids(uids)
+      # own_op: false quando il chiamante ha gia' un'operazione aperta (es.
+      # add_from_view → place_after): una start_operation annidata chiude in
+      # silenzio quella esterna e spezza il Ctrl+Z unico.
+      def persist_uids_for_ids(uids, own_op: true)
         return if uids.nil?
         m = model
         return unless m
@@ -120,6 +123,10 @@ module SceneManagerPlus
           to_persist << [p, current] if wanted_set[current]
         end
         return if to_persist.empty?
+        unless own_op
+          to_persist.each { |p, uid| p.set_attribute(PLUGIN_ID, 'uid', uid) }
+          return
+        end
         began = false
         begin
           m.start_operation('SM+ Persist page uids', true, false, true)
@@ -697,6 +704,36 @@ module SceneManagerPlus
         Core::Folders.save(folders_list)
       end
 
+      # Mette la scena `new_uid` subito sotto `anchor_uid` nell'ordine logico:
+      # nella stessa cartella se l'ancora sta in una cartella, a root
+      # altrimenti. Usato da add_from_view ("nuova scena sotto la corrente").
+      # Senza ancora, o se l'ancora non si trova, non tocca niente e la scena
+      # resta in coda come prima.
+      def place_after(new_uid, anchor_uid)
+        return false if new_uid.nil? || anchor_uid.nil? || new_uid == anchor_uid
+        folder_id = Core::Folders.scene_parent_map[anchor_uid]
+        siblings = if folder_id
+                     f = Core::Folders.all.find { |x| x['id'] == folder_id }
+                     f ? Array(f['scene_ids']) : []
+                   else
+                     logical_order
+                   end
+        siblings -= [new_uid]
+        idx = siblings.index(anchor_uid)
+        return false unless idx
+        # Gira dentro l'operazione di add_from_view: gli uid da scrivere li
+        # scriviamo qui, cosi' write_order_raw / Folders.write_raw non trovano
+        # piu' niente da persistere e non aprono un'operazione annidata.
+        unless Buffer.deferred?
+          persist_uids_for_ids(pages.map { |p| page_id(p) }, own_op: false)
+        end
+        reorder([new_uid], siblings[idx + 1], folder_id)
+        true
+      rescue => e
+        warn "[SM+] place_after: #{e.class}: #{e.message}"
+        false
+      end
+
       # Aggiorna proprietà page (rename / desc / flags).
       # In Buffer.deferred?: stage e basta. Altrimenti scrive su SU.
       def update_page(id, attrs)
@@ -1033,15 +1070,20 @@ module SceneManagerPlus
         pre_visible = {}
         m.layers.each { |l| pre_visible[l] = l.visible? }
 
+        # La scena nuova va messa subito sotto quella da cui nasce (nella
+        # stessa cartella, se sta in una cartella), non in coda alla lista.
+        anchor_uid = active ? page_id(active) : nil
+
         # Ramo Match Photo: delega al comando nativo, che e' l'unico a portarsi
         # dietro la foto. E' asincrono, quindi da qui in poi il lavoro prosegue
         # nel timer di add_from_view_native e questo metodo ritorna nil: la
         # Page arriva al chiamante solo attraverso il blocco on_created.
-        return add_from_view_native(name, pre_visible, &on_created) if is_mp
+        return add_from_view_native(name, pre_visible, anchor_uid, &on_created) if is_mp
 
         m.start_operation('SM+ New scene', true)
         begin
           page = build_page_from_view!(m, name, pre_visible)
+          place_after(page_id(page), anchor_uid)
           m.commit_operation
           finish.call(page)
         rescue => e
@@ -1118,7 +1160,7 @@ module SceneManagerPlus
       # prima (verificato: send_action ha ritornato true con pages ancora a 31,
       # la pagina e' comparsa solo al giro successivo del message pump). Per
       # questo il post-processing vive in un timer e non qui in linea.
-      def add_from_view_native(name, pre_visible, &on_created)
+      def add_from_view_native(name, pre_visible, anchor_uid = nil, &on_created)
         m = model
         unless m
           on_created.call(nil) if on_created
@@ -1139,14 +1181,14 @@ module SceneManagerPlus
           return nil
         end
 
-        await_native_page(before_ids, name, pre_visible, 0, &on_created)
+        await_native_page(before_ids, name, pre_visible, 0, anchor_uid, &on_created)
         nil
       end
 
       # Polling della pagina creata dal comando nativo. Catena di timer da
       # NATIVE_ADD_POLL_S, come Previews.generate: un tick per tentativo, cosi'
       # CEF resta reattivo. Nessuna scrittura finche' la pagina non c'e'.
-      def await_native_page(before_ids, name, pre_visible, attempt, &on_created)
+      def await_native_page(before_ids, name, pre_visible, attempt, anchor_uid = nil, &on_created)
         m = model
         fresh = m && m.pages.find { |p| !before_ids.include?(p.object_id) }
 
@@ -1158,7 +1200,7 @@ module SceneManagerPlus
           end
           ::UI.start_timer(NATIVE_ADD_POLL_S, false) do
             begin
-              await_native_page(before_ids, name, pre_visible, attempt + 1, &on_created)
+              await_native_page(before_ids, name, pre_visible, attempt + 1, anchor_uid, &on_created)
             rescue => e
               warn "[SM+] await_native_page: #{e.class}: #{e.message}"
             end
@@ -1166,14 +1208,14 @@ module SceneManagerPlus
           return
         end
 
-        finalize_native_page(fresh, name, pre_visible)
+        finalize_native_page(fresh, name, pre_visible, anchor_uid)
         on_created.call(fresh) if on_created
       end
 
       # Allinea la pagina nata dal comando nativo a quello che il plugin si
       # aspetta da una scena creata da lui: nome, flag use_*, override di
       # visibilita' layer, uid.
-      def finalize_native_page(page, name, pre_visible)
+      def finalize_native_page(page, name, pre_visible, anchor_uid = nil)
         m = model
         return unless m
 
@@ -1250,6 +1292,7 @@ module SceneManagerPlus
           end
 
           page_id(page) # ensure uid attribute exists
+          place_after(page_id(page), anchor_uid)
           m.commit_operation
           puts "[SM+] add_from_view_native: created '#{page.name}' (Match Photo preserved)"
         rescue => e
@@ -1330,12 +1373,20 @@ module SceneManagerPlus
       def select_page(id)
         p = find_by_id(id)
         return false unless p
-        # Per scene Match Photo: skip se già attiva — riassegnare la stessa
-        # pagina MP con state dirty può scatenare un restore-cycle → BugSplat.
-        # Per scene normali: permettiamo il re-assign anche se già attiva,
-        # così l'utente può cliccare la scena corrente per ripristinare
-        # camera/stile/layers allo stato salvato (= "ri-applica scena").
-        return true if model.pages.selected_page == p && matchphoto?(p)
+        # Il re-assign anche se gia' attiva e' voluto: cliccare la scena
+        # corrente ripristina camera/stile/layer salvati (= "ri-applica
+        # scena", come il comando "Jump to active scene").
+        #
+        # Fino al 2026-09-25 qui c'era uno skip per le scene Match Photo
+        # ("restore-cycle su MP dirty → BugSplat"): e' la stessa diagnosi
+        # smontata tre volte nel CLAUDE.md (sezione Match Photo). Il crash
+        # vero era il null-deref di page.style == nil con use_style acceso,
+        # che non dipende da MP. Resta bloccato solo QUEL caso, e solo sulla
+        # ri-attivazione: se la scena e' gia' attiva lo stato e' quello del
+        # viewport, e riassegnarla metterebbe selected_style a nil.
+        if model.pages.selected_page == p && p.use_style? && style_missing?(p)
+          return true
+        end
         model.pages.selected_page = p
         # Variante colore: ripristina l'eventuale variante precedente e
         # applica quella della scena attivata (no-op se nessuna delle due).

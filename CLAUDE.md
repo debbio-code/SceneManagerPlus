@@ -59,7 +59,9 @@ Feature aggiunte post-Fase 4:
 |---|---|
 | UI | `UI::HtmlDialog` (CEF, SU 2017+) — niente WebDialog legacy |
 | Stile finestra principale | `STYLE_UTILITY` (palette sempre sopra viewport, posizione+dimensione persistite affidabilmente — `STYLE_DIALOG` non salva la posizione su SU 2019). Auto-riaprire all'avvio se era aperta (flag `main_dialog_open` via `write_default`, ri-show con timer 0.5s dopo `file_loaded`). Settings/Properties restano `STYLE_DIALOG` (sono modali-ish). |
-| Navigazione tastiera | **Rimappata 2026-08-05** (prima le frecce nude riordinavano, ed era troppo facile riordinare credendo di navigare): `ArrowUp`/`ArrowDown` = una riga; `PageUp`/`PageDown` = **una schermata**; `Home`/`End` = prima/ultima; **`Ctrl`(o Cmd)`+ArrowUp/Down` sposta** la scena (singola o multi-contigua sotto lo stesso parent). Tutto lungo l'ordine logico visibile (cartelle chiuse saltate), un solo handler in `app.js`. Il salto di pagina (`pageJumpTarget`) è calcolato sulla **geometria vera** delle row (`offsetTop` vs `clientHeight` della lista), non contando N scene: l'altezza di riga cambia con le thumbnails e le intestazioni di cartella occupano spazio pur non essendo scene — contare gli elementi sbaglierebbe in entrambi i casi. Non c'è modo pulito in SU 2019 di hijacker i tasti globalmente, quindi fuori dal plugin resta il comportamento nativo. |
+| Navigazione tastiera | **Rimappata di nuovo 2026-09-25** (v1.1.0): `PageUp`/`PageDown` = scena precedente/successiva (i tasti "scena" storici di SU); `Home`/`End` = prima/ultima; **`Ctrl`(o Cmd)`+PageUp/PageDown` sposta** la scena (singola o multi-contigua sotto lo stesso parent). **Le frecce non fanno niente, di proposito**: in SU servono ai blocchi d'asse di Sposta/Linea, e l'utente le vuole libere. Tutto lungo l'ordine logico visibile (cartelle chiuse saltate), logica unica in `navigateKey` (`app.js`), esposta come `SM.navigate(key)`. **Fuori dalla finestra**: i keydown del CEF arrivano solo col focus nel dialog, quindi ci sono i comandi Plugins → **Next scene / Previous scene** (`Dialog.navigate`: con la finestra aperta delega a `SM.navigate`, chiusa ripiega su `flat_scene_order` dalla scena attiva) da legare a PagSu/PagGiù in Preferences → Shortcuts. Il vecchio salto "di una schermata" (`pageJumpTarget`) è stato rimosso. |
+| Posizione scena nuova | `add_from_view` mette la scena nuova **subito sotto quella attiva** (nella stessa cartella se l'attiva è in una cartella) via `SceneModel.place_after`, dentro la stessa operazione (1 Ctrl+Z), anche nel ramo Match Photo (`finalize_native_page`). Per non aprire operazioni annidate (una `start_operation` dentro un'altra chiude la prima in silenzio) gli uid vengono persistiti prima con `persist_uids_for_ids(..., own_op: false)`. |
+| Ri-clic sulla scena attiva | `select_page` riassegna `selected_page` anche se la scena è già attiva = "ri-applica scena" (come "Jump to active scene"), **Match Photo comprese** dal 2026-09-25: lo skip per le MP era un residuo della diagnosi smontata (vedi sezione Match Photo). Resta bloccato solo il caso `use_style? && page.style == nil`. |
 | Nuova scena da vista | Icona toolbar (📷+) → `SceneModel.add_from_view`. Replica gli override di visibilità layer della pagina attiva (vedi sotto, "Add visible tag"). **Forza tutti gli 8 `FLAG_KEYS` (use_camera, use_style, ecc.) a `true`** dopo `pages.add`, così la nuova scena cattura sempre lo state completo del viewport — `pages.add` da solo rispetta i "Default Scene Properties" globali di SU e se l'utente li ha personalizzati (es. Style/Fog OFF) la scena nascerebbe monca. Scelta UX: il flusso del plugin è "scatta foto completa", non "rispetta i miei default SU". **Se la scena attiva è Match Photo** prende invece il ramo `add_from_view_native` (comando nativo via `send_action`, asincrono → post-processing in timer): vedi sezione "Match Photo". Da lì in poi `add_from_view` ritorna la Page solo nel ramo sincrono — **i chiamanti devono usare il blocco `on_created`**. |
 | Update da view (`⟳`) | `SceneModel.update_from_view(id)` costruisce una bitmask `PAGE_USE_*` con lookup difensivo (vedi `docs/SU2019-LESSONS.md`). Per `use_style?` tenta `PAGE_USE_STYLE` → `PAGE_USE_SKETCHCS` → `PAGE_USE_RENDERING_OPTIONS` (fallback piggyback). Per `use_axes?` tenta `PAGE_USE_AXES` → `PAGE_USE_CAMERA`. Script `tools/dump-page-use.rb` per verificare i nomi delle costanti effettivamente esposte dalla SU in uso. **Se lo stile attivo è dirty** (`styles.active_style_changed`), mostra un `UI.messagebox` 3-button YES/NO/CANCEL equivalente al "Warning - Scenes and Styles" nativo: YES → `update_selected_style` poi page.update; NO → mostra istruzioni per "Save as new" via browser (l'API Ruby SU 2019 non lo espone) e abort; CANCEL → toglie il bit style dal mask, salva il resto. Senza questo dialog le modifiche pending allo stile si perdono silenziosamente: `page.update(PAGE_USE_SKETCHCS)` lega la scena allo stile ma non lo flusha. UI: il trigger ⟳ vive nella toolbar (`btn-update`), opera su selezione (anche multipla con loop client-side). Niente più icona update per-row: quello slot è occupato dal badge lettera stile. |
 | Style letter badge | Sostituisce la vecchia ⟳ per-row. Mostra A,B,C... derivato da `SceneModel.styles_map` (ordine alfabetico su `model.styles.map(&:name)`, **tutti** gli stili, anche orfani). Per-scena `scene.style_name` da `page.style.name`. JS lookup via `letterForStyle()` → '?' se manca. Render solo (zero interazione di update): click sx apre mini Style Manager, click dx apre picker riassegna. |
@@ -144,6 +146,19 @@ La "Sync to SketchUp" originariamente prevista è stata scartata: sarebbe
 stata destructive (cancella+ricrea pagine), rischiosa per lo stato per-pagina
 (hidden geometry, layer states, section planes non sono facilmente preservabili
 via API 2019), e non strettamente necessaria per il workflow dell'utente.
+
+**Ri-verificato il 2026-09-25** (su file di prova, SU 19.0.685), la risposta resta
+no, ma adesso si sa perché. Nelle risorse di `SketchUp.exe` (menu `#410`, il menu
+contestuale delle linguette scena; letto con `LoadLibraryEx` + `LoadMenu`, niente
+SketchUp acceso) esistono **Move Left = 21178** e **Move Right = 21177**. Però
+agiscono sulla linguetta **cliccata col destro**, e senza quel contesto sono
+no-op: `send_action`, `WM_COMMAND` mandato alla barra linguette
+(`msctls_statusbar32` → `SysTabControl32`, figlia diretta della finestra
+principale), al frame e alla view ritornano "ok" e non spostano niente, anche con
+le linguette visibili. Nemmeno clic destro simulato con `PostMessage`
+(`WM_RBUTTONDOWN/UP`, `WM_CONTEXTMENU`, `NM_RCLICK`, cursore vero spostato sopra)
+apre il menu. Restava solo l'input mouse reale (`SendInput`) su linguette accese:
+scartato, fragile e visibile. Non rifare queste prove.
 
 Ogni pagina riceve un `uid` stabile salvato come attributo `SceneManagerPlus/uid`,
 così l'ordine logico e le cartelle sopravvivono a rinomine.
@@ -254,7 +269,7 @@ Per il deploy ideale via symlink/junction (richiede admin) e altre note vedi
 
 Avvio: SketchUp 2019 → menu **Plugins → Scene Manager+** (o icona toolbar).
 
-**Versione nel titolo della finestra** (`Scene Manager+ v1.0.0`): serve a
+**Versione nel titolo della finestra** (oggi `Scene Manager+ v1.1.0`, alzata il 2026-09-25): serve a
 verificare a colpo d'occhio che le postazioni dei colleghi girino tutte con la
 stessa build. Sorgente unica `SceneManagerPlus::PLUGIN_VERSION` in
 `scene_manager_plus.rb` (la stessa che va in `ext.version`), letta da
@@ -2347,13 +2362,13 @@ PowerShell si contano i pixel scuri per colonna e si trovano gli spigoli
 verticali. È così che è saltata fuori la sequenza qui sopra. ⚠️ Misurare
 **sul colore**, non sul tratto (vedi la trappola dell'antialias in Fase 4).
 
-⚠️ **I valori di `Sketchup.write_default` non si trovano su disco a SketchUp
-chiuso** (cercati il 2026-08-06): non sono nel registro
-(`HKCU\Software\SketchUp\SketchUp 2019\…`, che contiene solo MainFrame/
-Workspace/Recent File List) né in `SharedPreferences.json`. Quindi il profilo
-di taratura **non è ispezionabile dall'esterno**: per sapere cosa c'è dentro
-o si guarda dalla UI, o si misura l'immagine prodotta col metodo qui sopra.
-Non perderci tempo una seconda volta.
+⚠️ **Correzione 2026-09-25: i valori di `Sketchup.write_default` SONO su
+disco**, in `%LOCALAPPDATA%\SketchUp\SketchUp 2019\SketchUp\PrivatePreferences.json`
+(sezione `"SceneManagerPlus"`). La ricerca del 2026-08-06 aveva guardato solo il
+registro e `SharedPreferences.json` (in `%APPDATA%`, dove invece stanno le
+**scorciatoie da tastiera**, chiavi `Shortcut_N` = `"shift ctrl alt TASTO comando"`;
+le scorciatoie di default di SU, es. PageDown → Next Scene, non sono lì ma si
+leggono da Ruby con `Sketchup.get_shortcuts`).
 
 ### RISOLTO (2026-08-06): il cartiglio non cambia più proporzioni
 

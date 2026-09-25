@@ -139,6 +139,35 @@ module SceneManagerPlus
         Sketchup.send_action(id.to_i)
       end
 
+      # Comandi "Next/Previous scene" (main.rb): i keydown del CEF arrivano solo
+      # col focus dentro la finestra, un UI::Command con scorciatoia invece
+      # scatta ovunque. Con la finestra aperta delega al JS (SM.navigate), cosi'
+      # la logica e' UNA sola con le frecce: ordine visibile, selezione blu che
+      # segue, defer mode rispettato. A finestra chiusa ripiega sull'ordine
+      # logico letto qui, partendo dalla scena attiva.
+      def navigate(key)
+        if @dialog && @dialog.visible?
+          @dialog.execute_script("window.SM && SM.navigate && SM.navigate(#{key.to_s.to_json});")
+          return
+        end
+        return ::UI.beep if Core::Buffer.deferred?
+        m = Sketchup.active_model
+        return ::UI.beep unless m
+        order = Core::SceneModel.flat_scene_order
+        return ::UI.beep if order.empty?
+        cur = m.pages.selected_page
+        idx = cur ? order.index(Core::SceneModel.page_id(cur)) : nil
+        dir = key.to_s == 'PageDown' ? 1 : -1
+        target = if idx.nil?
+                   dir > 0 ? order.first : order.last
+                 else
+                   order[[[idx + dir, 0].max, order.length - 1].min]
+                 end
+        Core::SceneModel.select_page(target) if target
+      rescue => e
+        warn "[SM+] navigate: #{e.class}: #{e.message}"
+      end
+
       # Accessor usato da ExportDialog per pushare progress al main dialog.
       def dialog_handle
         @dialog
