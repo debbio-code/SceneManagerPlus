@@ -367,9 +367,10 @@ h2('4.3 Selezione e navigazione da tastiera')
 table(
     ['Tasto', 'Azione'],
     [
-        ['PaginaSu / PaginaGiù', 'Scena precedente / successiva lungo l’ordine logico visibile (le cartelle chiuse vengono saltate).'],
+        ['Freccia Su / Freccia Giù', 'Sposta la selezione di una riga lungo l’ordine logico visibile (le cartelle chiuse vengono saltate).'],
+        ['PaginaSu / PaginaGiù', 'Sposta la selezione di una schermata (se ne vedi 10, PaginaGiù porta all’undicesima).'],
         ['Home / Fine', 'Salta alla prima / ultima scena visibile.'],
-        ['Ctrl + PaginaSu/PaginaGiù', 'SPOSTA la scena selezionata (riordino) nell’ordine logico.'],
+        ['Ctrl + Freccia Su/Giù', 'SPOSTA la scena selezionata (riordino) nell’ordine logico.'],
         ['Invio / F2', 'Avvia la rinomina inline della scena selezionata.'],
         ['Esc', 'Annulla la rinomina inline in corso.'],
     ],
@@ -378,9 +379,9 @@ table(
 callout('Nota sugli shortcut',
         'Queste scorciatoie funzionano solo dopo un clic dentro la finestra del plugin. SketchUp 2019 instrada '
         'quasi sempre i tasti al viewport, quindi non è possibile intercettarli globalmente dal dialog. Per uno '
-        'shortcut "vero" col viewport in focus ci sono i comandi Plugins → Next scene / Previous scene (da legare a '
-        'PaginaSu / PaginaGiù in Window → Preferences → Shortcuts) e "Jump to active scene" (cap. 13). '
-        'Le frecce sono lasciate libere di proposito: in SketchUp servono ai blocchi d’asse degli strumenti.')
+        'shortcut "vero" col viewport in focus, vedi il comando "Jump to active scene" (cap. 13). '
+        'Fuori dalla finestra PaginaSu / PaginaGiù restano i comandi scena nativi di SketchUp (ordine delle '
+        'linguette): SketchUp 2019 non salva una riassegnazione di quei due tasti, che torna al nativo a ogni riavvio.')
 
 h2('4.4 Riordino (drag & drop)')
 para('Trascina la maniglia di una scena per spostarla. Puoi trascinare scene dentro/fuori dalle cartelle. '
@@ -636,9 +637,10 @@ para('Funzionano dopo un clic dentro la finestra del plugin.')
 table(
     ['Scorciatoia', 'Azione'],
     [
-        ['PaginaSu / PaginaGiù', 'Scena precedente / successiva (salta cartelle chiuse).'],
+        ['Freccia Su / Freccia Giù', 'Muove la selezione di una riga (salta cartelle chiuse).'],
+        ['PaginaSu / PaginaGiù', 'Muove la selezione di una schermata.'],
         ['Home / Fine', 'Prima / ultima scena.'],
-        ['Ctrl + PaginaSu/PaginaGiù', 'Sposta (riordina) la scena selezionata.'],
+        ['Ctrl + Freccia Su/Giù', 'Sposta (riordina) la scena selezionata.'],
         ['Invio / F2', 'Rinomina inline la scena selezionata.'],
         ['Esc', 'Annulla rinomina inline.'],
         ['Doppio clic', 'Apre il Properties dialog.'],
