@@ -124,6 +124,82 @@ body {
 
 .ov-count { color: #6ea8dc; text-transform: none; }
 
+/* Override di materiale: [base] nome → [in questa scena] [copia da] [x] */
+.mat-list {
+  max-height: 190px;
+  overflow-y: auto;
+}
+.mat-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 2px;
+  border-bottom: 1px solid #242424;
+}
+/* override rimasto su un materiale che non c'è / non si usa più: si spegne
+   il nome, non i quadratini (il colore deve restare leggibile) */
+.mat-row.off .mat-name { opacity: 0.5; }
+.mat-slot {
+  flex: 0 0 22px;
+  display: flex;
+  justify-content: center;
+}
+.mat-sw {
+  flex: 0 0 22px;
+  height: 18px;
+  border: 1px solid #111;
+  border-radius: 2px;
+}
+.mat-sw-var { cursor: pointer; }
+.mat-sw-var:hover { border-color: #6ea8dc; }
+.mat-sw-var.empty {
+  background: none;
+  border: 1px dashed #666;
+  color: #888;
+  font-size: 12px;
+  line-height: 16px;
+  text-align: center;
+}
+.mat-sw-var.locked { cursor: default; }
+.mat-sw-var.locked:hover { border-color: #111; }
+.mat-sw-var.empty.locked:hover { border-color: #666; }
+.mat-name {
+  flex: 1;
+  min-width: 0;
+  color: #cfd8e3;
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mat-row.set .mat-name { color: #fff; }
+.mat-tag {
+  flex: 0 0 auto;
+  padding: 0 4px;
+  border-radius: 2px;
+  background: #4a3b1e;
+  color: #ffd97a;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+.mat-pick {
+  flex: 0 0 22px;
+  width: 22px;
+  background: #222;
+  color: #999;
+  border: 1px solid #1a1a1a;
+  border-radius: 2px;
+  padding: 1px 0;
+  font-size: 11px;
+  outline: none;
+}
+.mat-pick.mat-move {
+  flex: 0 0 62px;
+  width: 62px;
+  color: #ffd97a;
+}
+
 .ov-list {
   flex: 1;
   overflow-y: auto;

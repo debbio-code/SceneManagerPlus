@@ -16,6 +16,9 @@
 //                               chiama una sola volta alla chiusura del popup
 //                               con il colore finale. Usato per evitare write
 //                               a SU su modelli con AttributeObserver lento.
+//     opts.onPreview = fn(hex) → solo con commitOnEnd: chiamata a ogni
+//                               cambio (drag/typing/preset), per un'anteprima
+//                               che non è ancora il commit.
 //   SMColorPopup.hide()
 //   SMColorPopup.pushRecent(hex) — chiamato automaticamente sui commit.
 window.SMColorPopup = (function () {
@@ -27,6 +30,7 @@ window.SMColorPopup = (function () {
   var ready = false;
   var allowNoneCurrent = false;
   var commitOnEndCurrent = false;
+  var previewCurrent = null;
   var lastAppliedInSession = null;
   var pendingHex = null;
 
@@ -221,6 +225,7 @@ window.SMColorPopup = (function () {
     lastAppliedInSession = hex;
     pendingHex = hex;
     if (onApply && !commitOnEndCurrent) onApply(hex);
+    else if (previewCurrent && commitOnEndCurrent) previewCurrent(hex);
   }
 
   function show(triggerEl, currentHex, applyFn, opts) {
@@ -230,6 +235,7 @@ window.SMColorPopup = (function () {
     onApply = applyFn;
     allowNoneCurrent = !!(opts && opts.allowNone);
     commitOnEndCurrent = !!(opts && opts.commitOnEnd);
+    previewCurrent = (opts && typeof opts.onPreview === 'function') ? opts.onPreview : null;
     if (noneBtnEl) noneBtnEl.style.display = allowNoneCurrent ? '' : 'none';
     lastAppliedInSession = null;
     pendingHex = null;
@@ -239,9 +245,12 @@ window.SMColorPopup = (function () {
     // updateAll). Era visibile su HorizonColor, dove il valore mostrato
     // (#ffffff sentinel) differisce dal reale e l'apertura lo sovrascriveva.
     var _savedApply = onApply;
+    var _savedPreview = previewCurrent;
     onApply = null;
+    previewCurrent = null;
     setFromHex(currentHex || '#ffffff');
     onApply = _savedApply;
+    previewCurrent = _savedPreview;
     lastAppliedInSession = null; // setFromHex sopra non conta come commit utente
     pendingHex = null;
     var r = triggerEl.getBoundingClientRect();
@@ -267,6 +276,7 @@ window.SMColorPopup = (function () {
     lastAppliedInSession = null;
     pendingHex = null;
     commitOnEndCurrent = false;
+    previewCurrent = null;
     anchorEl = null;
     onApply = null;
   }

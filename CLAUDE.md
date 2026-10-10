@@ -52,6 +52,12 @@ Feature aggiunte post-Fase 4:
   diretto: `docs/SU2019-LESSONS.md` (sezione "MCP per il probing API") e il
   CLAUDE.md del repo MCP. Va avviato da `Extensions → MCP Server → Start Server`
   dopo ogni restart di SU.
+  ⚠️ **Prove che SCRIVONO: solo su un file di prova salvato, aperto apposta**,
+  mai sul modello su cui l'utente sta lavorando — il 2026-10-10 ne è stato
+  corrotto uno ("Save Problem: File Corrupt"). Niente `Sketchup.undo` nelle
+  prove (è asincrono, e se la propria operazione non ha cambiato niente si
+  porta via l'ultima dell'utente) e mai `abort_operation` su una transparent
+  op: vedi "Varianti colore", fatti verificati.
 
 ## Decisioni di design
 
@@ -3509,6 +3515,146 @@ colore" per-scena: override materiale registrati dall'utente via schermata
   anche l'apply della variante (si risistema alla prossima attivazione).
   Caveat accettato e non mitigato (onTransactionUndo possibile ma rischia
   di combattere l'undo dell'utente).
+- ⚠️ **`abort_operation` su una transparent op annulla anche l'operazione
+  PRECEDENTE** (verificato 2026-10-10 su 19.0.685: op A chiusa che aggiunge
+  un materiale, op B transparent abortita → sparisce anche A). Cioè un
+  errore dentro un apply si porta via l'ultima cosa fatta dall'utente. Nella
+  stessa sessione di prove il modello (mai salvato) è finito in "Save
+  Problem: File Corrupt": l'abort di una transparent op è il primo
+  indiziato. **Nei `rescue` delle transparent op: `commit_operation`, mai
+  abort**, rimettendo a mano quello che serve (un flag `began` azzerato
+  dopo il commit riuscito evita il doppio commit). Corretto il 2026-10-10
+  in `settings.rb` (flush), `clipboard.rb` (read styles, che rimette lo
+  stile di prima), `scene_model.rb` (persist uids e `finalize_native_page`,
+  che si aggancia al comando nativo "Add Scene"): solo controllo di
+  sintassi, i rami d'errore non sono stati provati dal vivo. In
+  `variants.rb` le tre transparent op (`on_scene_activated`,
+  `restore_applied!`, `reapply!`) chiudono in `ensure` con commit.
+  ⚠️ Per trovarle tutte: il nome può contenere parentesi
+  (`'SM+ New scene (finalize)'`), un grep con `[^)]*` le salta.
+
+### Override di MATERIALE (2026-10-10)
+
+Secondo tipo di override nella stessa variante, nato perché quello per pezzo
+non regge sui componenti parametrici (repo `Componenti dinamici`): a ogni
+"Applica" svuotano e ricostruiscono la definizione, i `persistent_id` dei
+pezzi interni cambiano e gli override restano orfani (visto sul modello di
+Nicola: 13 su 14; si salva solo l'id dell'istanza).
+
+- **Cosa dice**: "in questa scena il materiale X appare con questo colore".
+  Cambia `color`/`alpha` del materiale entrando nella scena e li rimette
+  uscendo; i pezzi non si toccano. Chiave = nome del materiale.
+- **Storage**: stesso page attribute, `{v:2, overrides:[...], materials:
+  [{name, color:'#RRGGBB', alpha|null}]}`. `alpha: null` = non toccare. Senza
+  `materials` si scrive ancora `v:1`. Una build precedente legge una v2 come
+  "nessun materiale" e, se riscrive la variante, li perde.
+- **API** (`Core::Variants`): `record_material(page, name, color, alpha)`
+  (dal vivo se la scena è quella nel viewport, altrimenti solo salvataggio),
+  `remove_material_override`, `material_overrides_for`, `read_variant`,
+  `set_variant`, `reapply!`. `copy/paste`, `clear_and_restore`,
+  `has_variant?` coprono tutti e due i tipi; `prune_missing` solo i pezzi.
+- **Snapshot RAM** `@applied[:mat_snapshot]`: solo quello che è stato
+  toccato (`alpha` c'è solo se l'override la cambia).
+- **`reapply!`**: ri-afferma gli override di materiale della variante
+  applicata, zero-write se sono a posto; quello che trova diverso lo prende
+  come nuovo base. Lo chiamano (a) `on_scene_activated` sul ri-clic della
+  scena già attiva e (b) **Componenti parametrici** dopo ogni callback del
+  pannello (`GG::Componenti.ricolora` in `dispatch`), perché i generatori a
+  ogni rigenerazione fanno `m.color = <base>`. Niente controllo nel polling:
+  combatterebbe chi cambia il colore a mano.
+- **Solo colori pieni**: `color=` su un materiale con texture lo TINGE
+  (`materialType` 2), quindi quelli con texture si saltano con report.
+  Togliere/rimettere la texture si può (`texture = nil`, poi `texture =
+  image_rep` + `texture.size=`, pixel identici) ma si perde
+  `texture.filename`: non fatto.
+- **Limiti**: due componenti dello stesso colore condividono il materiale e
+  cambiano insieme; i generatori mettono il colore nel NOME ("... Struttura
+  #383E42"), quindi cambiando il colore base nasce un materiale nuovo e
+  l'override resta su quello vecchio (tornando al colore di prima riprende);
+  annullare (Ctrl+Z) la rimozione dal vivo di un override lascia il
+  materiale col colore della variante senza snapshot per rimetterlo.
+- **`variants.rb` regge il `load` a caldo**: lo stato del modulo è
+  `@x = ... unless defined?(@x)`. Prima un reload con una variante applicata
+  perdeva lo snapshot (e al salvataggio i colori della variante finivano nel
+  .skp come base).
+- **Verificato dal vivo** (19.0.685, file di prova con una Alba Butterfly e
+  due scene): registrazione dal vivo e non, modifica, alpha, rimozione,
+  cambio scena, ri-clic, variante mista pezzo+materiale, copia/incolla,
+  clear, prune, formato v1; salvataggio con variante attiva (una sonda in
+  `onPreSaveModel` vede i colori base, in `onPostSaveModel` quelli della
+  variante; dopo il save `modified?` è false); rigenerazione con misura
+  cambiata + `ricolora`. Il file si è salvato senza errori dopo ogni giro.
+  **Non provati**: export/anteprime, linguette native (stesso
+  `on_scene_activated`), riapertura del file.
+- `find_entity_by_persistent_id([])` solleva `ArgumentError`: una variante
+  di soli materiali ha la lista dei pid vuota (`apply_pairs!` esce prima).
+- **Finestra** (`ui/variant_dialog.rb`, `variant.html/js/css`): sezione
+  "Materials" sopra quella dei pezzi ("Single entities" + "Entity
+  overrides", invariata). Una riga per materiale: `[base] nome → [in questa
+  scena] [▾ copia colore da] [✕]`. Le righe sono i materiali che la scena
+  già cambia **più quelli usati dalla selezione nel viewport**, quindi la
+  finestra segue la selezione: `SelObserver` attaccato solo a finestra
+  aperta, eventi raccolti con `UI.start_timer(0)`. Scena non attiva = righe
+  bloccate (c'è già il banner "Activate"). Etichette: `missing` (materiale
+  sparito), `texture` (non supportato), `not in use` (niente nel modello lo
+  usa più: compare "move to", che sposta l'override su un materiale della
+  selezione).
+- **Scelta del colore**: selettore condiviso `SMColorPopup` in
+  `commitOnEnd` con la nuova opzione **`onPreview`** (chiamata a ogni
+  cambio; le altre finestre non la passano e non cambiano). Mentre lo si
+  muove → `sm_variant_mat_preview` (al più una ogni 120 ms): cambia il
+  materiale, **non** scrive la scena (`Variants.preview_material`). Alla
+  chiusura → `sm_variant_mat_set` (`record_material`). La prima anteprima è
+  un'operazione normale, le altre e la conferma sono `merge: true`
+  (transparent): tutta la scelta è 1 Ctrl+Z. Finestra chiusa col selettore
+  aperto → `resync_materials!` rimette il materiale a quello che la scena
+  salva. Altri callback: `sm_variant_mat_copy {name, from}`,
+  `sm_variant_mat_remove {name}`, `sm_variant_mat_move {from, to}`.
+- **"Not in use"** costa una scansione del modello (`used_material_names`):
+  se è svelta (< 50 ms) si rifà quando serve, al più una al secondo; se è
+  lenta resta quella dell'apertura. Oltre `MODEL_BUDGET` entità non si
+  calcola; oltre `SEL_BUDGET` la lista della selezione può essere incompleta
+  (c'è l'avviso).
+- **Diagnosi da remoto**: `window.onerror` manda gli errori JS a
+  `sm_variant_log`, e l'ultimo messaggio resta in `VariantDialog@last_log`
+  (leggibile dal bridge: si può interrogare il DOM con `execute_script` →
+  `sketchup.sm_variant_log(...)` e rileggerlo al giro dopo).
+- **Verificato**: nel browser (disegno, clic, anteprima/conferma, copia,
+  sposta, togli, scena non attiva) e dentro SketchUp pilotando la finestra
+  dal bridge sul file di prova (apertura, righe che seguono la selezione,
+  anteprima che non scrive, conferma, copia, sposta, togli, chiusura con
+  anteprima pendente, salvataggio). **Non visto**: l'aspetto nel CEF di
+  SketchUp, i clic veri sul selettore, il Ctrl+Z di una scelta.
+
+#### Cosa manca (nota del 2026-10-10 — Nicola: "per ora può andare")
+
+- **Trasparenza nella finestra.** Il motore la regge (`alpha` nell'override,
+  `record_material(page, name, color, alpha)`, provata dal bridge); manca il
+  campo nella riga. Oggi la finestra, cambiando colore, tiene l'alpha che
+  l'override ha già (`stored_alpha`), quindi un'alpha si può mettere solo
+  dal bridge.
+- **Texture.** I materiali con texture sono bloccati (etichetta `texture`).
+  La strada è verificata a metà: `texture = nil` poi `texture = image_rep` +
+  `texture.size=` ridà pixel identici ma perde `texture.filename` (si
+  aggira ripassando da un file temporaneo con lo stesso nome); le texture
+  già tinte (`materialType` 2) non sono mai state provate.
+- **Fra file.** Gli override di materiale vanno per nome, quindi si possono
+  portare in un altro file (clipboard scene): non fatto.
+- **Da guardare a occhio, mai visto**: l'aspetto della finestra nel CEF di
+  SketchUp, i clic veri sul selettore colore, il Ctrl+Z di una scelta
+  (atteso: un passo solo).
+- **Mai provati**: export e anteprime con una variante di materiale, cambio
+  scena dalle linguette native, riapertura del file salvato (la sonda dice
+  che al salvataggio i colori sono quelli base).
+- **Colore base cambiato nel componente**: l'override resta sul materiale
+  vecchio; oggi si sistema a mano ("not in use" + "move to"). Componenti
+  parametrici potrebbe avvisare Scene Manager+ a fine "Applica" e spostarlo
+  da solo.
+- **Idea**: le pastiglie RAL dei generatori (`STRUCT_COLORS` nei loro
+  `specs.rb`) fra i colori pronti del selettore.
+- **Versione**: `PLUGIN_VERSION` è rimasta 1.1.1. Va alzata prima di
+  distribuire ai colleghi: una build precedente che riscrive una variante
+  ne perde gli override di materiale.
 
 ### Conseguenze UX accettate
 

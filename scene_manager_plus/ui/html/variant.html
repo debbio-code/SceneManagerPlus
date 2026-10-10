@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <title>Color variant</title>
   <link rel="stylesheet" href="css/variant.css">
+  <link rel="stylesheet" href="css/color_popup.css">
 </head>
 <body>
   <div id="app">
@@ -20,22 +21,33 @@
     </header>
 
     <section class="group">
-      <h3>Assign</h3>
+      <h3>Materials <span id="mat-count" class="ov-count"></span></h3>
+      <div id="mat-list" class="mat-list"></div>
+      <div id="mat-empty" class="ov-empty hidden">Select something in the viewport to list its materials.</div>
+      <div id="mat-truncated" class="hint hidden">Too many entities selected: the list may be incomplete.</div>
+      <div class="hint">
+        Click the right-hand swatch to choose how a material looks in this
+        scene. It changes everything painted with that material and keeps
+        working when a parametric component is regenerated.
+      </div>
+    </section>
+
+    <section class="group">
+      <h3>Single entities</h3>
       <div class="assign-row">
         <select id="mat-select"></select>
         <button id="btn-assign" title="Record an override for every entity currently selected in the viewport">Assign to selection</button>
       </div>
       <div class="hint">
-        Select entities in the viewport, choose a material, then click
-        &ldquo;Assign to selection&rdquo;. Overrides are stored in the scene and applied
-        every time the scene is activated from Scene Manager+.
+        For exceptions: select entities in the viewport, choose a material,
+        then click &ldquo;Assign to selection&rdquo;. Lost when the entity is rebuilt.
       </div>
     </section>
 
     <section class="group group-list">
-      <h3>Overrides <span id="ov-count" class="ov-count"></span></h3>
+      <h3>Entity overrides <span id="ov-count" class="ov-count"></span></h3>
       <div id="ov-list" class="ov-list"></div>
-      <div id="ov-empty" class="ov-empty hidden">No overrides yet.</div>
+      <div id="ov-empty" class="ov-empty hidden">No entity overrides.</div>
     </section>
 
     <footer class="ftr">
@@ -45,6 +57,24 @@
     </footer>
   </div>
 
+  <!-- Color picker popup condiviso (js/color_popup.js): stesso markup di
+       style.html, <input type="color"> non funziona nel CEF di SU 2019. -->
+  <div id="sm-color-popup" class="sm-color-popup hidden">
+    <div class="cp-main">
+      <div id="cp-sb" class="cp-sb"><span class="cp-marker" id="cp-sb-marker"></span></div>
+      <div id="cp-hue" class="cp-hue"><span class="cp-hue-marker" id="cp-hue-marker"></span></div>
+    </div>
+    <div class="cp-bot">
+      <span id="cp-preview" class="cp-preview"></span>
+      <input type="text" id="cp-hex" class="cp-hex" maxlength="7" placeholder="#aabbcc" spellcheck="false">
+      <button id="cp-none" class="cp-none-btn" title="No color" style="display:none">None</button>
+      <button id="cp-ok" class="cp-ok-btn" title="Confirm color (Enter)">OK</button>
+    </div>
+    <div id="cp-recent" class="cp-recent"></div>
+    <div id="cp-presets" class="cp-presets"></div>
+  </div>
+
+  <script src="js/color_popup.js"></script>
   <script src="js/variant.js"></script>
 </body>
 </html>
