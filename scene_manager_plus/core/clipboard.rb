@@ -149,8 +149,20 @@ module SceneManagerPlus
           end
           m.styles.selected_style = prev_style if prev_style
           m.commit_operation
+          began = false
         rescue => e
-          m.abort_operation if began
+          # MAI abort_operation su una transparent op: annulla anche
+          # l'operazione PRECEDENTE, cioè l'ultima cosa fatta dall'utente
+          # (CLAUDE.md, "Varianti colore", fatti verificati 2026-10-10).
+          # Lo stile di prima lo rimettiamo a mano, poi si chiude.
+          if began
+            begin
+              m.styles.selected_style = prev_style if prev_style
+            rescue
+              nil
+            end
+            m.commit_operation
+          end
           warn "[SM+] Clipboard.read_styles_snapshot: #{e.class}: #{e.message}"
         end
         # Ripristina la vista pre-copy (viewport invisibile alla copy).

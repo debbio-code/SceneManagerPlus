@@ -133,9 +133,14 @@ module SceneManagerPlus
           began = true
           to_persist.each { |p, uid| p.set_attribute(PLUGIN_ID, 'uid', uid) }
           m.commit_operation
+          began = false
           puts "[SM+] persist_uids_for_ids: persisted #{to_persist.size} uid(s) in 1 op"
         rescue => e
-          m.abort_operation if began
+          # MAI abort_operation su una transparent op: annulla anche
+          # l'operazione PRECEDENTE, cioè l'ultima cosa fatta dall'utente
+          # (CLAUDE.md, "Varianti colore", fatti verificati 2026-10-10).
+          # Gli uid già scritti restano: sono gli stessi della cache RAM.
+          m.commit_operation if began
           warn "[SM+] persist_uids_for_ids failed: #{e.class}: #{e.message}"
         end
       end
@@ -1222,6 +1227,7 @@ module SceneManagerPlus
         # transparent=true -> si aggancia all'operazione nativa "Add Scene",
         # cosi' un solo Ctrl+Z annulla scena e finalizzazione insieme.
         m.start_operation('SM+ New scene (finalize)', true, false, true)
+        began = true
         begin
           unless name.to_s.strip.empty?
             begin
@@ -1294,9 +1300,15 @@ module SceneManagerPlus
           page_id(page) # ensure uid attribute exists
           place_after(page_id(page), anchor_uid)
           m.commit_operation
+          began = false
           puts "[SM+] add_from_view_native: created '#{page.name}' (Match Photo preserved)"
         rescue => e
-          m.abort_operation
+          # MAI abort_operation su una transparent op: annulla anche
+          # l'operazione PRECEDENTE (CLAUDE.md, "Varianti colore", fatti
+          # verificati 2026-10-10) — qui il comando nativo "Add Scene", e chi
+          # ci ha chiamato si ritroverebbe in mano una pagina cancellata. La
+          # scena resta, finalizzata fin dove si è arrivati.
+          m.commit_operation if began
           warn "[SM+] finalize_native_page: #{e.class}: #{e.message}"
         end
       end

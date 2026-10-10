@@ -231,11 +231,17 @@ module SceneManagerPlus
             end
           end
           model.commit_operation
+          began = false
           @dirty.delete(model.object_id)
           puts "[SM+] Settings.flush!: wrote %d key(s) in %.1fms" %
                [written, (Time.now - t0) * 1000]
         rescue => e
-          model.abort_operation if began
+          # MAI abort_operation su una transparent op: annulla anche
+          # l'operazione PRECEDENTE, cioè l'ultima cosa fatta dall'utente
+          # (CLAUDE.md, "Varianti colore", fatti verificati 2026-10-10).
+          # Si chiude tenendo le chiavi già scritte: @dirty resta acceso, il
+          # prossimo flush riprova e salta quelle già uguali.
+          model.commit_operation if began
           warn "[SM+] Settings.flush!: failed (#{e.class}: #{e.message})"
         end
       end
