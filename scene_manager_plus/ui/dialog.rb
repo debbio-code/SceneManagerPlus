@@ -257,8 +257,12 @@ module SceneManagerPlus
 
         dlg.add_action_callback('sm_update_page') do |_ctx, payload|
           data = parse(payload)
+          data = Core::SceneModel.check_rename(data['id'], data)
           Core::SceneModel.update_page(data['id'], data)
           push_state
+          # La scheda scena puo' essere aperta sulla stessa scena: deve
+          # mostrare il nome nuovo, non quello di prima.
+          PropertiesDialog.push_state if data.key?('name')
         end
 
         dlg.add_action_callback('sm_update_from_view') do |_ctx, payload|

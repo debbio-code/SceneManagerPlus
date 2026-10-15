@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  const SMP = { state: null, applying: false };
+  const SMP = { state: null };
   window.SMP = SMP;
 
   function $(sel) { return document.querySelector(sel); }
@@ -63,11 +63,11 @@
              '<span>' + escapeHtml(item.label) + '</span></label>';
     }).join('');
     el.querySelectorAll('input[type=checkbox]').forEach(cb => {
-      cb.addEventListener('change', commit);
+      cb.addEventListener('change', commitFlags);
     });
   }
 
-  function readForm() {
+  function readFlags() {
     const flags = {};
     document.querySelectorAll('#prop-flags input[type=checkbox]').forEach(cb => {
       // data-flags è un JSON array: per item merged (es. Style and Fog)
@@ -76,12 +76,7 @@
       try { keys = JSON.parse(cb.dataset.flags || '[]'); } catch (e) { keys = []; }
       keys.forEach(k => { flags[k] = cb.checked; });
     });
-    return {
-      id:          SMP.state && SMP.state.scene ? SMP.state.scene.id : null,
-      name:        $('#prop-name').value,
-      description: $('#prop-desc').value,
-      flags:       flags
-    };
+    return flags;
   }
 
   function setStatus(msg, ms) {
@@ -89,22 +84,82 @@
     if (msg) setTimeout(() => { $('#status').textContent = ''; }, ms || 1500);
   }
 
-  function commit() {
-    if (SMP.applying) return;
-    const data = readForm();
-    if (!data.id) return;
-    // Se name è vuoto, non inviarlo (SU non accetterebbe nome vuoto)
-    if (!data.name || !data.name.trim()) {
-      // ripristina dal state
-      $('#prop-name').value = (SMP.state && SMP.state.scene) ? SMP.state.scene.name : '';
-      setStatus('Name cannot be empty');
-      return;
+  function currentId() {
+    return SMP.state && SMP.state.scene ? SMP.state.scene.id : null;
+  }
+
+  function commitFlags() {
+    const id = currentId();
+    if (!id) return;
+    call('sm_props_apply', { id: id, flags: readFlags() });
+    setStatus('Saved');
+  }
+
+  // Nome e descrizione come li conosce Ruby, o come li abbiamo appena
+  // mandati. Un campo e' "in modifica" solo se il suo testo e' diverso da
+  // qui: e' questo, non il solo fatto di avere il cursore dentro, a
+  // decidere se un aggiornamento da Ruby puo' riscriverlo. Rende anche
+  // idempotente commitText: change e blur scattano tutti e due e solo il
+  // primo manda qualcosa.
+  var textBase = { name: '', description: '' };
+
+  function commitText() {
+    const id = currentId();
+    if (!id) return;
+    const nameEl = $('#prop-name');
+    const descEl = $('#prop-desc');
+    const data = { id: id };
+    if (nameEl.value !== textBase.name) {
+      const nm = nameEl.value.trim();
+      if (!nm) {
+        // Nome vuoto: SU non lo accetta, si torna a quello di prima.
+        nameEl.value = textBase.name;
+        setStatus('Name cannot be empty');
+      } else {
+        if (nameEl.value !== nm) nameEl.value = nm;
+        if (nm !== textBase.name) {
+          data.name = nm;
+          textBase.name = nm;
+        }
+      }
     }
-    SMP.applying = true;
+    if (descEl.value !== textBase.description) {
+      data.description = descEl.value;
+      textBase.description = descEl.value;
+    }
+    if (!('name' in data) && !('description' in data)) return;
+    // Il controllo dei nomi doppi lo fa Ruby: se propone un altro nome, o
+    // se l'avviso viene annullato, rimanda lo state e il campo si allinea.
     call('sm_props_apply', data);
     setStatus('Saved');
-    // applying si resetta in setState (push successivo)
-    setTimeout(() => { SMP.applying = false; }, 200);
+  }
+
+  // Riscrive un campo testo col valore di Ruby, a meno che l'utente ci stia
+  // scrivendo qualcosa di non ancora salvato (cursore dentro E testo diverso
+  // da textBase). `force` = cambio scena: si riscrive comunque.
+  function syncText(el, key, value, force) {
+    const editing = !force && document.activeElement === el &&
+                    el.value !== textBase[key];
+    textBase[key] = value;
+    if (!editing && el.value !== value) el.value = value;
+  }
+
+  // Arriva una scena diversa mentre un campo ha ancora il cursore dentro
+  // (es. doppio click su un'altra scena nella lista a meta' rinomina).
+  // Si chiude l'edit come se l'utente avesse cliccato fuori: nome e
+  // descrizione vanno alla scena DI PRIMA, quella per cui erano stati
+  // scritti; gli altri campi (nebbia, stampa in scala) lasciano perdere,
+  // perche' la nebbia si scrive sulla scena attiva, che ormai e' l'altra.
+  // Senza questo il campo teneva il testo vecchio e al primo clic fuori lo
+  // salvava sulla scena nuova.
+  // Va chiamata PRIMA di sostituire SMP.state: commitText legge da li' l'id.
+  function closeEditsForSwitch() {
+    const a = document.activeElement;
+    if (!a || a === document.body || a === document.documentElement) return;
+    if (a === $('#prop-name') || a === $('#prop-desc')) commitText();
+    // Il commit dei campi nebbia esce subito se la scena non e' attiva.
+    fogValues.active = false;
+    if (typeof a.blur === 'function') a.blur();
   }
 
   SMP.setState = function (state) {
@@ -119,17 +174,19 @@
       $('#scene-title').textContent = '(scene not found)';
       $('#prop-name').value = '';
       $('#prop-desc').value = '';
+      textBase = { name: '', description: '' };
       $('#prop-flags').innerHTML = '';
       $('#btn-update-view').disabled = true;
       return;
     }
+    const prev = SMP.state && SMP.state.scene;
+    const switched = !!(prev && prev.id !== s.id);
+    if (switched) closeEditsForSwitch();
     SMP.state = state;
     $('#scene-title').textContent = s.name || '(unnamed)';
-    // Non sovrascrivere il campo se l'utente sta digitando in quel momento
-    const nameEl = $('#prop-name');
-    const descEl = $('#prop-desc');
-    if (document.activeElement !== nameEl) nameEl.value = s.name || '';
-    if (document.activeElement !== descEl) descEl.value = s.description || '';
+    // Non sovrascrivere il campo se l'utente ci sta scrivendo (vedi syncText)
+    syncText($('#prop-name'), 'name', s.name || '', switched);
+    syncText($('#prop-desc'), 'description', s.description || '', switched);
     renderFlags(state.flag_keys || [], s.flags || {});
     $('#btn-update-view').disabled = false;
     renderPreview(state.preview_url);
@@ -138,7 +195,6 @@
     // Esito di un'operazione Ruby che non merita un messagebox (es. quante
     // entita' sono finite sul layer).
     if (state.status) setStatus(state.status, 4000);
-    SMP.applying = false;
   };
 
   // === Fog dual-range slider =================================================
@@ -898,10 +954,10 @@
 
   document.addEventListener('DOMContentLoaded', () => {
     // Commit su blur / change per i campi testuali
-    $('#prop-name').addEventListener('change', commit);
-    $('#prop-name').addEventListener('blur', commit);
-    $('#prop-desc').addEventListener('change', commit);
-    $('#prop-desc').addEventListener('blur', commit);
+    $('#prop-name').addEventListener('change', commitText);
+    $('#prop-name').addEventListener('blur', commitText);
+    $('#prop-desc').addEventListener('change', commitText);
+    $('#prop-desc').addEventListener('blur', commitText);
 
     // Enter sul nome → commit + blur
     $('#prop-name').addEventListener('keydown', (e) => {

@@ -84,9 +84,15 @@ module SceneManagerPlus
           data = parse(payload)
           id   = data['id'] || @scene_id
           if id
+            renamed = data.key?('name')
+            data = Core::SceneModel.check_rename(id, data)
             Core::SceneModel.update_page(id, data)
             Dialog.push_state
-            # Non re-pushiamo al props dialog: ha già i valori giusti.
+            # Dopo una rinomina il campo deve mostrare il nome che la scena
+            # ha davvero: l'alternativa accettata, o quello di prima se
+            # l'avviso del nome doppio e' stato annullato. Per il resto
+            # (descrizione, flag) il dialog ha gia' i valori giusti.
+            push_state if renamed
           end
         end
 

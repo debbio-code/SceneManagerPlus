@@ -739,6 +739,91 @@ module SceneManagerPlus
         false
       end
 
+      # === Nomi doppi =====================================================
+      # SU accetta due scene con lo stesso nome, ma nella lista (e nei tab,
+      # nel cartiglio) diventano indistinguibili. Il controllo scatta sulle
+      # rinomine fatte dall'utente: lista (F2 / tasto destro -> Rename) e
+      # scheda scena. Confronto senza maiuscole/minuscole e senza spazi ai
+      # bordi ("Pianta" e "pianta " si leggono uguali). In defer mode conta
+      # il nome che la scena AVRA' e le scene da cancellare non contano.
+
+      def scene_name_key(name)
+        name.to_s.strip.downcase
+      end
+
+      # Nome effettivo della scena (con la rinomina in attesa, in defer mode).
+      def effective_scene_name(page, uid)
+        edit = Buffer.deferred? ? Buffer.page_edit(uid) : nil
+        edit && edit.key?('name') ? edit['name'].to_s : page.name.to_s
+      end
+
+      # { chiave di confronto => nome com'e' scritto } di tutte le scene
+      # tranne `except_id`.
+      def taken_scene_names(except_id: nil)
+        pages.each_with_object({}) do |p, h|
+          uid = page_id(p)
+          next if uid == except_id
+          next if Buffer.deferred? && Buffer.deleted?(uid)
+          nm = effective_scene_name(p, uid)
+          h[scene_name_key(nm)] ||= nm
+        end
+      end
+
+      # Primo nome libero nella forma "Nome (2)", "Nome (3)"..., la stessa
+      # delle scene incollate da un altro file (Clipboard.dedup_name). Se il
+      # nome finisce gia' con "(N)" si riparte dal numero successivo.
+      def unique_scene_name(name, taken)
+        base = name.to_s.strip
+        i = 2
+        if (md = base.match(/\A(.*\S)\s*\((\d+)\)\z/))
+          base = md[1]
+          i = md[2].to_i + 1
+        end
+        i += 1 while taken.key?(scene_name_key("#{base} (#{i})"))
+        "#{base} (#{i})"
+      end
+
+      # Il nome che la scena `id` prendera' davvero. Se `wanted` e' gia' di
+      # un'altra scena avvisa e propone un nome libero: OK = usa quello,
+      # Annulla = la scena tiene il suo nome. nil = niente da rinominare.
+      def resolve_scene_name(id, wanted)
+        want = wanted.to_s.strip
+        return nil if want.empty?
+        p = find_by_id(id)
+        return nil unless p
+        current = effective_scene_name(p, id)
+        # Stesso nome di prima: niente da controllare. Senza questo un file
+        # che ha GIA' due scene omonime farebbe scattare l'avviso a ogni
+        # salvataggio della scheda.
+        return want if want == current
+        taken = taken_scene_names(except_id: id)
+        owner = taken[scene_name_key(want)]
+        return want unless owner
+        alt = unique_scene_name(want, taken)
+        mb    = Object.const_defined?(:MB_OKCANCEL) ? MB_OKCANCEL : 1
+        id_ok = Object.const_defined?(:IDOK) ? IDOK : 1
+        msg = "A scene named \"#{owner}\" already exists.\n\n" \
+              "OK: rename this scene to \"#{alt}\"\n" \
+              "Cancel: keep its name \"#{current}\""
+        ::UI.messagebox(msg, mb) == id_ok ? alt : nil
+      end
+
+      # Filtro delle modifiche chieste dall'utente prima di update_page: il
+      # nome passa dal controllo dei doppi. Ritorna gli attrs da applicare,
+      # senza 'name' se la rinomina e' stata annullata; descrizione e flag
+      # passano comunque.
+      def check_rename(id, attrs)
+        return attrs unless attrs.is_a?(Hash) && attrs.key?('name')
+        out = attrs.dup
+        final = resolve_scene_name(id, attrs['name'])
+        if final
+          out['name'] = final
+        else
+          out.delete('name')
+        end
+        out
+      end
+
       # Aggiorna proprietà page (rename / desc / flags).
       # In Buffer.deferred?: stage e basta. Altrimenti scrive su SU.
       def update_page(id, attrs)

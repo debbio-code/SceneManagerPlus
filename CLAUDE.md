@@ -73,7 +73,7 @@ Feature aggiunte post-Fase 4:
 | Style letter badge | Sostituisce la vecchia ⟳ per-row. Mostra A,B,C... derivato da `SceneModel.styles_map` (ordine alfabetico su `model.styles.map(&:name)`, **tutti** gli stili, anche orfani). Per-scena `scene.style_name` da `page.style.name`. JS lookup via `letterForStyle()` → '?' se manca. Render solo (zero interazione di update): click sx apre mini Style Manager, click dx apre picker riassegna. |
 | Style assignment (click dx lettera) | `SceneModel.assign_style(uid, name)` attiva la target page, fa `styles.selected_style = X`, forza `use_style/use_rendering_options = true`, `page.update(STYLE_BIT \| RO_BIT)`, ripristina la scena attiva precedente. Tutto in una `start_operation` (1 Ctrl+Z). Immediato anche in defer mode (operazione viewport-dipendente, analoga a `update_from_view`). Side-effect noto: se lo stile precedente era dirty, le pending si perdono (come comportamento native SU). |
 | Mini Style Manager (click sx lettera) | `UI::StyleDialog` (`STYLE_DIALOG`) con 3 gruppi: **Edges** (`EdgeColorMode` 0/1/2 = All same/By material/By axis — è il colore *delle linee*, non delle facce; `TransparencySort` 0/1/2); **Background** (`BackgroundColor`, `DrawHorizon` on/off, `SkyColor`); **Display** (`DrawHidden`, Model axes checkbox `DisplaySketchAxes`, `DisplaySectionPlanes`, `DisplaySectionCuts`). Edit live → `rendering_options[k] = v` + `styles.update_selected_style` per committare al persistente. All'apertura, la scena di contesto viene attivata nel viewport per feedback live. **Scope sempre = "all scenes using this style"**: niente "only this scene" perché l'API Ruby SU 2019 non espone `style.name=` né `Styles#add_style` da memoria, quindi clonare programmaticamente uno stile non è fattibile pulitamente. Banner nel dialog spiega il workaround manuale: duplicare lo stile in Window → Styles nativo, poi riassegnare via right-click su lettera. **Model Axes è un checkbox stateful** come gli altri Display: la rendering option `DisplaySketchAxes` (bool) controlla il display degli assi del modello — scoperto via MCP `eval_ruby` su SU 2019.0.685 (vedi sezione "Style management"). Niente più hack `Sketchup.send_action(10522)`/`axes_cmd_id`. |
-| Rinomina inline | Right-click su scena → context menu → "Rename" → input nella row, Enter = commit, Esc/blur-senza-modifiche = annulla. |
+| Rinomina inline | **F2** (solo F2: Invio non apre più la rinomina, scelta dell'utente 2026-10-15) oppure right-click su scena → context menu → "Rename" → input nella row, Enter = commit, Esc/blur-senza-modifiche = annulla. Passa dal controllo dei nomi doppi (sezione "Nomi doppi delle scene"). |
 | Selezione vs scena attiva | Due stati **distinti** nel JS: `selection` (array, barra azzurra, può essere multipla) e `activeId` (singolo, marker giallo sul `.grip`, = scena effettivamente nel viewport). `push_state` invia `active_id` dal `pages.selected_page` di Ruby. `setActiveFromNative` (polling 250ms) aggiorna SOLO `activeId`, mai la selezione (prima la collassava all'uid, e ogni cambio tab nativo distruggeva la multi-selezione). Helper `selectPageLocal(id)` per i click/keynav: in **defer mode è no-op** (la scena nel viewport non cambia → il giallo non deve seguire la selezione), altrimenti setta `activeId` e chiama `SMBridge.selectPage` per feedback immediato senza attendere il polling. **Ordine obbligatorio nei handler keynav (frecce/PageUp/Down/Home/End) e click**: `selectPageLocal(id)` PRIMA di `render()`, perché `selectPageLocal` muta `activeId` ma non re-renderizza; se invertito, il marker giallo resta sulla scena precedente fino al successivo `push_state` (lag di 1 step). |
 | Preview thumbnail | 300×150 (stesso aspect ratio dell'export finale). Durante batch generation: transizioni scena disabilitate, antialias off, yield a CEF batched ogni ~total/25 scene. Cache-buster `?t=` bumpato solo a cambio set chiavi o fine-generazione, non a ogni `setState`. |
 | Cartelle | Solo logiche (ordine in `model.attribute`), no sync alle pagine native (vedi sotto) |
@@ -353,11 +353,57 @@ Polling attaccato in `Dialog.show` e fermato in `set_on_closed`.
 ## Properties dialog (dblclick)
 
 Live commit, niente Apply: name salva su Enter o blur, description su blur,
-flag su change. `setState` da Ruby evita di sovrascrivere il campo se è
-`document.activeElement` (pattern `setIfNotFocused`).
+flag su change. `commitText` manda **solo** i campi testo cambiati
+(`{id, name?, description?}`), `commitFlags` solo `{id, flags}`: niente più
+form intero a ogni commit, e niente più guardia `SMP.applying`.
+
+**Quando Ruby può riscrivere un campo testo** (dal 2026-10-15, sostituisce il
+vecchio `setIfNotFocused` "cursore dentro = non toccare"): `textBase` tiene
+nome e descrizione come li conosce Ruby (o come li ha appena mandati il JS), e
+`syncText` lascia stare il campo solo se ha il cursore **e** un testo diverso
+da `textBase`, cioè una modifica non ancora salvata. Serve per due motivi:
+- **Cambio scena col cursore nel campo** (bug segnalato: doppio click su
+  un'altra scena a metà rinomina). Prima il campo teneva il testo vecchio e al
+  primo clic fuori lo salvava sulla scena **nuova**. Ora `setState`, se arriva
+  un id diverso, chiama `closeEditsForSwitch` **prima** di sostituire
+  `SMP.state`: nome/descrizione non salvati vanno alla scena di prima (quella
+  per cui erano stati scritti), poi `blur()` su qualunque campo. Per i campi
+  nebbia mette prima `fogValues.active = false`, così il loro commit-on-blur
+  esce subito: la nebbia si scrive sulla scena attiva, che ormai è l'altra.
+- **Nome cambiato da Ruby** (alternativa del nome doppio, o avviso annullato)
+  mentre la finestra è disattivata ma il cursore è ancora nel campo: il campo
+  non è "sporco" e si allinea. Per questo `sm_props_apply` rimanda lo state
+  quando il payload ha un nome, e `sm_update_page` (rinomina dalla lista)
+  rimanda lo state anche alla scheda scena.
+
+`textBase` rende anche idempotente `commitText`: `change` e `blur` scattano
+tutti e due e solo il primo manda qualcosa.
 
 `scene_payload` usa `SceneModel.scene_hash(p, uid)` che fa già l'overlay del
 Buffer in defer mode, così il dialog mostra valori coerenti.
+
+## Nomi doppi delle scene (2026-10-15)
+
+SU accetta due scene con lo stesso nome; il plugin no, sulle rinomine fatte
+dall'utente (lista e scheda scena). `SceneModel.check_rename(id, attrs)`, da
+chiamare prima di `update_page` (lo fanno `sm_update_page` e
+`sm_props_apply`): se il nome è già di un'altra scena, `resolve_scene_name`
+mostra un messagebox OK/Cancel con un nome libero proposto
+(`unique_scene_name`: "Nome (2)", "Nome (3)"…, stessa forma di
+`Clipboard.dedup_name`; se il nome finisce già con "(N)" riparte da N+1).
+OK = usa quello, Cancel = la chiave `name` sparisce dagli attrs e la scena
+tiene il suo nome (descrizione e flag passano comunque).
+
+- Confronto senza maiuscole/minuscole e senza spazi ai bordi.
+- In defer mode conta il nome che la scena **avrà** (rinomina in attesa) e le
+  scene da cancellare non contano.
+- Nome uguale a quello attuale = nessun controllo: altrimenti un file che ha
+  già due scene omonime farebbe scattare l'avviso a ogni blur della scheda.
+- Non coperti (non sono rinomine dell'utente): nomi automatici di SU sulle
+  scene nuove, Controllo rilievo, incolla da clipboard (ha il suo dedup).
+- ⚠️ Collaudato solo il lato JS (browser, finto `window.sketchup`); il lato
+  Ruby è stato scritto senza poterlo eseguire (niente Ruby sulla postazione,
+  MCP spento). Se l'avviso non compare, guardare prima lì.
 
 ## Settings dialog
 

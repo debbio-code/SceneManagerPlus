@@ -1148,10 +1148,12 @@ window.SM = (function () {
       SMBridge.setExportIncluded(targetIds, newIncluded);
     });
 
-    // Enter / F2 -> rinomina inline la scena selezionata (solo se ne e'
-    // selezionata esattamente una). Equivale al click destro -> Rename.
+    // F2 -> rinomina inline la scena selezionata (solo se ne e' selezionata
+    // esattamente una). Equivale al click destro -> Rename. Solo F2, come in
+    // Esplora risorse: Invio non apre piu' la rinomina (scelta dell'utente,
+    // 2026-10-15).
     document.addEventListener('keydown', function (e) {
-      if (e.key !== 'Enter' && e.key !== 'F2') return;
+      if (e.key !== 'F2') return;
       var t = e.target;
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
       if (selection.length !== 1) return;
