@@ -136,13 +136,9 @@ module SceneManagerPlus
             out << {
               'key'               => style_key_by_name[sn],
               'native_name'       => sn,
-              # Nome che l'utente vede: sui file nuovi è il nome nativo, sui
-              # legacy non ancora migrati è il nickname. In paste diventa il
-              # nome vero dello stile creato.
-              'style_name'        => Core::Styles.display_name(sn),
-              # 'nickname' resta per i clipboard.json scritti da versioni
-              # precedenti (letto in fallback dal paste).
-              'nickname'          => (Core::Styles.get_nickname(sn) || ''),
+              # Il nome dello stile (l'unico: i nickname legacy non si usano
+              # più). In paste diventa il nome dello stile creato.
+              'style_name'        => sn,
               'badge_color'       => (Core::Styles.get_color(sn) || ''),
               'rendering_options' => ro_snapshot
             }

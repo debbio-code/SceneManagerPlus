@@ -248,16 +248,7 @@ window.SM = (function () {
     }
     var included = scene.export_included !== false;
     var letter = letterForStyle(scene.style_name);
-    var letterTitle = 'No style';
-    if (scene.style_name) {
-      // Mostra il nickname se c'è, indicando il nome nativo tra parentesi.
-      var styleEntry = styleByNameMap[scene.style_name] || null;
-      if (styleEntry && styleEntry.nick) {
-        letterTitle = 'Style: ' + styleEntry.nick + ' (native: ' + scene.style_name + ')';
-      } else {
-        letterTitle = 'Style: ' + scene.style_name;
-      }
-    }
+    var letterTitle = scene.style_name ? 'Style: ' + scene.style_name : 'No style';
     var letterStyle = '';
     var letterColor = colorForStyle(scene.style_name);
     if (letterColor) {
@@ -322,29 +313,49 @@ window.SM = (function () {
     var m = document.getElementById('sm-ctx-menu');
     if (m && !m.contains(e.target)) hideContextMenu();
   }
-  // Picker stili: lista A nome / B nome / ... per riassegnare uno stile alla
-  // scena cliccata. Stesso pattern di showContextMenu (dismiss via blur/click).
-  function showStylePickerMenu(x, y, sceneId) {
+  // Scene su cui lavora il picker della lettera stile: tutta la selezione se
+  // la scena cliccata ne fa parte, altrimenti la sola scena cliccata. Stessa
+  // regola del menu contestuale della riga.
+  function styleTargetsFor(sceneId) {
+    if (selection.length > 1 && selection.indexOf(sceneId) !== -1) {
+      return selection.filter(function (id) { return !!sceneById(id); });
+    }
+    return [sceneId];
+  }
+
+  // Picker stili: lista A nome / B nome / ... per riassegnare uno stile alle
+  // scene `targetIds` (una o piu'). Stesso pattern di showContextMenu
+  // (dismiss via blur/click).
+  function showStylePickerMenu(x, y, targetIds) {
     hideContextMenu();
     var styles = state.styles || [];
-    var scene = sceneById(sceneId);
-    var currentName = scene && scene.style_name;
+    // Stile "corrente" (giallo) solo se tutte le scene bersaglio lo usano gia':
+    // con stili misti nessuna voce e' quella giusta per tutte.
+    var currentName = null;
+    targetIds.forEach(function (id, i) {
+      var sc = sceneById(id);
+      var n = (sc && sc.style_name) || '';
+      if (i === 0) currentName = n;
+      else if (currentName !== n) currentName = '';
+    });
     var menu = document.createElement('div');
     menu.className = 'context-menu style-picker-menu';
     menu.id = 'sm-ctx-menu';
     var header = document.createElement('div');
     header.className = 'ctx-header';
-    header.textContent = 'Assign style';
+    header.textContent = targetIds.length > 1
+      ? 'Assign style to ' + targetIds.length + ' scenes'
+      : 'Assign style';
     menu.appendChild(header);
 
-    // Voce "+ Nuovo stile..." sempre in cima: alloca slot dal pool +
-    // (opzionale) nickname + assegna alla scena di contesto.
+    // Voce "+ Nuovo stile..." sempre in cima: crea uno stile dal viewport,
+    // chiede il nome e lo assegna alle scene bersaglio.
     var newItem = document.createElement('div');
     newItem.className = 'ctx-item style-pick style-pick-new';
     newItem.innerHTML = '<span class="ctx-letter">+</span><span class="ctx-name">New style…</span>';
     newItem.addEventListener('click', function () {
       hideContextMenu();
-      SMBridge.newStyle(sceneId);
+      SMBridge.newStyle(targetIds);
     });
     menu.appendChild(newItem);
 
@@ -367,16 +378,16 @@ window.SM = (function () {
       }
       var letterSpan = '<span class="ctx-letter"' + letterStyleAttr + '>' + s.letter + '</span>';
       item.innerHTML = letterSpan + '<span class="ctx-name"></span>';
-      // Display: nickname se presente, altrimenti nome nativo.
-      var label = s.display_name || s.name;
-      item.querySelector('.ctx-name').textContent = label;
-      // Tooltip mostra il nome nativo se diverso dal display.
-      if (s.nick) item.title = 'Native: ' + s.name;
+      item.querySelector('.ctx-name').textContent = s.name;
       item.addEventListener('click', function () {
         hideContextMenu();
-        if (s.name !== currentName) {
-          SMBridge.assignStyle(sceneId, s.name);
-        }
+        // Solo le scene che non hanno gia' quello stile: le altre non vanno
+        // riattivate ne' riscritte.
+        var ids = targetIds.filter(function (id) {
+          var sc = sceneById(id);
+          return !sc || sc.style_name !== s.name;
+        });
+        if (ids.length) SMBridge.assignStyle(ids, s.name);
       });
       menu.appendChild(item);
     });
@@ -1034,7 +1045,18 @@ window.SM = (function () {
       // stile e' permesso (la foto resta), Ruby chiede una conferma la prima
       // volta. Fino al 2026-08-01 qui c'era una deviazione al pannello Styles
       // nativo, basata su un divieto poi smentito dalle misure.
-      showStylePickerMenu(e.clientX, e.clientY, row.dataset.id);
+      //
+      // Dentro la selezione: il cambio vale per tutte le scene selezionate.
+      // Fuori: la selezione passa alla scena cliccata (come il tasto destro
+      // sulla riga), cosi' la fascia azzurra dice su cosa si sta lavorando.
+      var id = row.dataset.id;
+      if (selection.indexOf(id) === -1) {
+        selection = [id];
+        anchorId = id;
+        selectPageLocal(id);
+        render();
+      }
+      showStylePickerMenu(e.clientX, e.clientY, styleTargetsFor(id));
     }, true);
 
     // Scene color swatch: click sx → popup picker (live apply via Ruby).

@@ -30,11 +30,12 @@ window.SMBridge = (function () {
                        if (flags && flags.length) payload.flags = flags;
                        call('sm_update_from_view', payload);
                      },
-    assignStyle:     function (id, name) { call('sm_assign_style', { id: id, style_name: name }); },
+    // ids: una scena (stringa) o piu' (array) — Ruby fa un'operazione sola.
+    assignStyle:     function (ids, name) { call('sm_assign_style', { ids: [].concat(ids), style_name: name }); },
     setSceneColor:   function (id, hex)  { call('sm_scene_set_color', { id: id, color: hex || '' }); },
     openStyle:       function (id, name) { call('sm_open_style', { id: id, style_name: name }); },
     openNativeStylesPanel: function (id) { call('sm_open_native_styles_panel', { id: id }); },
-    newStyle:        function (id)       { call('sm_style_new', { id: id }); },
+    newStyle:        function (ids)      { call('sm_style_new', { ids: [].concat(ids) }); },
     deleteScenes:    function (ids)   { call('sm_delete', { ids: ids }); },
     newSceneFromView:function ()      { call('sm_new_scene_from_view'); },
     folderCreate:    function (name)  { call('sm_folder_create', { name: name }); },

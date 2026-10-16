@@ -15,6 +15,14 @@ module SceneManagerPlus
     # 2026-08-01). Il rename passa da Core::Styles.rename_style, che sposta con
     # sé i metadata chiavati per nome e rifiuta i duplicati.
     #
+    # Segue la scena attiva (dal 2026-10-16, come il Properties dialog): mostra
+    # sempre lo stile della scena nel viewport. Prima restava legato allo
+    # stile da cui era stato aperto, e dopo un cambio scena o un cambio stile
+    # dalla lista mostrava valori di un altro stile; peggio, al primo edit
+    # rimetteva quello stile nel viewport (select_style!) su una scena che non
+    # lo usa. I valori mostrati vengono dalle rendering options del viewport,
+    # quindi sono giusti solo se lo stile in edit è quello attivo.
+    #
     # Settings esposti (chiavi rendering_options con lookup difensivo):
     #   FaceColorMode (0=All same, 1=By material, 2=By axis)
     #   TransparencySort (0=Faster, 1=Medium, 2=Nicer)
@@ -124,6 +132,45 @@ module SceneManagerPlus
         @dialog
       end
 
+      # Chiamato a ogni cambio della scena attiva (click in lista, linguette
+      # native via polling). La finestra passa alla nuova scena e al suo
+      # stile. In defer mode resta ferma, come il resto: la scena nel viewport
+      # non segue la selezione.
+      def follow_active(uid)
+        return unless @dialog && @dialog.visible?
+        return if Core::Buffer.deferred?
+        page = Core::SceneModel.find_by_id(uid)
+        return unless page
+        name = Core::SceneModel.page_style_name(page).to_s
+        return if uid == @scene_id && name == @style_name.to_s
+        @scene_id   = uid
+        @style_name = name
+        push_state
+      rescue => e
+        warn "[SM+] style follow_active: #{e.class}: #{e.message}"
+      end
+
+      # Dopo un cambio stile fatto dalla finestra principale (una o più
+      # scene). Si riallinea alla scena attiva, il cui stile può essere
+      # appena cambiato, e rilegge i valori anche se il nome è lo stesso
+      # (cambia comunque il numero di scene che usano lo stile).
+      def after_assign(ids, style_name)
+        return unless @dialog && @dialog.visible?
+        if Core::Buffer.deferred?
+          @style_name = style_name.to_s if @scene_id && Array(ids).include?(@scene_id)
+        else
+          m = Sketchup.active_model
+          page = m && m.pages.selected_page
+          if page
+            @scene_id   = Core::SceneModel.page_id(page)
+            @style_name = Core::SceneModel.page_style_name(page).to_s
+          end
+        end
+        push_state
+      rescue => e
+        warn "[SM+] style after_assign: #{e.class}: #{e.message}"
+      end
+
       def register_callbacks(dlg)
         dlg.add_action_callback('sm_style_ready') do |_ctx|
           push_state
@@ -162,11 +209,8 @@ module SceneManagerPlus
         end
 
         # Rinomina lo stile correntemente in edit (nome NATIVO: si vede anche
-        # in Window → Styles di SketchUp).
-        #
-        # Su un file legacy non ancora migrato l'input mostra il nickname:
-        # committarlo rinomina lo stile nativo e butta via il nickname, cioè
-        # migra quel singolo stile senza che l'utente debba saperlo.
+        # in Window → Styles di SketchUp). Sui file legacy rename_style butta
+        # via anche l'eventuale nickname rimasto nel modello.
         #
         # Nome vuoto o già usato da un altro stile → rifiutato con messagebox
         # (SU accetterebbe il duplicato in sessione, salvo poi rinominarlo di
@@ -175,12 +219,17 @@ module SceneManagerPlus
         dlg.add_action_callback('sm_style_set_name') do |_ctx, payload|
           data = parse(payload)
           want = data['name'].to_s.strip
+          # `style` = lo stile per cui il nome è stato scritto. Può non essere
+          # più @style_name: la finestra segue la scena attiva, e una modifica
+          # rimasta in sospeso al cambio scena arriva dopo (vedi
+          # flushHeaderEdits in style_dialog.js).
+          target = data['style'].to_s.empty? ? @style_name : data['style'].to_s
           if want.empty?
             ::UI.messagebox('The style name cannot be empty.')
-          elsif Core::Styles.rename_style(@style_name, want)
+          elsif Core::Styles.rename_style(target, want)
             # Il target di ogni callback successivo è cambiato: senza questo,
             # select_style!/apply_changes cercherebbero un nome che non esiste più.
-            @style_name = want
+            @style_name = want if target.to_s == @style_name.to_s
           else
             ::UI.messagebox(
               "A style named '#{want}' already exists.\n" \
@@ -250,7 +299,8 @@ module SceneManagerPlus
         # pannello Styles). Commit su blur/Enter, come il nome.
         dlg.add_action_callback('sm_style_set_description') do |_ctx, payload|
           data = parse(payload)
-          Core::Styles.set_description(@style_name, data['description'].to_s)
+          target = data['style'].to_s.empty? ? @style_name : data['style'].to_s
+          Core::Styles.set_description(target, data['description'].to_s)
           push_state
         end
 
@@ -271,7 +321,7 @@ module SceneManagerPlus
         # Usato dal footer della finestra stile (overlay CSS problematico in CEF SU 2019).
         dlg.add_action_callback('sm_style_show_scenes') do |_ctx|
           using = scenes_using_style(@style_name)
-          display = Core::Styles.display_name(@style_name) rescue @style_name
+          display = @style_name
           if using.empty?
             ::UI.messagebox("No scenes use style '#{display}'.")
           else
@@ -333,11 +383,6 @@ module SceneManagerPlus
         is_mp = ctx ? Core::SceneModel.matchphoto?(ctx) : false
         state = {
           style_name:   @style_name,
-          # Valore mostrato nell'input "Name": sui file già migrati coincide
-          # con style_name; sui legacy è ancora il nickname, e committarlo
-          # rinomina lo stile nativo (vedi sm_style_set_name).
-          display_name: Core::Styles.display_name(@style_name),
-          nickname:     Core::Styles.get_nickname(@style_name),
           description:  Core::Styles.get_description(@style_name),
           badge_color:  Core::Styles.get_color(@style_name),
           # Elenco per il selettore dell'header. Stessa fonte delle lettere

@@ -19,12 +19,14 @@ module SceneManagerPlus
     #   riapertura del file. Quindi l'unicità la impone il plugin, a monte:
     #   vedi style_name_taken? / unique_style_name / rename_style.
     #
-    # Nickname per-modello (LEGACY, in sola lettura + migrazione):
+    # Nickname per-modello (LEGACY, solo migrazione):
     #   Mappa native_name → friendly_name nel dict 'SMP_style_nicks'. Era il
     #   modo di dare un nome leggibile agli slot quando non si poteva
-    #   rinominare. I file già lavorati la contengono ancora: display_name la
-    #   rispetta, e migrate_legacy_nicknames! la converte in nomi veri
-    #   (bottone in Settings). Sui file nuovi non viene mai scritta.
+    #   rinominare. Dal 2026-10-16 il plugin NON la mostra più da nessuna
+    #   parte: uno stile ha un nome solo, quello nativo (due nomi per lo
+    #   stesso stile confondevano, scelta dell'utente). I file già lavorati
+    #   la contengono ancora: migrate_legacy_nicknames! la converte in nomi
+    #   veri (bottone in Settings). Sui file nuovi non viene mai scritta.
     module Styles
       module_function
 
@@ -503,46 +505,12 @@ module SceneManagerPlus
         { renamed: renamed, skipped: skipped }
       end
 
-      # ── Nickname API (legacy) ─────────────────────────────────────────
+      # ── Nickname (legacy) ─────────────────────────────────────────────
+      # Non si leggono più per la UI e non si scrivono: resta solo la pulizia
+      # delle entry orfane (rename, purge) e la migrazione qui sopra.
 
-      def get_nickname(style_name)
-        m = model
-        return nil unless m && style_name
-        v = m.get_attribute(NICKNAMES_DICT, style_name.to_s, nil)
-        return nil if v.nil?
-        s = v.to_s
-        s.empty? ? nil : s
-      end
-
-      # Set nickname. Ritorna true se applicato, false se conflict (un altro
-      # stile ha già lo stesso display_name = stesso nickname, o nickname che
-      # collide con il nome nativo di un altro stile). Stringa vuota = clear,
-      # sempre OK.
-      #
-      # Validazione contro display_name (non solo nickname): se uno stile è
-      # senza nickname e si chiama nativamente "Foo", non vogliamo permettere
-      # ad un altro stile di nicknamarsi "Foo" — altrimenti il picker mostra
-      # due voci con lo stesso label e l'utente non capisce quale sceglie.
-      def set_nickname(style_name, nickname)
-        m = model
-        return false unless m && style_name
-        key = style_name.to_s
-        nick = nickname.to_s.strip
-        if nick.empty?
-          m.set_attribute(NICKNAMES_DICT, key, '')
-          return true
-        end
-        return false if display_name_taken?(nick, except_native: key)
-        m.set_attribute(NICKNAMES_DICT, key, nick)
-        true
-      end
-
-      def clear_nickname(style_name)
-        set_nickname(style_name, '')
-      end
-
-      # Rimuove proprio la key dal dizionario (vs set_nickname che lascia '').
-      # Usato dopo purge_unused per non accumulare nickname orfani.
+      # Rimuove la key dal dizionario dei nickname. Usato dopo rename e
+      # purge_unused per non lasciare nickname orfani.
       def remove_nickname_attr(style_name)
         m = model
         return unless m && style_name
@@ -594,35 +562,15 @@ module SceneManagerPlus
         d.delete_key(style_name.to_s) if d.respond_to?(:delete_key)
       end
 
-      # True se `name` è già usato come display_name (nickname o nativo) da
-      # uno stile diverso da `except_native`. Case-sensitive, trim'ata.
-      def display_name_taken?(name, except_native: nil)
-        target = name.to_s.strip
-        return false if target.empty?
-        m = model
-        return false unless m && m.respond_to?(:styles) && m.styles
-        m.styles.any? do |s|
-          sname = s.name.to_s
-          next false if except_native && sname == except_native.to_s
-          display_name(sname) == target
-        end
-      end
-
-      # Nome da mostrare nella UI del plugin: nickname se presente, altrimenti
-      # il nome nativo SU.
-      def display_name(style_name)
-        get_nickname(style_name) || style_name.to_s
-      end
-
       # Enumera gli stili del modello NON usati da nessuna scena. Ritorna
-      # array di hash { name, display_name } ordinati per display_name.
+      # array di hash { name } ordinati per nome.
       def unused_styles
         m = model
         return [] unless m
         used_names = m.pages.map { |p| (p.style.name.to_s rescue nil) }.compact.uniq
         m.styles.reject { |s| used_names.include?(s.name.to_s) }
-                .map { |s| { name: s.name.to_s, display_name: display_name(s.name.to_s) } }
-                .sort_by { |h| h[:display_name].downcase }
+                .map { |s| { name: s.name.to_s } }
+                .sort_by { |h| h[:name].downcase }
       end
 
       # Flusso completo del purge con conferma e report, condiviso tra il
@@ -638,13 +586,7 @@ module SceneManagerPlus
           ::UI.messagebox('All styles are in use by at least one scene. Nothing to purge.')
           return nil
         end
-        list = unused.map { |h|
-          if h[:display_name] != h[:name]
-            "  • #{h[:display_name]} (native: #{h[:name]})"
-          else
-            "  • #{h[:name]}"
-          end
-        }.join("\n")
+        list = unused.map { |h| "  • #{h[:name]}" }.join("\n")
         mb_yesno = Object.const_defined?(:MB_YESNO) ? MB_YESNO : 4
         id_yes   = Object.const_defined?(:IDYES)   ? IDYES   : 6
         answer = ::UI.messagebox(

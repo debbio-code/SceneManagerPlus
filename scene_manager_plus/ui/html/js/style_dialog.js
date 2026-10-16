@@ -243,7 +243,7 @@ window.SMS = (function () {
     styles.forEach(function (s) {
       var o = document.createElement('option');
       o.value = s.name;
-      o.textContent = (s.letter ? s.letter + '   ' : '') + (s.display_name || s.name);
+      o.textContent = (s.letter ? s.letter + '   ' : '') + s.name;
       if (s.name === current) { o.selected = true; found = true; }
       sel.appendChild(o);
     });
@@ -259,21 +259,46 @@ window.SMS = (function () {
     }
   }
 
+  // La finestra segue la scena attiva, quindi lo stile puo' cambiare sotto un
+  // campo Name/Description con una modifica non ancora salvata (cursore
+  // dentro, finestra disattivata da un clic sulla lista: in CEF il blur non
+  // arriva). La modifica va allo stile per cui era stata scritta, mandata
+  // esplicitamente col suo nome, prima che lo state cambi.
+  function flushHeaderEdits(prev) {
+    var oldName = prev.style_name || '';
+    if (!oldName) return;
+    var n = $('style-nickname');
+    if (n && document.activeElement === n) {
+      var v = n.value.trim();
+      if (v && v !== oldName) call('sm_style_set_name', { name: v, style: oldName });
+    }
+    var d = $('style-description');
+    if (d && document.activeElement === d && d.value !== (prev.description || '')) {
+      call('sm_style_set_description', { description: d.value, style: oldName });
+    }
+  }
+
   function setState(newState) {
+    var prev = state;
+    var switching = !!(newState && prev && prev.style_name != null &&
+                       newState.style_name !== prev.style_name);
+    if (switching) flushHeaderEdits(prev);
     state = newState || state;
     if (!state.values) state.values = {};
     if (!state.scenes_list) state.scenes_list = [];
-    var shown = state.display_name || state.style_name || '';
+    if (switching) {
+      // Campi riallineati allo stile nuovo PRIMA del blur: cosi' il
+      // commit-on-blur li trova invariati e non manda niente.
+      var nEl = $('style-nickname');
+      if (nEl) { nEl.value = state.style_name || ''; nEl.blur(); }
+      var dEl = $('style-description');
+      if (dEl) { dEl.value = state.description || ''; dEl.blur(); }
+    }
     renderStylePicker(state.styles || [], state.style_name || '');
-    $('style-name').textContent = state.style_name || '—';
-    // La riga "Native:" ha senso solo sui file legacy non ancora migrati,
-    // dove il campo Name mostra il nickname e il nome vero e' un altro.
-    var natEl = $('style-native');
-    if (natEl) natEl.style.display = (shown === (state.style_name || '')) ? 'none' : '';
     // Name input: NON sovrascrivere se l'utente sta editando.
     var nickEl = $('style-nickname');
     if (nickEl && document.activeElement !== nickEl) {
-      nickEl.value = shown;
+      nickEl.value = state.style_name || '';
     }
     var descEl = $('style-description');
     if (descEl && document.activeElement !== descEl) {
@@ -452,9 +477,9 @@ window.SMS = (function () {
     var el = $('style-nickname');
     if (!el) return;
     var v = el.value.trim();
-    var cur = state.display_name || state.style_name || '';
+    var cur = state.style_name || '';
     if (v === cur) return;
-    call('sm_style_set_name', { name: v });
+    call('sm_style_set_name', { name: v, style: cur });
   }
 
   function commitDescription() {
@@ -462,7 +487,7 @@ window.SMS = (function () {
     if (!el) return;
     var v = el.value;
     if (v === (state.description || '')) return;
-    call('sm_style_set_description', { description: v });
+    call('sm_style_set_description', { description: v, style: state.style_name || '' });
   }
 
   // Imposta i controlli senza scatenare il change-handler che ri-invierebbe
@@ -707,7 +732,7 @@ window.SMS = (function () {
       nickEl.addEventListener('keydown', function (e) {
         if (e.key === 'Enter') { e.preventDefault(); nickEl.blur(); }
         else if (e.key === 'Escape') {
-          nickEl.value = state.display_name || state.style_name || '';
+          nickEl.value = state.style_name || '';
           nickEl.blur();
         }
       });

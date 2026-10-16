@@ -167,23 +167,15 @@ module SceneManagerPlus
       def styles_map
         m = model
         return [] unless m && m.respond_to?(:styles) && m.styles
-        # Ordiniamo per display_name (nickname o nativo) così la lettera
-        # rispecchia ciò che l'utente vede nel plugin. Stabile a parità di
-        # nome (rare).
-        nick_dict  = m.attribute_dictionary(Core::Styles::NICKNAMES_DICT, false) rescue nil
-        color_dict = m.attribute_dictionary(Core::Styles::COLORS_DICT, false)    rescue nil
-        pairs = m.styles.map do |s|
-          name = s.name.to_s
-          nick = nick_dict ? nick_dict[name].to_s : ''
-          [name, nick.empty? ? name : nick]
-        end
-        pairs.sort_by! { |(_, disp)| disp.downcase }
-        pairs.each_with_index.map do |(name, disp), i|
-          nick = nick_dict ? nick_dict[name].to_s : ''
-          nick = nil if nick.empty?
+        # Ordine alfabetico sul nome nativo, l'unico nome che uno stile ha
+        # (lo stesso di Window → Styles). I nickname del vecchio pool non si
+        # mostrano più: vedi Core::Styles, "Nickname (LEGACY)".
+        color_dict = m.attribute_dictionary(Core::Styles::COLORS_DICT, false) rescue nil
+        names = m.styles.map { |s| s.name.to_s }.sort_by(&:downcase)
+        names.each_with_index.map do |name, i|
           color = color_dict ? color_dict[name].to_s : ''
           color = nil if color.empty?
-          { name: name, display_name: disp, nick: nick, color: color, letter: letter_for_index(i) }
+          { name: name, color: color, letter: letter_for_index(i) }
         end
       rescue => e
         warn "[SM+] styles_map: #{e.class}: #{e.message}"
@@ -319,12 +311,23 @@ module SceneManagerPlus
       #
       # Resta la conferma perché l'operazione cambia visibilmente il disegno e
       # può partire da un clic destro di striscio.
+      #
+      # `page` può essere anche un array (cambio stile su più scene): una sola
+      # domanda per tutte.
       def confirm_mp_style_change(page)
         return true if mp_style_change_acknowledged?
         mb    = Object.const_defined?(:MB_OKCANCEL) ? MB_OKCANCEL : 1
         id_ok = Object.const_defined?(:IDOK) ? IDOK : 1
+        list  = Array(page)
+        head  = if list.size == 1
+                  "Scene '#{list.first.name}' is a Match Photo scene."
+                else
+                  "#{list.size} of these scenes are Match Photo scenes:\n" +
+                    list.first(8).map { |p| "  • #{p.name}" }.join("\n") +
+                    (list.size > 8 ? "\n  …" : '')
+                end
         answer = ::UI.messagebox(
-          "Scene '#{page.name}' is a Match Photo scene.\n\n" \
+          "#{head}\n\n" \
           "Changing its style is allowed: the background photo stays and the " \
           "two-point perspective is preserved. What changes is how the model " \
           "geometry itself is drawn.\n\n" \
@@ -1398,73 +1401,103 @@ module SceneManagerPlus
         end
       end
 
-      # Riassegna uno stile a una scena. Anche in defer mode l'operazione è
-      # immediata: assegnare uno stile dipende dal qui-e-ora del viewport e
-      # cambia model.styles.selected_style come effetto collaterale (come
+      # Riassegna uno stile a una scena. Wrapper di assign_styles per i
+      # chiamanti che lavorano su una scena sola; ritorna true/false.
+      def assign_style(page_uid, style_name)
+        assign_styles([page_uid], style_name) > 0
+      end
+
+      # Riassegna uno stile a una o più scene, in UNA operazione (un solo
+      # Ctrl+Z annulla tutto). Anche in defer mode è immediata: assegnare uno
+      # stile dipende dal qui-e-ora del viewport e cambia
+      # model.styles.selected_style come effetto collaterale (come
       # update_from_view).
       #
-      # Flusso:
-      #   1) ricorda la pagina attualmente selezionata
-      #   2) attiva la pagina target (così page.update() captura sul target)
-      #   3) cambia model.styles.selected_style allo stile voluto
-      #   4) page.update(PAGE_USE_STYLE | PAGE_USE_RENDERING_OPTIONS) cattura
-      #   5) ripristina la pagina selezionata originale
+      # Per ogni scena:
+      #   1) la attiva (così page.update() cattura sul target, e la nebbia
+      #      ripristinata è la SUA: lo stile non porta con sé la nebbia, che
+      #      quindi resta quella della scena e non quella del viewport)
+      #   2) cambia model.styles.selected_style allo stile voluto
+      #   3) page.update(PAGE_USE_STYLE | PAGE_USE_RENDERING_OPTIONS) cattura
+      # Alla fine torna alla scena che era nel viewport.
       #
-      # Side effect noto: se lo stile precedente era dirty, le modifiche
-      # pending vengono perse (analogo al comportamento native SU). Per Fase B
-      # accettiamo: l'utente che riassegna sa cosa sta facendo.
-      def assign_style(page_uid, style_name)
+      # Side effect noto: se lo stile nel viewport era dirty, le modifiche
+      # pending vengono perse (analogo al comportamento native SU).
+      #
+      # Ritorna il numero di scene a cui lo stile è stato assegnato: 0 se
+      # stile o scene non trovati, conferma Match Photo annullata, errore.
+      def assign_styles(page_uids, style_name)
         m = model
-        return false unless m
-        p = find_by_id(page_uid)
-        unless p
-          warn "[SM+] assign_style: page not found id=#{page_uid.inspect}"
-          return false
+        return 0 unless m
+        pages = Array(page_uids).map { |id| find_by_id(id) }.compact.uniq
+        if pages.empty?
+          warn "[SM+] assign_styles: no page found for #{page_uids.inspect}"
+          return 0
         end
         target_style = m.styles.find { |s| s.name.to_s == style_name.to_s }
         unless target_style
-          warn "[SM+] assign_style: style '#{style_name}' not found in model"
-          return false
+          warn "[SM+] assign_styles: style '#{style_name}' not found in model"
+          return 0
         end
         # Match Photo: NON è più un divieto (vedi confirm_mp_style_change).
-        # Solo una conferma, e una sola volta per macchina.
-        return false if matchphoto?(p) && !confirm_mp_style_change(p)
-        # Costanti PAGE_USE_* — lookup difensivo come in update_from_view
-        sc = lambda do |*names|
-          names.each { |n| return Object.const_get(n) if Object.const_defined?(n) }
-          0
-        end
-        style_bit = sc.call('PAGE_USE_STYLE', 'PAGE_USE_SKETCHCS', 'PAGE_USE_RENDERING_OPTIONS')
-        ro_bit    = sc.call('PAGE_USE_RENDERING_OPTIONS')
-        mask = style_bit | ro_bit
-        prev_page = m.pages.selected_page
+        # Solo una conferma, una sola volta per macchina, e una sola per
+        # tutta la selezione. Annullata = non cambia nessuna scena.
+        mp_pages = pages.select { |p| matchphoto?(p) }
+        return 0 if !mp_pages.empty? && !confirm_mp_style_change(mp_pages)
+        mask = style_ro_mask
+        prev_page  = m.pages.selected_page
+        prev_style = m.styles.selected_style
+        left_prev  = false
         m.start_operation('SM+ Assign style', true)
         begin
-          m.pages.selected_page = p
-          # Pagina senza stile salvato (scene MP di plugin terzi, o create
-          # dalle vecchie versioni di SM+): le si dà PRIMA uno stile, con la
-          # pagina già attiva. È il vero discrimine del BugSplat storico —
-          # non "essere Match Photo" — vedi capture_style!. Qui è difensivo:
-          # il p.update poco sotto salverebbe comunque uno stile, ma se
-          # quella riga fallisse la pagina resterebbe coi flag accesi e
-          # style == nil, cioè nello stato che splatta.
-          capture_style!(p) if style_missing?(p)
-          m.styles.selected_style = target_style
-          # Forza il flag use_style a true: senza, page.update con STYLE bit
-          # non lega effettivamente lo stile alla scena (cfr. PAGE_USE_*).
-          p.use_style = true if p.respond_to?(:use_style=)
-          p.use_rendering_options = true if p.respond_to?(:use_rendering_options=)
-          p.update(mask)
-          m.pages.selected_page = prev_page if prev_page && prev_page != p
+          pages.each do |p|
+            if m.pages.selected_page != p
+              m.pages.selected_page = p
+              left_prev = true
+            end
+            # Pagina senza stile salvato (scene MP di plugin terzi, o create
+            # dalle vecchie versioni di SM+): le si dà PRIMA uno stile, con la
+            # pagina già attiva. È il vero discrimine del BugSplat storico —
+            # non "essere Match Photo" — vedi capture_style!. Qui è difensivo:
+            # il p.update poco sotto salverebbe comunque uno stile, ma se
+            # quella riga fallisse la pagina resterebbe coi flag accesi e
+            # style == nil, cioè nello stato che splatta.
+            capture_style!(p) if style_missing?(p)
+            m.styles.selected_style = target_style
+            # Forza il flag use_style a true: senza, page.update con STYLE bit
+            # non lega effettivamente lo stile alla scena (cfr. PAGE_USE_*).
+            # Scritto solo se cambia (regola dei write sui flag, vedi update_page).
+            p.use_style = true if p.respond_to?(:use_style=) && !p.use_style?
+            if p.respond_to?(:use_rendering_options=) && !p.use_rendering_options?
+              p.use_rendering_options = true
+            end
+            p.update(mask)
+          end
+          # Si torna alla scena che era nel viewport: riattivarla rimette il
+          # SUO stile (quello nuovo, se era fra le scene cambiate). Se non
+          # salva lo stile, o non c'era una scena attiva, si rimette a mano lo
+          # stile che il viewport mostrava: altrimenti resterebbe lo stile
+          # appena assegnato, su una vista che non lo usa.
+          m.pages.selected_page = prev_page if prev_page && left_prev
+          if prev_style && (prev_page.nil? || !prev_page.use_style?) &&
+             !pages.include?(prev_page)
+            m.styles.selected_style = prev_style
+          end
           m.commit_operation
-          puts "[SM+] assign_style: page='#{p.name}' style='#{style_name}'"
-          true
         rescue => e
           m.abort_operation
-          warn "[SM+] assign_style: #{e.class}: #{e.message}"
+          warn "[SM+] assign_styles: #{e.class}: #{e.message}"
           warn e.backtrace.first(3).join("\n")
-          false
+          return 0
         end
+        # Stampa in scala: riattivare la scena con selected_page= ricarica la
+        # camera salvata, che le bande del foglio non le ha. Stessa chiamata
+        # che fa il cambio scena normale (nessuna write sul modello).
+        if prev_page && m.pages.selected_page == prev_page && pages.any? { |p| p != prev_page }
+          Core::PrintScale.on_scene_activated(prev_page) rescue nil
+        end
+        puts "[SM+] assign_styles: style='#{style_name}' scenes=#{pages.map(&:name).inspect}"
+        pages.size
       end
 
       def select_page(id)

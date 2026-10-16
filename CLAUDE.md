@@ -71,7 +71,7 @@ Feature aggiunte post-Fase 4:
 | Nuova scena da vista | Icona toolbar (📷+) → `SceneModel.add_from_view`. Replica gli override di visibilità layer della pagina attiva (vedi sotto, "Add visible tag"). **Forza tutti gli 8 `FLAG_KEYS` (use_camera, use_style, ecc.) a `true`** dopo `pages.add`, così la nuova scena cattura sempre lo state completo del viewport — `pages.add` da solo rispetta i "Default Scene Properties" globali di SU e se l'utente li ha personalizzati (es. Style/Fog OFF) la scena nascerebbe monca. Scelta UX: il flusso del plugin è "scatta foto completa", non "rispetta i miei default SU". **Se la scena attiva è Match Photo** prende invece il ramo `add_from_view_native` (comando nativo via `send_action`, asincrono → post-processing in timer): vedi sezione "Match Photo". Da lì in poi `add_from_view` ritorna la Page solo nel ramo sincrono — **i chiamanti devono usare il blocco `on_created`**. |
 | Update da view (`⟳`) | `SceneModel.update_from_view(id)` costruisce una bitmask `PAGE_USE_*` con lookup difensivo (vedi `docs/SU2019-LESSONS.md`). Per `use_style?` tenta `PAGE_USE_STYLE` → `PAGE_USE_SKETCHCS` → `PAGE_USE_RENDERING_OPTIONS` (fallback piggyback). Per `use_axes?` tenta `PAGE_USE_AXES` → `PAGE_USE_CAMERA`. Script `tools/dump-page-use.rb` per verificare i nomi delle costanti effettivamente esposte dalla SU in uso. **Se lo stile attivo è dirty** (`styles.active_style_changed`), mostra un `UI.messagebox` 3-button YES/NO/CANCEL equivalente al "Warning - Scenes and Styles" nativo: YES → `update_selected_style` poi page.update; NO → mostra istruzioni per "Save as new" via browser (l'API Ruby SU 2019 non lo espone) e abort; CANCEL → toglie il bit style dal mask, salva il resto. Senza questo dialog le modifiche pending allo stile si perdono silenziosamente: `page.update(PAGE_USE_SKETCHCS)` lega la scena allo stile ma non lo flusha. UI: il trigger ⟳ vive nella toolbar (`btn-update`), opera su selezione (anche multipla con loop client-side). Niente più icona update per-row: quello slot è occupato dal badge lettera stile. |
 | Style letter badge | Sostituisce la vecchia ⟳ per-row. Mostra A,B,C... derivato da `SceneModel.styles_map` (ordine alfabetico su `model.styles.map(&:name)`, **tutti** gli stili, anche orfani). Per-scena `scene.style_name` da `page.style.name`. JS lookup via `letterForStyle()` → '?' se manca. Render solo (zero interazione di update): click sx apre mini Style Manager, click dx apre picker riassegna. |
-| Style assignment (click dx lettera) | `SceneModel.assign_style(uid, name)` attiva la target page, fa `styles.selected_style = X`, forza `use_style/use_rendering_options = true`, `page.update(STYLE_BIT \| RO_BIT)`, ripristina la scena attiva precedente. Tutto in una `start_operation` (1 Ctrl+Z). Immediato anche in defer mode (operazione viewport-dipendente, analoga a `update_from_view`). Side-effect noto: se lo stile precedente era dirty, le pending si perdono (come comportamento native SU). |
+| Style assignment (click dx lettera) | **Vale per tutta la selezione** se il clic destro cade su una scena selezionata (dal 2026-10-16; fuori dalla selezione la selezione passa alla scena cliccata, come il tasto destro sulla riga). Header "Assign style to N scenes"; lo stile è evidenziato come attuale solo se lo usano tutte; si mandano solo le scene che non lo hanno già. `SceneModel.assign_styles(ids, name)` (`assign_style(uid, name)` resta come wrapper): per ogni scena la attiva, fa `styles.selected_style = X`, forza `use_style/use_rendering_options = true` (solo se spenti), `page.update(STYLE_BIT \| RO_BIT)`; alla fine torna alla scena che era nel viewport (+ `PrintScale.on_scene_activated` per le bande) e, se quella non salva lo stile, rimette lo stile di prima. Tutto in una `start_operation` (1 Ctrl+Z). Attivare ogni scena serve anche a tenerle la SUA nebbia (lo stile non porta la nebbia: verificato, scena con nebbia → stile cambiato → nebbia intatta). Conferma Match Photo una sola per tutta la selezione. Immediato anche in defer mode (operazione viewport-dipendente, analoga a `update_from_view`). Side-effect noto: se lo stile nel viewport era dirty, le pending si perdono (come comportamento native SU). Verificato dal vivo (19.0.685), anche con le transizioni fra scene accese. |
 | Mini Style Manager (click sx lettera) | `UI::StyleDialog` (`STYLE_DIALOG`) con 3 gruppi: **Edges** (`EdgeColorMode` 0/1/2 = All same/By material/By axis — è il colore *delle linee*, non delle facce; `TransparencySort` 0/1/2); **Background** (`BackgroundColor`, `DrawHorizon` on/off, `SkyColor`); **Display** (`DrawHidden`, Model axes checkbox `DisplaySketchAxes`, `DisplaySectionPlanes`, `DisplaySectionCuts`). Edit live → `rendering_options[k] = v` + `styles.update_selected_style` per committare al persistente. All'apertura, la scena di contesto viene attivata nel viewport per feedback live. **Scope sempre = "all scenes using this style"**: niente "only this scene" perché l'API Ruby SU 2019 non espone `style.name=` né `Styles#add_style` da memoria, quindi clonare programmaticamente uno stile non è fattibile pulitamente. Banner nel dialog spiega il workaround manuale: duplicare lo stile in Window → Styles nativo, poi riassegnare via right-click su lettera. **Model Axes è un checkbox stateful** come gli altri Display: la rendering option `DisplaySketchAxes` (bool) controlla il display degli assi del modello — scoperto via MCP `eval_ruby` su SU 2019.0.685 (vedi sezione "Style management"). Niente più hack `Sketchup.send_action(10522)`/`axes_cmd_id`. |
 | Rinomina inline | **F2** (solo F2: Invio non apre più la rinomina, scelta dell'utente 2026-10-15) oppure right-click su scena → context menu → "Rename" → input nella row, Enter = commit, Esc/blur-senza-modifiche = annulla. Passa dal controllo dei nomi doppi (sezione "Nomi doppi delle scene"). |
 | Selezione vs scena attiva | Due stati **distinti** nel JS: `selection` (array, barra azzurra, può essere multipla) e `activeId` (singolo, marker giallo sul `.grip`, = scena effettivamente nel viewport). `push_state` invia `active_id` dal `pages.selected_page` di Ruby. `setActiveFromNative` (polling 250ms) aggiorna SOLO `activeId`, mai la selezione (prima la collassava all'uid, e ogni cambio tab nativo distruggeva la multi-selezione). Helper `selectPageLocal(id)` per i click/keynav: in **defer mode è no-op** (la scena nel viewport non cambia → il giallo non deve seguire la selezione), altrimenti setta `activeId` e chiama `SMBridge.selectPage` per feedback immediato senza attendere il polling. **Ordine obbligatorio nei handler keynav (frecce/PageUp/Down/Home/End) e click**: `selectPageLocal(id)` PRIMA di `render()`, perché `selectPageLocal` muta `activeId` ma non re-renderizza; se invertito, il marker giallo resta sulla scena precedente fino al successivo `push_state` (lag di 1 step). |
@@ -226,7 +226,7 @@ Callback principali in `ui/dialog.rb`:
 | `sm_update_from_view` | come bottone Update nativo |
 | `sm_delete` | cancella scene selezionate |
 | `sm_folder_create` / `_update` / `_delete` / `_toggle` | CRUD cartelle |
-| `sm_assign_style` | riassegna stile a scena (`{ id, style_name }`) |
+| `sm_assign_style` | riassegna stile a una o più scene (`{ ids: [], style_name }`; `id` singolo ancora accettato). Anche `sm_style_new` prende `{ ids }` |
 | `sm_open_style` | apre Mini Style Manager (`{ id, style_name }`) |
 | `sm_log` | debug → `Ruby Console` |
 
@@ -777,7 +777,7 @@ Tre layer di interazione sulla stessa lettera per-row:
 |---|---|
 | Render | Lettera A,B,C... (badge mono) = lo stile assegnato alla scena |
 | Click sx | Apre Mini Style Manager (`StyleDialog.show_for`) per quello stile |
-| Click dx | Apre style picker (`showStylePickerMenu` in app.js) — lista A `<name>`, B `<name>`... lo stile corrente in giallo, click per riassegnare |
+| Click dx | Apre style picker (`showStylePickerMenu` in app.js) — lista A `<name>`, B `<name>`... lo stile corrente in giallo, click per riassegnare. Su una scena selezionata vale per **tutta la selezione** (`styleTargetsFor`) |
 
 **Letter mapping** (`SceneModel.styles_map`): ordine alfabetico per nome stile,
 include **tutti** gli stili del modello (non solo quelli usati). Oltre la Z
@@ -786,7 +786,8 @@ come `state.styles = [{ name, letter }, ...]`. Per-scena `state.scenes[].style_n
 da `Sketchup::Page#style` (esistente in SU 2019). JS `letterForStyle()` cerca
 e ritorna '?' se nil (stato pre-push o stile orfano).
 
-**Riassegnazione** (`SceneModel.assign_style`): non c'è un setter pulito
+**Riassegnazione** (`SceneModel.assign_styles`, una o più scene; dettagli
+nella tabella "Decisioni di design"): non c'è un setter pulito
 `page.style=` in SU 2019. Workaround: attiva la pagina target, set
 `styles.selected_style = X`, forza `use_style = true` + `use_rendering_options =
 true` (altrimenti `page.update` con STYLE bit non lega davvero lo stile), poi
@@ -803,6 +804,23 @@ viewport). Ogni edit → coerce per tipo (hex→`Sketchup::Color`, bool, int) �
 `ro[k] = v` → `styles.update_selected_style` (committa al persistente; senza
 questo gli edit valgono solo per la sessione e all'attivazione successiva
 SU riapplica lo stile salvato perdendo le modifiche).
+
+**Segue la scena attiva** (dal 2026-10-16, come il Properties dialog):
+`StyleDialog.follow_active(uid)` da `sm_select_page` e dal polling,
+`StyleDialog.after_assign` dopo un cambio stile dalla lista. Era la
+"confusione nella finestra di dettaglio dello stile" segnalata dall'utente:
+la finestra restava legata allo stile da cui era stata aperta, quindi dopo un
+cambio scena o un cambio stile dalla lista mostrava ancora il vecchio nome e
+valori presi dal viewport (cioè da un altro stile), e al primo edit
+`select_style!` rimetteva il vecchio stile nel viewport su una scena che non
+lo usa. I valori mostrati vengono sempre dalle rendering options del
+viewport: sono giusti solo se lo stile in edit è quello attivo, ed è per
+questo che la finestra deve seguire la scena. In defer mode resta ferma.
+Nome/descrizione: i commit mandano lo stile per cui sono stati scritti
+(`style` nel payload) e `flushHeaderEdits` in `style_dialog.js` salva una
+modifica rimasta in sospeso **prima** che lo state passi allo stile nuovo
+(stessa trappola del Properties dialog: a finestra disattivata il blur non
+arriva).
 
 **Scope = sempre "all scenes using this style"**: l'API Ruby SU 2019 non
 permette di clonare/rinominare uno stile programmaticamente
@@ -1416,8 +1434,16 @@ duplicati. Non è una rifinitura: è il requisito che tiene in piedi il resto.
 | `prompt_style_name_loop(title:, label:, default:)` | Sostituisce `prompt_nickname_loop`. Ritorna stringa non vuota o `:aborted` |
 | `legacy_nickname_candidates` / `migrate_legacy_nicknames!` | Migrazione (sotto) |
 
-`display_name(name)` **resta** e rispetta ancora il nickname: serve ai file
-legacy non ancora migrati, che devono continuare a funzionare come prima.
+⚠️ **Dal 2026-10-16 uno stile ha UN nome solo, anche nei file legacy.**
+`display_name`, `get_nickname`, `set_nickname`, `display_name_taken?` sono
+stati rimossi; `styles_map` manda `{ name, color, letter }` e nessuna finestra
+mostra più il nickname né la riga "Native:". Scelta dell'utente: due nomi per
+lo stesso stile confondevano, e contribuivano alla "confusione nella finestra
+dello stile". Conseguenza accettata: in un file legacy non migrato si vede
+`SM+ Slot NN` finché non si preme il bottone di migrazione qui sotto. Il
+dizionario `SMP_style_nicks` resta nel modello solo per quella migrazione (e
+viene ripulito da rename/purge). La clipboard copia il nome nativo; il paste
+legge ancora `nickname` dai `clipboard.json` vecchi.
 
 ### Migrazione dei file legacy — bottone, mai automatica
 
@@ -1432,10 +1458,9 @@ AttributeObserver di plugin terzi).
 Rinominare stili dentro file già consegnati o condivisi (vedi la nota su
 Version Control X) è una decisione sua, non un effetto collaterale.
 
-Migrazione "opportunistica" gratuita: nel Mini Style Manager il campo **Name**
-mostra il `display_name`, quindi su un file legacy mostra il nickname —
-committarlo rinomina lo stile nativo e butta via il nickname. Un singolo stile
-si migra da sé senza che l'utente debba saperlo.
+(Fino al 2026-10-16 c'era anche una migrazione "opportunistica": il campo
+Name del Mini Style Manager mostrava il nickname e committarlo rinominava lo
+stile. Non esiste più: il campo mostra il nome nativo.)
 
 ⚠️ **Dopo un rename, `StyleDialog` aggiorna `@style_name`**: senza,
 `select_style!` / `apply_changes` dei callback successivi cercherebbero un

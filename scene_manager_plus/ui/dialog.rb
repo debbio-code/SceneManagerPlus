@@ -89,6 +89,8 @@ module SceneManagerPlus
         # Il Properties dialog mostra sempre la scena attiva: qui passa il
         # cambio scena fatto dai tab nativi di SU.
         PropertiesDialog.follow_active(uid)
+        # Idem la finestra dello stile: mostra lo stile della scena attiva.
+        StyleDialog.follow_active(uid)
       rescue => e
         warn "[SM+] poll_active_scene: #{e.class}: #{e.message}"
       end
@@ -252,6 +254,7 @@ module SceneManagerPlus
             # successivo del polling (250ms) — o mai, se la scena era gia'
             # quella attiva per SU ma non quella mostrata nel dialog.
             PropertiesDialog.follow_active(data['id'])
+            StyleDialog.follow_active(data['id'])
           end
         end
 
@@ -272,10 +275,18 @@ module SceneManagerPlus
           push_state
         end
 
+        # Picker della lettera stile. `ids` = tutte le scene selezionate se il
+        # clic destro è caduto dentro la selezione, altrimenti la sola scena
+        # cliccata (`id` resta accettato per compatibilità).
         dlg.add_action_callback('sm_assign_style') do |_ctx, payload|
           data = parse(payload)
-          Core::SceneModel.assign_style(data['id'], data['style_name'])
+          ids  = data['ids'].is_a?(Array) ? data['ids'] : [data['id']].compact
+          n = Core::SceneModel.assign_styles(ids, data['style_name'])
+          if n > 1
+            Sketchup.status_text = "Style '#{data['style_name']}' assigned to #{n} scenes"
+          end
           push_state
+          StyleDialog.after_assign(ids, data['style_name'])
         end
 
         dlg.add_action_callback('sm_open_style') do |_ctx, payload|
@@ -360,17 +371,17 @@ module SceneManagerPlus
 
         # "Nuovo stile" da picker right-click. Chiede il nome (con retry su
         # duplicato), crea lo stile nativo dalle rendering options correnti,
-        # poi lo assegna alla scena di contesto.
+        # poi lo assegna alle scene di contesto (`ids`, come sm_assign_style).
         dlg.add_action_callback('sm_style_new') do |_ctx, payload|
           data = parse(payload)
-          scene_id = data['id']
+          ids  = data['ids'].is_a?(Array) ? data['ids'] : [data['id']].compact
           # Match Photo: la conferma va chiesta PRIMA di creare lo stile.
-          # assign_style la chiederebbe da sé, ma a stile già creato: un
+          # assign_styles la chiederebbe da sé, ma a stile già creato: un
           # annullamento lascerebbe uno stile orfano nel modello. Confermando
-          # qui si scrive il flag, quindi assign_style poi non richiede nulla.
-          scene_page = scene_id ? Core::SceneModel.find_by_id(scene_id) : nil
-          if scene_page && Core::SceneModel.matchphoto?(scene_page) &&
-             !Core::SceneModel.confirm_mp_style_change(scene_page)
+          # qui si scrive il flag, quindi assign_styles poi non richiede nulla.
+          mp_pages = ids.map { |id| Core::SceneModel.find_by_id(id) }.compact
+                        .select { |p| Core::SceneModel.matchphoto?(p) }
+          if !mp_pages.empty? && !Core::SceneModel.confirm_mp_style_change(mp_pages)
             next
           end
           result = Core::Styles.prompt_style_name_loop(
@@ -387,10 +398,11 @@ module SceneManagerPlus
             style = Core::Styles.create_style_from_viewport(name: result)
             if style
               puts "[SM+] sm_style_new: created #{style.name.inspect} from viewport"
-              Core::SceneModel.assign_style(scene_id, style.name) if scene_id
+              Core::SceneModel.assign_styles(ids, style.name) unless ids.empty?
             end
           end
           push_state
+          StyleDialog.after_assign(ids, style ? style.name : nil) if result != :aborted
         end
 
         dlg.add_action_callback('sm_scene_set_color') do |_ctx, payload|
