@@ -22,210 +22,8 @@ window.SMS = (function () {
     return /^#[0-9a-f]{6}$/.test(s) ? s : null;
   }
 
-  // ColorPopup è ora il modulo condiviso color_popup.js (window.SMColorPopup):
-  // include "Recenti" e bottone "None". Lasciamo qui la vecchia IIFE privata
-  // come dead-code in caso si voglia rollback rapido, ma usiamo lo shared.
+  // Selettore colore condiviso (js/color_popup.js, window.SMColorPopup).
   var ColorPopup = window.SMColorPopup;
-  var _ColorPopupLegacy = (function () {
-    var popup, sbEl, sbMarker, hueEl, hueMarker, hexEl, previewEl, presetsEl;
-    var hsv = { h: 0, s: 0, v: 0 };
-    var onApply = null;
-    var anchorEl = null;
-    var ready = false;
-
-    var PRESETS = [
-      '#ffffff', '#dddddd', '#aaaaaa', '#777777', '#444444', '#000000', '#7a3e1d', '#3e1f0e',
-      '#ff0000', '#ff8800', '#ffff00', '#88ff00', '#00ff44', '#00ddaa', '#00aaff', '#0044ff',
-      '#4400ff', '#aa00ff', '#ff00aa', '#ff0044', '#88aaff', '#aaccdd', '#ccddee', '#e0e8f5'
-    ];
-
-    function init() {
-      if (ready) return;
-      popup    = $('sm-color-popup');
-      if (!popup) return;
-      sbEl     = $('cp-sb');
-      sbMarker = $('cp-sb-marker');
-      hueEl    = $('cp-hue');
-      hueMarker= $('cp-hue-marker');
-      hexEl    = $('cp-hex');
-      previewEl= $('cp-preview');
-      presetsEl= $('cp-presets');
-
-      // Presets
-      PRESETS.forEach(function (c) {
-        var s = document.createElement('span');
-        s.className = 'cp-preset';
-        s.style.background = c;
-        s.title = c;
-        s.addEventListener('click', function () { setFromHex(c); });
-        presetsEl.appendChild(s);
-      });
-
-      // SB drag (saturation × value)
-      bindDrag(sbEl, function (e) {
-        var r = sbEl.getBoundingClientRect();
-        var x = Math.max(0, Math.min(r.width, e.clientX - r.left));
-        var y = Math.max(0, Math.min(r.height, e.clientY - r.top));
-        hsv.s = x / r.width;
-        hsv.v = 1 - y / r.height;
-        updateAll();
-      });
-
-      // Hue drag (vertical)
-      bindDrag(hueEl, function (e) {
-        var r = hueEl.getBoundingClientRect();
-        var y = Math.max(0, Math.min(r.height, e.clientY - r.top));
-        hsv.h = (y / r.height) * 360;
-        if (hsv.h >= 360) hsv.h = 359.999;
-        updateAll();
-      });
-
-      // Hex input typed → parse, update sliders
-      hexEl.addEventListener('input', function () {
-        var hex = normalizeHex(hexEl.value);
-        if (hex) {
-          var rgb = hexToRgb(hex);
-          var nh = rgbToHsv(rgb.r, rgb.g, rgb.b);
-          // Mantieni h se s/v sono 0 (per non perdere la posizione hue su grigi)
-          if (nh.s > 0 || nh.v > 0) hsv.h = nh.h;
-          hsv.s = nh.s;
-          hsv.v = nh.v;
-          updateAll(true); // skipHexUpdate = true (utente sta typing)
-        }
-      });
-
-      // Outside click → close
-      document.addEventListener('mousedown', function (e) {
-        if (popup.classList.contains('hidden')) return;
-        if (popup.contains(e.target)) return;
-        if (anchorEl && anchorEl.contains(e.target)) return;
-        hide();
-      }, true);
-
-      // Esc → close
-      document.addEventListener('keydown', function (e) {
-        if (popup.classList.contains('hidden')) return;
-        if (e.key === 'Escape') hide();
-      });
-
-      ready = true;
-    }
-
-    function bindDrag(el, fn) {
-      el.addEventListener('mousedown', function (e) {
-        e.preventDefault();
-        fn(e);
-        function move(ev) { fn(ev); }
-        function up() {
-          document.removeEventListener('mousemove', move);
-          document.removeEventListener('mouseup', up);
-        }
-        document.addEventListener('mousemove', move);
-        document.addEventListener('mouseup', up);
-      });
-    }
-
-    function setFromHex(hex) {
-      hex = normalizeHex(hex);
-      if (!hex) return;
-      var rgb = hexToRgb(hex);
-      var nh = rgbToHsv(rgb.r, rgb.g, rgb.b);
-      if (nh.s > 0 || nh.v > 0) hsv.h = nh.h;
-      hsv.s = nh.s;
-      hsv.v = nh.v;
-      updateAll();
-    }
-
-    function updateAll(skipHexUpdate) {
-      var hex = hsvToHex(hsv.h, hsv.s, hsv.v);
-      // Background SB usa hue puro come base color
-      sbEl.style.backgroundColor = hsvToHex(hsv.h, 1, 1);
-      // Marker positions
-      sbMarker.style.left = (hsv.s * 100) + '%';
-      sbMarker.style.top  = ((1 - hsv.v) * 100) + '%';
-      hueMarker.style.top = ((hsv.h / 360) * 100) + '%';
-      previewEl.style.background = hex;
-      if (!skipHexUpdate) hexEl.value = hex;
-      // Live apply al caller (form + Ruby)
-      if (onApply) onApply(hex);
-    }
-
-    function show(triggerEl, currentHex, applyFn) {
-      init();
-      if (!popup) return;
-      anchorEl = triggerEl;
-      onApply = applyFn;
-      setFromHex(currentHex || '#ffffff');
-      // Position
-      var r = triggerEl.getBoundingClientRect();
-      popup.classList.remove('hidden');
-      var pw = popup.offsetWidth, ph = popup.offsetHeight;
-      var x = r.left;
-      var y = r.bottom + 4;
-      var vw = window.innerWidth, vh = window.innerHeight;
-      if (x + pw > vw) x = Math.max(4, vw - pw - 4);
-      if (y + ph > vh) y = Math.max(4, r.top - ph - 4);
-      popup.style.left = x + 'px';
-      popup.style.top  = y + 'px';
-    }
-
-    function hide() {
-      if (popup) popup.classList.add('hidden');
-      anchorEl = null;
-      onApply = null;
-    }
-
-    // ── HSV ↔ RGB ↔ Hex ────────────────────────────────────────────────
-    function hexToRgb(hex) {
-      hex = hex.replace('#', '');
-      return {
-        r: parseInt(hex.slice(0, 2), 16),
-        g: parseInt(hex.slice(2, 4), 16),
-        b: parseInt(hex.slice(4, 6), 16)
-      };
-    }
-    function rgbToHex(r, g, b) {
-      function h(x) { var s = Math.round(x).toString(16); return s.length === 1 ? '0' + s : s; }
-      return '#' + h(r) + h(g) + h(b);
-    }
-    function rgbToHsv(r, g, b) {
-      r /= 255; g /= 255; b /= 255;
-      var max = Math.max(r, g, b), min = Math.min(r, g, b);
-      var d = max - min, s, h = 0, v = max;
-      s = max === 0 ? 0 : d / max;
-      if (max !== min) {
-        if      (max === r) h = (g - b) / d + (g < b ? 6 : 0);
-        else if (max === g) h = (b - r) / d + 2;
-        else                h = (r - g) / d + 4;
-        h *= 60;
-      }
-      return { h: h, s: s, v: v };
-    }
-    function hsvToRgb(h, s, v) {
-      h /= 60;
-      var i = Math.floor(h) % 6;
-      var f = h - Math.floor(h);
-      var p = v * (1 - s);
-      var q = v * (1 - f * s);
-      var t = v * (1 - (1 - f) * s);
-      var r, g, b;
-      switch (i) {
-        case 0: r = v; g = t; b = p; break;
-        case 1: r = q; g = v; b = p; break;
-        case 2: r = p; g = v; b = t; break;
-        case 3: r = p; g = q; b = v; break;
-        case 4: r = t; g = p; b = v; break;
-        case 5: r = v; g = p; b = q; break;
-      }
-      return { r: r * 255, g: g * 255, b: b * 255 };
-    }
-    function hsvToHex(h, s, v) {
-      var rgb = hsvToRgb(h, s, v);
-      return rgbToHex(rgb.r, rgb.g, rgb.b);
-    }
-
-    return { show: show, hide: hide };
-  })();
 
   // ═════════════════════════════════════════════════════════════════════
   // Style dialog principale
@@ -290,7 +88,13 @@ window.SMS = (function () {
     var prev = state;
     var switching = !!(newState && prev && prev.style_name != null &&
                        newState.style_name !== prev.style_name);
-    if (switching) flushHeaderEdits(prev);
+    if (switching) {
+      flushHeaderEdits(prev);
+      // Selettore colore aperto sullo stile di prima: si chiude senza
+      // confermare, e i ritocchi in coda non partono (andrebbero sul nuovo).
+      if (ColorPopup && ColorPopup.isOpen()) ColorPopup.cancel();
+      dropLive();
+    }
     state = newState || state;
     if (!state.values) state.values = {};
     if (!state.scenes_list) state.scenes_list = [];
@@ -575,6 +379,33 @@ window.SMS = (function () {
     call('sm_style_apply', { changes: changes });
   }
 
+  // Colori dal selettore, dal vivo: cursori, ruota e pipetta che scorre lo
+  // schermo mandano decine di ritocchi al secondo, e ognuno e' una modifica
+  // dello stile in SketchUp (con la sua voce nell'Undo). Ne parte al massimo
+  // uno ogni LIVE_MS, e l'ultimo sempre.
+  var LIVE_MS = 100;
+  var liveTimer = null, liveQueue = null;
+  function sendLive(changes) {
+    liveQueue = liveQueue || {};
+    for (var k in changes) liveQueue[k] = changes[k];
+    if (!liveTimer) liveTick();
+  }
+  function liveTick() {
+    liveTimer = null;
+    if (!liveQueue) return;
+    var c = liveQueue;
+    liveQueue = null;
+    sendChanges(c);
+    liveTimer = setTimeout(liveTick, LIVE_MS);
+  }
+  // Cambio di stile sotto la finestra: i ritocchi in coda erano per lo stile
+  // di prima, e Ruby li scriverebbe su quello nuovo.
+  function dropLive() {
+    if (liveTimer) { clearTimeout(liveTimer); liveTimer = null; }
+    liveQueue = null;
+  }
+  var COLOR_TITLES = { BackgroundColor: 'Background color', SkyColor: 'Sky color', HorizonColor: 'Horizon color' };
+
   function bindListeners() {
     // Select int
     ['EdgeColorMode', 'TransparencySort'].forEach(function (k) {
@@ -691,12 +522,12 @@ window.SMS = (function () {
       // Swatch clickabile → apre popup picker
       sw.addEventListener('click', function () {
         var current = normalizeHex(state.values && state.values[k]) || '#ffffff';
+        // Dal vivo: a ogni ritocco il viewport mostra il colore.
         ColorPopup.show(sw, current, function (hex) {
-          // Live apply ad ogni cambio nel popup
           el.value = hex;
           sw.style.background = hex;
-          var c = {}; c[k] = hex; sendChanges(c);
-        });
+          var c = {}; c[k] = hex; sendLive(c);
+        }, { title: COLOR_TITLES[k] });
       });
 
       // Text input: anteprima live durante typing, commit su change/blur.
@@ -768,11 +599,20 @@ window.SMS = (function () {
     if (bSw && bEl) {
       bSw.addEventListener('click', function () {
         var current = normalizeHex(state.badge_color) || '#cccccc';
+        // Il colore del badge non si vede nel viewport: una sola scrittura,
+        // alla chiusura (e' un attributo del modello, ~5s sui file con
+        // observer di plugin terzi). Intanto cambia solo il campione.
         ColorPopup.show(bSw, current, function (hex) {
-          bEl.value = hex;
-          bSw.style.background = hex;
-          bSw.classList.remove('swatch-empty');
           commitBadgeColor(hex);
+        }, {
+          title: 'Badge color',
+          allowNone: true,
+          commitOnEnd: true,
+          onPreview: function (hex) {
+            bEl.value = hex;
+            bSw.style.background = hex;
+            bSw.classList.remove('swatch-empty');
+          }
         });
       });
       bEl.addEventListener('input', function () {

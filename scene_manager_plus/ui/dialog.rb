@@ -230,6 +230,8 @@ module SceneManagerPlus
       # Bridge: la UI chiama window.sketchup.<callback>(JSON.stringify(args))
       # e attende risposta tramite sketchup.callback(reqId, result).
       def register_callbacks(dlg)
+        # le pipette del selettore colore (colore scena)
+        Core::ColorPick.register(dlg)
         dlg.add_action_callback('sm_ready') do |_ctx|
           puts "[SM+] sm_ready received from UI"
           push_state

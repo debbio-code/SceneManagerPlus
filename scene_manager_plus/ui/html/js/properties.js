@@ -768,7 +768,7 @@
           window.SMColorPopup.show(sw, curHex, function (hex) {
             if (!hex) return;
             layCallMany('color', layTargets(name), hex);
-          }, { commitOnEnd: true });
+          }, { title: 'Layer color: ' + name, commitOnEnd: true });
         });
       }
 

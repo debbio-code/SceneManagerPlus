@@ -91,6 +91,7 @@ window.SMV = (function () {
       dropPreview();
       call('sm_variant_mat_set', { name: row.name, color: hex });
     }, {
+      title: row.name + ' in this scene',
       commitOnEnd: true,
       onPreview: function (hex) {
         sw.classList.remove('empty');

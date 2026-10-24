@@ -3,6 +3,7 @@ require 'sketchup.rb'
 module SceneManagerPlus
   require File.join(PLUGIN_DIR, 'core', 'buffer')
   require File.join(PLUGIN_DIR, 'core', 'native_panel')
+  require File.join(PLUGIN_DIR, 'core', 'color_pick')
   require File.join(PLUGIN_DIR, 'core', 'styles')
   require File.join(PLUGIN_DIR, 'core', 'layers')
   require File.join(PLUGIN_DIR, 'core', 'scene_model')
