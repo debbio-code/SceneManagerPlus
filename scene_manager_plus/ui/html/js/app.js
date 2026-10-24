@@ -116,7 +116,22 @@ window.SM = (function () {
     }
     setStatus(statusBits.join(' · '));
     updateDeferButton();
+    updateDebugButton();
     updateOrderBanner();
+  }
+
+  function updateDebugButton() {
+    var btn = $('btn-debug');
+    if (!btn) return;
+    if (state.debug_mode_on_open) {
+      btn.classList.add('active');
+      btn.title = 'Debugging mode ON: Ruby Console + MCP server start with SketchUp. ' +
+        'Click to turn off (takes effect from the next launch)';
+    } else {
+      btn.classList.remove('active');
+      btn.title = 'Debugging mode on startup (Ruby Console + MCP server). ' +
+        'Click to turn on: also starts them right now';
+    }
   }
 
   function updateOrderBanner() {
@@ -936,33 +951,14 @@ window.SM = (function () {
     if (btnDefer) {
       btnDefer.addEventListener('click', function () { SMBridge.deferToggle(); });
     }
-    var btnSelectAll = $('btn-select-all');
-    if (btnSelectAll) {
-      // Ciclo: 0 = "all", 1 = "none", 2 = "invert original". Si resetta se
-      // l'utente cambia selezione manualmente tra una pressione e l'altra.
-      var saStep = 0;
-      var saOriginal = null;
-      var saLastApplied = null;
-      function sigOf(arr) { return arr.slice().sort().join('|'); }
-      btnSelectAll.addEventListener('click', function () {
-        var order = visibleSceneOrder();
-        if (order.length === 0) return;
-        if (saLastApplied === null || sigOf(selection) !== saLastApplied) {
-          saStep = 0;
-          saOriginal = selection.slice();
-        }
-        if (saStep === 0) {
-          selection = order.slice();
-        } else if (saStep === 1) {
-          selection = [];
-        } else {
-          var orig = saOriginal || [];
-          selection = order.filter(function (id) { return orig.indexOf(id) === -1; });
-        }
-        anchorId = selection.length ? selection[0] : null;
-        saLastApplied = sigOf(selection);
-        saStep = (saStep + 1) % 3;
-        render();
+    // Debugging mode on startup: al posto del vecchio "Select all" (superato
+    // da Shift+click). Stesso flag della checkbox in Settings → Interface.
+    var btnDebug = $('btn-debug');
+    if (btnDebug) {
+      btnDebug.addEventListener('click', function () {
+        var turnOn = !state.debug_mode_on_open;
+        if (turnOn) setStatus('Debugging mode: starting Ruby Console + MCP server…');
+        SMBridge.debugToggle(turnOn);
       });
     }
     var btnSurvey = $('btn-survey-check');
@@ -1386,6 +1382,7 @@ window.SM = (function () {
     setPreviewProgress: setPreviewProgress,
     setExportProgress: setExportProgress,
     setActiveFromNative: setActiveFromNative,
-    selectId: selectId
+    selectId: selectId,
+    showStatus: setStatus
   };
 })();

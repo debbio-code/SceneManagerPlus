@@ -2708,12 +2708,31 @@ Quando devi editare un file JS con caratteri Unicode (frecce, em-dash,
 ecc.), verifica sempre dopo l'edit con il check sopra. Pattern alternativo:
 fai l'edit con `Write` invece di `Edit` quando puoi.
 
-## Debugging mode (checkbox Settings → Interface) — 2026-06-01
+## Debugging mode (checkbox Settings → Interface + bottone "MCP") — 2026-06-01
 
 Checkbox "Debugging mode on startup (Ruby Console + MCP server)" in Settings →
 Interface. A ogni avvio di SketchUp apre la Ruby Console e avvia il server MCP,
 così le verifiche live via `eval_ruby` sono disponibili senza riaprire nulla
 (comodo nei tanti riavvii dovuti a modifiche `.rb`).
+
+**Bottone "MCP" in toolbar** (dal 2026-10-24, richiesta dell'utente: lo usa
+spesso): stesso flag della checkbox, verde quando acceso. È una scritta e non
+un'icona di proposito ("più chiara a tutti": la prima versione era un 🐞). Ha
+preso il posto del vecchio "Select all" (☑, ciclo tutte/nessuna/inverti),
+superato da Shift+click.
+
+**Toolbar stretta** (stesso giorno): la finestra dell'utente sta a ~370 px e i
+bottoni con le emoji, nel CEF di SketchUp, vengono più larghi che in un browser.
+Padding 3px 4px, gap 2px e `white-space: nowrap` in `.toolbar button`: prima,
+a spazio insufficiente, i bottoni si restringevano e il "+" di 📷+ / 📁+ andava
+a capo. Misurata in browser: ci stanno tutti fino a ~305 px di larghezza.
+La logica comune è `SettingsDialog.set_debug_on_open(enabled)` (scrive il flag,
+se acceso apre subito console + MCP, rimanda lo state a **entrambe** le
+finestre e ritorna lo status); la usano `sm_settings_debug_on_open` e
+`sm_debug_toggle` (`ui/dialog.rb`). Il flag arriva alla finestra principale
+come `state.debug_mode_on_open` (letto direttamente in `Dialog.push_state`,
+come `show_thumbs`), l'esito va nella status bar via `SM.showStatus`.
+Spegnere non chiude la console né ferma il server: vale dal prossimo avvio.
 
 **Logica** in `SettingsDialog.activate_debug_mode` (riusata da `main.rb` allo
 startup e dal callback della checkbox):

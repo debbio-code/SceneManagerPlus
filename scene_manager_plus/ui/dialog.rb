@@ -453,6 +453,15 @@ module SceneManagerPlus
           end
         end
 
+        # Bottone "MCP": stesso flag della checkbox "Debugging mode on startup"
+        # dei Settings. set_debug_on_open rimanda già lo state (che riscrive
+        # la status bar), quindi l'esito si mostra dopo.
+        dlg.add_action_callback('sm_debug_toggle') do |_ctx, payload|
+          data   = parse(payload)
+          status = SettingsDialog.set_debug_on_open(data['enabled'] ? true : false)
+          dlg.execute_script("window.SM && SM.showStatus && SM.showStatus(#{status.to_json});")
+        end
+
         dlg.add_action_callback('sm_export_cancel_running') do |_ctx|
           Core::Exporter.request_cancel!
         end
@@ -569,7 +578,9 @@ module SceneManagerPlus
           native_order_divergent: payload[:native_order_divergent],
           variant_clipboard: payload[:variant_clipboard],
           # Flag per-macchina, si cambia da Settings → Interface.
-          show_thumbs: Sketchup.read_default('SceneManagerPlus', 'show_thumbs', false) ? true : false
+          show_thumbs: Sketchup.read_default('SceneManagerPlus', 'show_thumbs', false) ? true : false,
+          # Flag per-macchina: bottone "MCP" + checkbox in Settings → Interface.
+          debug_mode_on_open: Sketchup.read_default('SceneManagerPlus', 'debug_mode_on_open', false) ? true : false
         }
         puts "[SM+] push_state: model=#{state[:model_info][:title].inspect} " \
              "native_pages=#{state[:model_info][:pages_count]} " \

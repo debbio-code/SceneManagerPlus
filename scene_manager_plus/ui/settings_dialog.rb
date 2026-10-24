@@ -208,18 +208,11 @@ module SceneManagerPlus
         # Sketchup.write_default, NON nel gruppo 'ui' che è per-file model
         # attribute). Quando abilitato, a ogni avvio di SketchUp `main.rb`
         # chiama `activate_debug_mode`. Toggle-on lo attiva anche subito.
+        # Stesso flag del bottone "MCP" nella toolbar principale.
         dlg.add_action_callback('sm_settings_debug_on_open') do |_ctx, payload|
-          data    = parse(payload)
-          enabled = data['enabled'] ? true : false
-          Sketchup.write_default('SceneManagerPlus', 'debug_mode_on_open', enabled)
-          if enabled
-            status = activate_debug_mode
-            dlg.execute_script("window.SMS && SMS.setDebugResult(#{status.to_json});")
-          else
-            dlg.execute_script(
-              "window.SMS && SMS.setDebugResult(#{'Off — will not auto-start on next launch'.to_json});"
-            )
-          end
+          data   = parse(payload)
+          status = set_debug_on_open(data['enabled'] ? true : false)
+          dlg.execute_script("window.SMS && SMS.setDebugResult(#{status.to_json});")
         end
 
         # Thumbnails inline nella lista scene. Prima era un bottone della
@@ -232,12 +225,25 @@ module SceneManagerPlus
         end
       end
 
+      # Accende/spegne "Debugging mode on startup". Usata dalla checkbox dei
+      # Settings e dal bottone "MCP" della toolbar principale: scrive il flag, se
+      # acceso apre subito console + MCP, e riallinea entrambe le finestre
+      # (la checkbox qui e il bottone là). Spegnere non chiude la console né
+      # ferma il server: vale solo per i prossimi avvii. Ritorna lo status.
+      def set_debug_on_open(enabled)
+        Sketchup.write_default('SceneManagerPlus', 'debug_mode_on_open', enabled ? true : false)
+        status = enabled ? activate_debug_mode : 'Off — will not auto-start on next launch'
+        push_state
+        Dialog.push_state if defined?(Dialog)
+        status
+      end
+
       # Apre la Ruby Console e avvia il server MCP (se il plugin `su_mcp` è
       # installato). Entrambe le azioni sono guardate: su una macchina senza
       # MCP apre solo la console e lo segnala. Il server MCP espone `@server`
       # come ivar del modulo SU_MCP (vedi su_mcp/main.rb); `Server#start` è
       # idempotente (`return if @running`). Ritorna la stringa di status.
-      # Riusata da `main.rb` all'avvio e dal callback della checkbox.
+      # Riusata da `main.rb` all'avvio e da `set_debug_on_open`.
       def activate_debug_mode
         msgs = []
 

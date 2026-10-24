@@ -81,18 +81,29 @@ body {
 .cancel-btn:hover { background: #8a3a3a; }
 .cancel-btn.hidden { display: none; }
 
-#btn-thumbs.active {
-  background: #2e6fb8;
-  border-color: #1a4e8a;
+/* Scritta invece di icona: piu' chiara a tutti. align-self: alto quanto i
+   bottoni con emoji, che a parita' di font-size vengono piu' alti del testo. */
+#btn-debug {
+  align-self: stretch;
+  padding: 0 3px;
+  font-size: 10px;
+  font-weight: bold;
+  letter-spacing: 0.5px;
+}
+#btn-debug.active {
+  background: #3d7a3d;
+  border-color: #275227;
   color: #fff;
 }
-#btn-thumbs.active:hover { background: #3a85d6; }
+#btn-debug.active:hover { background: #4b944b; }
 
+/* Bottoni stretti: la finestra sta spesso a ~370 px. Senza nowrap, quando
+   lo spazio manca i bottoni si restringono e il "+" di 📷+ / 📁+ va a capo. */
 .toolbar {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 4px 6px;
+  gap: 2px;
+  padding: 3px 4px;
   background: #3a3a3a;
   border-bottom: 1px solid #1e1e1e;
 }
@@ -100,10 +111,11 @@ body {
   background: #4a4a4a;
   border: 1px solid #1e1e1e;
   color: #ddd;
-  padding: 4px 8px;
+  padding: 3px 4px;
   cursor: pointer;
   font-size: 12px;
   border-radius: 2px;
+  white-space: nowrap;
 }
 .toolbar button:hover:not(:disabled) { background: #5a5a5a; }
 .toolbar button:disabled { opacity: 0.4; cursor: default; }
