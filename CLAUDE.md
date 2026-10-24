@@ -110,6 +110,7 @@ scene_manager_plus/
 │   ├── scene_model.rb              # wrapper su Sketchup.active_model.pages
 │   ├── settings.rb                 # config persistente con defaults
 │   ├── styles.rb                   # pool slot + nickname per-modello
+│   ├── style_presets.rb            # preset di stile (Photomatch, Disegni Tecnici, Prospettive)
 │   ├── survey_check.rb             # Controllo rilievo: import DWG 3D Disto pulito
 │   ├── text_render.rb              # PowerShell+System.Drawing per filename label
 │   ├── titleblock.rb               # PowerShell+System.Drawing per cartiglio
@@ -1473,6 +1474,43 @@ stile. Non esiste più: il campo mostra il nome nativo.)
 ⚠️ **Dopo un rename, `StyleDialog` aggiorna `@style_name`**: senza,
 `select_style!` / `apply_changes` dei callback successivi cercherebbero un
 nome che non esiste più.
+
+### Preset di stile (`Core::StylePresets`) — 2026-10-24
+
+Stili pronti che il plugin ricrea in qualunque file: **Photomatch**, **Disegni
+Tecnici**, **Prospettive**, rifatti sugli stili omonimi costruiti a mano
+dall'utente (screenshot del Mini Style Manager). Nel picker del badge lettera
+(tasto destro) ce n'è una voce per preset sotto "+ New style…"
+(`sm_style_preset { ids, preset }`, elenco in `state.style_presets`): crea lo
+stile con `create_style_from_ro_hash` (template + rendering options +
+`description`) e lo assegna alle scene bersaglio, senza chiedere il nome. Se
+uno stile con quel nome esiste già: YES = usa quello, NO = nuovo
+"Nome 2", CANCEL. Conferma Match Photo chiesta **prima** di creare lo stile,
+come in `sm_style_new`. Per aggiungere un preset basta una voce in `PRESETS`.
+
+- `description`: `nil` = quella del template, `''` = vuota.
+- `match_photo` (solo Photomatch): Foreground off / Background on, scritte dal
+  pannello Styles nativo (`NativePanel`) e solo se fra le scene bersaglio c'è
+  una Match Photo (si attiva quella e poi si torna indietro; in defer mode solo
+  se è già quella attiva). **Opacità non impostate**: nello screenshot di
+  riferimento valevano 0/0, la tipica lettura vecchia del pannello. Se l'utente
+  le vuole, `opacity: N` nella voce.
+- ⚠️ **Mai provato dentro SketchUp** quando è stato scritto (niente Ruby sulla
+  postazione, MCP spento): solo il JS, nel browser. Se qualcosa non va, il
+  primo indiziato è il ramo Match Photo (`apply_match_photo!`).
+
+**Descrizione dello stile che "non si salva"** (segnalato lo stesso giorno),
+due correzioni perché la causa non è stata misurata:
+1. `style_dialog.js` salva la descrizione anche dopo 800 ms di pausa nella
+   scrittura, non solo sul blur (in CEF il blur non arriva cliccando fuori
+   dalla finestra o chiudendola). Col nome no: ogni salvataggio è una rinomina.
+2. `Core::Styles.update_selected_style_keeping_description` al posto di
+   `update_selected_style` dove si aggiorna uno stile esistente (Mini Style
+   Manager, YES del dialog "stile modificato"): rilegge la descrizione prima
+   e la rimette se l'Update l'ha cambiata. Sospetto: l'Update copia la copia
+   di lavoro di SU, che la descrizione scritta via Ruby non l'ha. Se succede
+   davvero, in Ruby Console compare "update_selected_style changed the
+   description…": è la prova che mancava, da riportare qui.
 
 ### Storia (obsoleta, per contesto)
 
