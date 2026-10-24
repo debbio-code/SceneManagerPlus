@@ -90,12 +90,14 @@ body {
   font-weight: bold;
   letter-spacing: 0.5px;
 }
+/* Acceso = verde pieno, ben distinto dal grigio dei bottoni spenti: un verde
+   scuro su toolbar scura non si notava. */
 #btn-debug.active {
-  background: #3d7a3d;
-  border-color: #275227;
+  background: #22b14c;
+  border-color: #0f6b2e;
   color: #fff;
 }
-#btn-debug.active:hover { background: #4b944b; }
+#btn-debug.active:hover { background: #2bc95a; }
 
 /* Bottoni stretti: la finestra sta spesso a ~370 px. Senza nowrap, quando
    lo spazio manca i bottoni si restringono e il "+" di 📷+ / 📁+ va a capo.
