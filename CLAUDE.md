@@ -2730,13 +2730,23 @@ console mostra solo i log). Dettagli:
   All'avvio `main.rb`: se `debug_mode_on_open` → console + MCP, altrimenti se
   `mcp_on_open` → solo MCP. ⚠️ Non verificato che una `write_default` dentro
   `onQuit` arrivi su disco: se non arrivasse resta valida quella del clic.
+- **Spegnere il bottone toglie anche la spunta** (`debug_mode_on_open = false`):
+  la checkbox all'avvio riaccende MCP, quindi lasciarla accesa contraddiceva
+  "grigio = resta spento" — era il "i due bottoni non sono sincronizzati"
+  segnalato. Accenderlo invece non la tocca (la spunta vuol dire "anche la
+  console"). Verificato dal vivo via MCP: spento → porta 9876 chiusa, entrambi
+  i flag a false; riacceso → tutto come prima.
+- In `settings.js` le due checkbox per-macchina (debug, thumbnails) si
+  assegnano direttamente, **non** con `setIfNotFocused`: nel CEF il focus resta
+  sulla checkbox anche dopo un clic in un'altra finestra, e il refresh mandato
+  dal bottone veniva scartato. Stessa trappola del selettore stili (vedi
+  "Mini Style Manager — header").
 - Codice: `set_mcp_on` / `start_mcp` / `stop_mcp` / `mcp_server` in
   `ui/settings_dialog.rb` (`activate_debug_mode` riusa `start_mcp`), callback
   `sm_mcp_toggle` in `ui/dialog.rb`, `SM.setMcpRunning` / `SM.showStatus` in
   `app.js`. `start_mcp` controlla `@running` dopo `start`: con la porta
   occupata `su_mcp` si rispegne da solo e il bottone lo dice.
-- Collaudato il JS nel browser; il lato Ruby solo riletto (niente Ruby sulla
-  postazione, MCP spento in quella sessione).
+- Collaudato il JS nel browser e il lato Ruby dal vivo via MCP (19.0.685).
 
 **Toolbar stretta** (stesso giorno): la finestra dell'utente sta a ~370 px e i
 bottoni con le emoji, nel CEF di SketchUp, vengono più larghi che in un browser.

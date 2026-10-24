@@ -377,6 +377,12 @@ function Invoke-SUEval {
 }
 ```
 
+⚠️ Se il codice Ruby sta in un file, leggerlo con `[IO.File]::ReadAllText`,
+**non** con `Get-Content -Raw`: in PowerShell 5.1 quella stringa si porta dietro
+proprietà extra (`PSPath`…) e `ConvertTo-Json` la serializza come oggetto. Il
+server risponde `Ruby evaluation error: no implicit conversion of Hash into
+String`, che sembra un errore del proprio Ruby e non lo è (2026-10-24).
+
 ⚠️ **`Sketchup.open_file` chiamato dentro `eval_ruby` si pianta** (2026-08-01).
 L'eval gira nel message loop di SU e il caricamento di un file non può
 rientrarci: la chiamata non ritorna mai (osservato: >120s, socket muto, poi il

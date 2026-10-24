@@ -243,10 +243,19 @@ module SceneManagerPlus
       # MCP (niente console, che a Claude non serve) e ricorda la scelta per il
       # prossimo avvio nel flag per-macchina `mcp_on_open`, distinto da
       # `debug_mode_on_open` della checkbox (console + MCP). Ritorna lo status.
+      # Spegnere toglie anche la spunta della checkbox: la checkbox all'avvio
+      # riaccende MCP, quindi lasciarla accesa contraddirebbe "grigio = resta
+      # spento" (ed era il "non sincronizzati" segnalato). Accendere invece
+      # non la tocca: la checkbox vuol dire "anche la console".
       def set_mcp_on(enabled)
         Sketchup.write_default('SceneManagerPlus', 'mcp_on_open', enabled ? true : false)
+        Sketchup.write_default('SceneManagerPlus', 'debug_mode_on_open', false) unless enabled
         status = enabled ? start_mcp : stop_mcp
         puts "[SM+] MCP button: #{status}"
+        unless enabled
+          push_state
+          @dialog.execute_script("window.SMS && SMS.setDebugResult(#{'Off — MCP stopped from the toolbar button'.to_json});") if @dialog && @dialog.visible?
+        end
         Dialog.push_state if defined?(Dialog)
         status
       end
