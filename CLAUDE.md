@@ -2718,9 +2718,12 @@ superato da Shift+click.
 
 **Toolbar stretta** (stesso giorno): la finestra dell'utente sta a ~370 px e i
 bottoni con le emoji, nel CEF di SketchUp, vengono più larghi che in un browser.
-Padding 3px 4px, gap 2px e `white-space: nowrap` in `.toolbar button`: prima,
-a spazio insufficiente, i bottoni si restringevano e il "+" di 📷+ / 📁+ andava
-a capo. Misurata in browser: ci stanno tutti fino a ~305 px di larghezza.
+Padding 3px 4px e `white-space: nowrap` in `.toolbar button`: prima, a spazio
+insufficiente, i bottoni si restringevano e il "+" di 📷+ / 📁+ andava a capo.
+Tolto il `gap` della toolbar, che SketchUp ignora (Chrome 64, vedi
+`SU2019-LESSONS.md`): in SketchUp i bottoni sono sempre stati attaccati.
+Misurata in un browser normale: ci stanno tutti fino a ~290 px di larghezza;
+nel CEF le emoji vengono più larghe, quindi lì il margine è minore.
 La logica comune è `SettingsDialog.set_debug_on_open(enabled)` (scrive il flag,
 se acceso apre subito console + MCP, rimanda lo state a **entrambe** le
 finestre e ritorna lo status); la usano `sm_settings_debug_on_open` e

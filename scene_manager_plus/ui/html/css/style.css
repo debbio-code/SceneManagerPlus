@@ -98,11 +98,13 @@ body {
 #btn-debug.active:hover { background: #4b944b; }
 
 /* Bottoni stretti: la finestra sta spesso a ~370 px. Senza nowrap, quando
-   lo spazio manca i bottoni si restringono e il "+" di 📷+ / 📁+ va a capo. */
+   lo spazio manca i bottoni si restringono e il "+" di 📷+ / 📁+ va a capo.
+   Niente gap: il CEF di SU 2019 (Chrome 64) lo ignora nei flex, quindi in
+   SketchUp i bottoni sono sempre stati attaccati; un gap qui varrebbe solo
+   nel browser dei collaudi e falserebbe le misure. */
 .toolbar {
   display: flex;
   align-items: center;
-  gap: 2px;
   padding: 3px 4px;
   background: #3a3a3a;
   border-bottom: 1px solid #1e1e1e;
