@@ -2900,9 +2900,17 @@ controlla se `@style_name` è tra i rimossi e ripiega con `fallback_style_name`
 resterebbe puntata a un nome inesistente e ogni edit successivo cadrebbe nel
 vuoto.
 
-`renderStylePicker` **non ricostruisce il select se ha il focus** (stesso
-principio del `setIfNotFocused` usato per gli input): un `push_state` a tendina
-aperta la chiuderebbe in faccia all'utente. E se lo stile corrente non è
+`renderStylePicker` **ricostruisce le voci solo se l'elenco è cambiato** (un
+`push_state` a tendina aperta la chiuderebbe in faccia all'utente), ma **la voce
+scelta la riallinea sempre**. ⚠️ Prima la regola era "se il select ha il focus
+non toccarlo", ed era un bug (corretto 2026-10-24): dopo una scelta il select
+tiene il focus anche quando si clicca nella finestra principale (in CEF il blur
+non arriva), quindi a ogni cambio scena il selettore restava sullo stile della
+scena precedente mentre il campo Name seguiva. Non reintrodurre una guardia sul
+solo focus. Dopo la scelta il select fa anche `blur()`: con il focus addosso,
+una freccia premuta pensando di cambiare scena assegnerebbe lo stile
+successivo. Verificato nel CEF di SketchUp (19.0.685) col focus forzato sul
+select. Se lo stile corrente non è
 nell'elenco (scena MP con stile interno, o nessuno stile) inserisce una voce
 segnaposto: senza, il select mostrerebbe il primo della lista facendo credere
 che sia quello in uso.

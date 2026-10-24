@@ -232,31 +232,39 @@ window.SMS = (function () {
   // ═════════════════════════════════════════════════════════════════════
   // Selettore stile dell'header. Le lettere sono le stesse della finestra
   // principale (stessa fonte lato Ruby), cosi' A resta A ovunque.
+  // Le voci si ricostruiscono solo se l'elenco e' cambiato (ricostruirle a
+  // tendina aperta la chiuderebbe di colpo); la voce scelta invece si
+  // riallinea sempre. Prima c'era un "se ha il focus non toccare": ma dopo
+  // una scelta il select tiene il focus anche quando si clicca nella
+  // finestra principale (in CEF il blur non arriva), e da li' il selettore
+  // restava fermo sullo stile della scena precedente a ogni cambio scena.
+  var pickerKey = null;
   function renderStylePicker(styles, current) {
     var sel = $('style-pick');
     if (!sel) return;
-    // Non ricostruire mentre l'utente ci sta dentro: un push_state a tendina
-    // aperta la chiuderebbe di colpo.
-    if (document.activeElement === sel) return;
-    sel.innerHTML = '';
-    var found = false;
-    styles.forEach(function (s) {
-      var o = document.createElement('option');
-      o.value = s.name;
-      o.textContent = (s.letter ? s.letter + '   ' : '') + s.name;
-      if (s.name === current) { o.selected = true; found = true; }
-      sel.appendChild(o);
-    });
+    var found = styles.some(function (s) { return s.name === current; });
     // Stile non elencato (scene Match Photo con stile interno, o nessuno
     // stile): voce segnaposto, altrimenti il select mostrerebbe il primo
     // della lista facendo credere che sia quello in uso.
-    if (!found) {
-      var ph = document.createElement('option');
-      ph.value = '';
-      ph.textContent = current || '(no style)';
-      ph.selected = true;
-      sel.insertBefore(ph, sel.firstChild);
+    var placeholder = found ? null : (current || '(no style)');
+    var key = JSON.stringify([styles.map(function (s) { return [s.letter, s.name]; }), placeholder]);
+    if (key !== pickerKey) {
+      pickerKey = key;
+      sel.innerHTML = '';
+      if (placeholder !== null) {
+        var ph = document.createElement('option');
+        ph.value = '';
+        ph.textContent = placeholder;
+        sel.appendChild(ph);
+      }
+      styles.forEach(function (s) {
+        var o = document.createElement('option');
+        o.value = s.name;
+        o.textContent = (s.letter ? s.letter + '   ' : '') + s.name;
+        sel.appendChild(o);
+      });
     }
+    sel.value = found ? current : '';
   }
 
   // La finestra segue la scena attiva, quindi lo stile puo' cambiare sotto un
@@ -654,6 +662,9 @@ window.SMS = (function () {
     if (pickEl) {
       pickEl.addEventListener('change', function () {
         var v = pickEl.value;
+        // Via il focus: con il select ancora attivo, una freccia premuta
+        // pensando di cambiare scena assegnerebbe lo stile successivo.
+        pickEl.blur();
         if (!v || v === (state.style_name || '')) return;
         call('sm_style_pick', { name: v });
       });
