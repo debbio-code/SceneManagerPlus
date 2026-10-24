@@ -258,6 +258,19 @@ Copy-Item "$src\scene_manager_plus.rb" "$plug\scene_manager_plus.rb" -Force
 Copy-Item "$src\scene_manager_plus" "$plug\" -Recurse
 ```
 
+⚠️ **Con più sessioni in parallelo (worktree in `.claude/worktrees/`)**
+(2026-10-24): la cartella Plugins è una sola e la copia la sostituisce per
+intero, quindi vince l'ultima sessione che copia. Da un worktree `$src` va
+messo al percorso **del worktree** (il comando sopra porterebbe in SketchUp i
+file della cartella principale, cioè il lavoro di un'altra sessione). Prima di
+copiare, controllare che le altre sessioni non abbiano modifiche già copiate
+in Plugins (`git -C <loro cartella> status --short` + un file loro presente in
+Plugins): in quel caso **non** copiare in automatico, avvisare l'utente e
+aspettare di unire. In una `reload` a caldo di `ui/settings_dialog.rb` (e degli
+altri dialog con `@dialog = nil` in testa al modulo) salvare prima l'handle
+della finestra e rimetterlo dopo il `load`, altrimenti la finestra aperta
+resta orfana.
+
 - Modifiche **Ruby (.rb)** → **avvisare l'utente di riavviare SketchUp**.
   In alternativa, se l'MCP è attivo, **reload a caldo** via `eval_ruby` senza
   riavvio: dopo la copia in Plugins, `load '<path>/file.rb'` sui file toccati
