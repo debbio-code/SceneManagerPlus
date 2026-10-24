@@ -36,16 +36,24 @@ window.SMS = (function () {
   // una scelta il select tiene il focus anche quando si clicca nella
   // finestra principale (in CEF il blur non arriva), e da li' il selettore
   // restava fermo sullo stile della scena precedente a ogni cambio scena.
+  //
+  // In fondo, i preset di stile (state.style_presets) in un gruppo a parte,
+  // sempre: anche quelli il cui stile non esiste ancora nel modello. Come
+  // nel picker della finestra principale, scegliere un preset crea lo stile
+  // (o riusa quello omonimo, se l'utente vuole) e lo assegna alla scena.
   var pickerKey = null;
-  function renderStylePicker(styles, current) {
+  var PRESET_PREFIX = 'preset:';
+  function renderStylePicker(styles, current, presets) {
     var sel = $('style-pick');
     if (!sel) return;
+    presets = presets || [];
     var found = styles.some(function (s) { return s.name === current; });
     // Stile non elencato (scene Match Photo con stile interno, o nessuno
     // stile): voce segnaposto, altrimenti il select mostrerebbe il primo
     // della lista facendo credere che sia quello in uso.
     var placeholder = found ? null : (current || '(no style)');
-    var key = JSON.stringify([styles.map(function (s) { return [s.letter, s.name]; }), placeholder]);
+    var key = JSON.stringify([styles.map(function (s) { return [s.letter, s.name]; }), placeholder,
+                              presets.map(function (p) { return [p.id, p.name]; })]);
     if (key !== pickerKey) {
       pickerKey = key;
       sel.innerHTML = '';
@@ -61,6 +69,18 @@ window.SMS = (function () {
         o.textContent = (s.letter ? s.letter + '   ' : '') + s.name;
         sel.appendChild(o);
       });
+      if (presets.length) {
+        var grp = document.createElement('optgroup');
+        grp.label = 'New style from preset';
+        presets.forEach(function (p) {
+          var o = document.createElement('option');
+          o.value = PRESET_PREFIX + p.id;
+          o.setAttribute('data-preset', p.id);
+          o.textContent = '+   ' + p.name;
+          grp.appendChild(o);
+        });
+        sel.appendChild(grp);
+      }
     }
     sel.value = found ? current : '';
   }
@@ -106,7 +126,7 @@ window.SMS = (function () {
       var dEl = $('style-description');
       if (dEl) { dEl.value = state.description || ''; dEl.blur(); }
     }
-    renderStylePicker(state.styles || [], state.style_name || '');
+    renderStylePicker(state.styles || [], state.style_name || '', state.style_presets);
     // Name input: NON sovrascrivere se l'utente sta editando.
     var nickEl = $('style-nickname');
     if (nickEl && document.activeElement !== nickEl) {
@@ -493,9 +513,18 @@ window.SMS = (function () {
     if (pickEl) {
       pickEl.addEventListener('change', function () {
         var v = pickEl.value;
+        var opt = pickEl.options[pickEl.selectedIndex];
+        var preset = opt ? opt.getAttribute('data-preset') : null;
         // Via il focus: con il select ancora attivo, una freccia premuta
         // pensando di cambiare scena assegnerebbe lo stile successivo.
         pickEl.blur();
+        if (preset) {
+          // Torna subito sullo stile attuale: Ruby può chiedere conferme e
+          // l'utente annullare; se va a buon fine il push_state porta il nuovo.
+          renderStylePicker(state.styles || [], state.style_name || '', state.style_presets);
+          call('sm_style_pick_preset', { preset: preset });
+          return;
+        }
         if (!v || v === (state.style_name || '')) return;
         call('sm_style_pick', { name: v });
       });

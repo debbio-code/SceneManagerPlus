@@ -276,6 +276,23 @@ module SceneManagerPlus
           Dialog.push_state if defined?(Dialog)
         end
 
+        # Preset dal selettore dell'header (gruppo "New style from preset",
+        # sempre presente anche se lo stile non esiste ancora nel modello).
+        # Come sm_style_pick, ma lo stile lo crea il preset (o riusa quello
+        # omonimo, se l'utente vuole): stesso flusso del picker della
+        # finestra principale, con la scena di contesto come bersaglio.
+        dlg.add_action_callback('sm_style_pick_preset') do |_ctx, payload|
+          data = parse(payload)
+          ids  = (@scene_id && Core::SceneModel.find_by_id(@scene_id)) ? [@scene_id] : []
+          name = Core::StylePresets.apply_to_scenes(data['preset'], ids)
+          if name
+            @style_name = name
+            select_style!(name)
+          end
+          push_state
+          Dialog.push_state if defined?(Dialog)
+        end
+
         # Purge degli stili inutilizzati. Stessa identica logica del bottone
         # nei Settings (vive in Core::Styles): qui è una scorciatoia, perché
         # "smetto di usare uno stile e poi lo elimino" è il modo in cui si
@@ -389,6 +406,7 @@ module SceneManagerPlus
           # Elenco per il selettore dell'header. Stessa fonte delle lettere
           # nella finestra principale, così le lettere coincidono.
           styles:       Core::SceneModel.styles_map,
+          style_presets: Core::StylePresets.list,
           scene_id:     @scene_id,
           scenes_count: using.size,
           scenes_list:  using.map { |p| p.name },

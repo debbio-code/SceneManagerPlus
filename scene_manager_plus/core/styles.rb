@@ -199,9 +199,11 @@ module SceneManagerPlus
       #   colore nel template, la stringa hex viene promossa a Color).
       # name: nome desiderato per lo stile (reso unico automaticamente).
       # description: se non nil, sostituisce quella del template.
+      # badge_color: se non nil, colore del badge lettera ('#rrggbb'), scritto
+      #   nella stessa operazione (un solo Ctrl+Z).
       #
       # Ritorna il Sketchup::Style creato o nil (errore).
-      def create_style_from_ro_hash(ro_hash, name: nil, description: nil)
+      def create_style_from_ro_hash(ro_hash, name: nil, description: nil, badge_color: nil)
         m = model
         return nil unless m
         ro_hash ||= {}
@@ -230,6 +232,7 @@ module SceneManagerPlus
           m.styles.update_selected_style
           # Dopo l'update, non prima (vedi update_selected_style_keeping_description).
           loaded.description = description.to_s unless description.nil?
+          set_color(loaded.name, badge_color) unless badge_color.nil?
 
           m.commit_operation
           loaded

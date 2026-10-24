@@ -1478,10 +1478,16 @@ nome che non esiste più.
 ### Preset di stile (`Core::StylePresets`) — 2026-10-24
 
 Stili pronti che il plugin ricrea in qualunque file: **Photomatch**, **Disegni
-Tecnici**, **Prospettive**, rifatti sugli stili omonimi costruiti a mano
-dall'utente (screenshot del Mini Style Manager). Nel picker del badge lettera
+Tecnici**, **Prospettive**, **Prospettive (cielo più chiaro)**, rifatti sugli
+stili omonimi costruiti a mano dall'utente (screenshot del Mini Style Manager;
+Prospettive ricontrollato il 2026-10-24: cielo `#5787d2`, orizzonte `#8fbde6`).
+Nel picker del badge lettera
 (tasto destro) ce n'è una voce per preset sotto "+ New style…"
-(`sm_style_preset { ids, preset }`, elenco in `state.style_presets`): crea lo
+(`sm_style_preset { ids, preset }`, elenco in `state.style_presets`). Gli
+stessi preset compaiono **sempre**, anche se lo stile non è ancora nel modello,
+nel selettore stile del Mini Style Manager, gruppo "New style from preset" in
+fondo (`sm_style_pick_preset { preset }`, bersaglio = la scena di contesto,
+`state.style_presets` anche lì). Entrambe le strade: crea lo
 stile con `create_style_from_ro_hash` (template + rendering options +
 `description`) e lo assegna alle scene bersaglio, senza chiedere il nome. Se
 uno stile con quel nome esiste già: YES = usa quello, NO = nuovo
@@ -1489,6 +1495,12 @@ uno stile con quel nome esiste già: YES = usa quello, NO = nuovo
 come in `sm_style_new`. Per aggiungere un preset basta una voce in `PRESETS`.
 
 - `description`: `nil` = quella del template, `''` = vuota.
+- `badge_color`: colore del badge lettera, il colore che domina la vista (cielo
+  se acceso, altrimenti sfondo): Photomatch grigio `#ccccc9`, Disegni Tecnici
+  bianco, le due Prospettive il loro cielo. Scritto **solo alla creazione**,
+  dentro l'operazione di `create_style_from_ro_hash` (kwarg `badge_color:`,
+  un solo Ctrl+Z); poi è dell'utente e non segue i cambi di cielo (scelta
+  dell'utente). Riusando uno stile omonimo (YES) il badge non si tocca.
 - `match_photo` (solo Photomatch): Foreground off / Background on, scritte dal
   pannello Styles nativo (`NativePanel`) e solo se fra le scene bersaglio c'è
   una Match Photo (si attiva quella e poi si torna indietro; in defer mode solo
@@ -3028,7 +3040,10 @@ Senza scena di contesto degrada a semplice cambio dello stile in edit.
 `assign_style` gestisce da sé la conferma Match Photo: se l'utente annulla
 ritorna `false`, `@style_name` non cambia e il `push_state` rimette il select
 sul valore vero. Le lettere vengono da `SceneModel.styles_map`, la stessa
-fonte della finestra principale, così A resta A ovunque.
+fonte della finestra principale, così A resta A ovunque. In fondo al select
+c'è il gruppo dei preset di stile (vedi "Preset di stile"): le loro voci hanno
+`data-preset` e vanno a `sm_style_pick_preset`, e il select torna subito sullo
+stile attuale finché Ruby non risponde (può chiedere conferme).
 
 **Purge** (`sm_style_purge`). È la risposta al fatto che SU 2019 **non espone
 un delete per-stile**: il modo di cancellare uno stile è smettere di usarlo e

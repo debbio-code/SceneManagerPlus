@@ -24,10 +24,16 @@ module SceneManagerPlus
     #
     # Disegni Tecnici e Prospettive (2026-10-24): anche questi dagli stili
     # omonimi dell'utente. Niente voci Match Photo (sono per scene normali),
-    # quindi restano quelle del template.
+    # quindi restano quelle del template. Prospettive (cielo più chiaro) è la
+    # stessa cosa con cielo e orizzonte più chiari.
     #
     # description: nil = tiene quella del template (Photomatch, come nello
     # stile di riferimento); '' = vuota; altrimenti il testo.
+    #
+    # badge_color: colore del badge lettera dello stile appena creato, il
+    # colore che domina la vista (il cielo se acceso, altrimenti lo sfondo).
+    # Scritto solo alla creazione: poi è dell'utente come ogni altro valore,
+    # e non segue i cambi di cielo/sfondo.
     module StylePresets
       module_function
 
@@ -53,7 +59,8 @@ module SceneManagerPlus
           match_photo: {
             'foreground' => { on: false },
             'background' => { on: true }
-          }
+          },
+          badge_color: '#ccccc9'               # grigio dello sfondo
         },
         {
           id:   'disegni_tecnici',
@@ -73,7 +80,8 @@ module SceneManagerPlus
             'DisplaySectionPlanes' => false,
             'DisplaySectionCuts'   => true
           },
-          description: ''
+          description: '',
+          badge_color: '#ffffff'
         },
         {
           id:   'prospettive',
@@ -85,21 +93,44 @@ module SceneManagerPlus
             'SilhouetteWidth'      => 1,
             'BackgroundColor'      => '#ccccc9',
             'DrawHorizon'          => true,       # Sky
-            'SkyColor'             => '#80b2f1',
-            'HorizonColor'         => '#ffffff',
+            'SkyColor'             => '#5787d2',
+            'HorizonColor'         => '#8fbde6',
             'ModelTransparency'    => false,      # X-ray
             'DrawHidden'           => false,      # Hidden geometry
             'DisplaySketchAxes'    => false,      # Model axes
             'DisplaySectionPlanes' => false,
             'DisplaySectionCuts'   => true
           },
-          description: "Voli d'uccello e prospettive dal basso"
+          description: "Voli d'uccello e prospettive dal basso",
+          badge_color: '#5787d2'               # = cielo
+        },
+        {
+          id:   'prospettive_chiaro',
+          name: 'Prospettive (cielo più chiaro)',
+          ro: {
+            'EdgeColorMode'        => 1,          # All same
+            'TransparencySort'     => 2,          # Nicer
+            'DrawSilhouettes'      => true,       # Profiles
+            'SilhouetteWidth'      => 1,
+            'BackgroundColor'      => '#ccccc9',
+            'DrawHorizon'          => true,       # Sky
+            'SkyColor'             => '#7dadec',
+            'HorizonColor'         => '#bcdcf2',
+            'ModelTransparency'    => false,      # X-ray
+            'DrawHidden'           => false,      # Hidden geometry
+            'DisplaySketchAxes'    => false,      # Model axes
+            'DisplaySectionPlanes' => false,
+            'DisplaySectionCuts'   => true
+          },
+          description: "Voli d'uccello e prospettive dal basso",
+          badge_color: '#7dadec'               # = cielo
         }
       ].freeze
 
       MANUAL_HINT = 'Set them by hand in the Style window (left click on the letter).'.freeze
 
-      # Per il picker della finestra principale (state.style_presets).
+      # Per il picker della finestra principale e il selettore della finestra
+      # dello stile (state.style_presets in entrambe).
       def list
         PRESETS.map { |p| { id: p[:id], name: p[:name] } }
       end
@@ -168,7 +199,8 @@ module SceneManagerPlus
         return nil unless m
         prev = m.styles.selected_style
         st = Styles.create_style_from_ro_hash(preset[:ro], name: preset[:name],
-                                              description: preset[:description])
+                                              description: preset[:description],
+                                              badge_color: preset[:badge_color])
         return nil unless st
         # create_style_from_ro_hash lascia selezionato lo stile nuovo: si
         # rimette quello che il viewport mostrava, così assign_styles parte
