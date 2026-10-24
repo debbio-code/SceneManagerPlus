@@ -20,7 +20,7 @@
       <button id="btn-delete" title="Delete selected">&#x2715;</button>
       <button id="btn-defer" title="Defer mode: stage changes in memory, click again to flush all to SketchUp">&#x23F8;</button>
       <button id="btn-previews" title="Generate previews for selected scenes (or all if none selected)">&#x1F3AC;</button>
-      <button id="btn-select-all" title="Select all scenes">&#x2611;</button>
+      <button id="btn-debug" title="MCP server on/off">MCP</button>
       <button id="btn-survey-check" title="Survey check: import a 3D Disto DWG (cm, cleaned, red) into a new 'Controllo Rilievo' scene">&#x1F4CD;</button>
       <div class="spacer"></div>
       <button id="btn-export" title="Batch export scenes">&#x21e9;</button>
@@ -42,20 +42,6 @@
     </footer>
   </div>
 
-  <div id="sm-color-popup" class="sm-color-popup hidden">
-    <div class="cp-main">
-      <div id="cp-sb" class="cp-sb"><span class="cp-marker" id="cp-sb-marker"></span></div>
-      <div id="cp-hue" class="cp-hue"><span class="cp-hue-marker" id="cp-hue-marker"></span></div>
-    </div>
-    <div class="cp-bot">
-      <span id="cp-preview" class="cp-preview"></span>
-      <input type="text" id="cp-hex" class="cp-hex" maxlength="7" placeholder="#aabbcc" spellcheck="false">
-      <button id="cp-none" class="cp-none-btn" title="No color" style="display:none">None</button>
-      <button id="cp-ok" class="cp-ok-btn" title="Confirm color (Enter)">OK</button>
-    </div>
-    <div id="cp-recent" class="cp-recent"></div>
-    <div id="cp-presets" class="cp-presets"></div>
-  </div>
 
   <script src="js/bridge.js"></script>
   <script src="js/dnd.js"></script>

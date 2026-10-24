@@ -116,7 +116,33 @@ window.SM = (function () {
     }
     setStatus(statusBits.join(' · '));
     updateDeferButton();
+    updateDebugButton();
     updateOrderBanner();
+  }
+
+  // Verde = server MCP acceso adesso (stato vero, letto da Ruby). Lo tiene
+  // aggiornato anche il polling (setMcpRunning) se il server viene acceso o
+  // spento da fuori.
+  function updateDebugButton() {
+    var btn = $('btn-debug');
+    if (!btn) return;
+    btn.disabled = state.mcp_available === false;
+    if (btn.disabled) {
+      btn.classList.remove('active');
+      btn.title = 'MCP plugin not installed on this computer';
+    } else if (state.mcp_running) {
+      btn.classList.add('active');
+      btn.title = 'MCP server ON (left on, it restarts with SketchUp). Click to stop it';
+    } else {
+      btn.classList.remove('active');
+      btn.title = 'MCP server OFF. Click to start it (left on, it restarts with SketchUp). ' +
+        'Ruby Console + MCP together: Settings → Interface';
+    }
+  }
+
+  function setMcpRunning(running) {
+    state.mcp_running = !!running;
+    updateDebugButton();
   }
 
   function updateOrderBanner() {
@@ -951,33 +977,15 @@ window.SM = (function () {
     if (btnDefer) {
       btnDefer.addEventListener('click', function () { SMBridge.deferToggle(); });
     }
-    var btnSelectAll = $('btn-select-all');
-    if (btnSelectAll) {
-      // Ciclo: 0 = "all", 1 = "none", 2 = "invert original". Si resetta se
-      // l'utente cambia selezione manualmente tra una pressione e l'altra.
-      var saStep = 0;
-      var saOriginal = null;
-      var saLastApplied = null;
-      function sigOf(arr) { return arr.slice().sort().join('|'); }
-      btnSelectAll.addEventListener('click', function () {
-        var order = visibleSceneOrder();
-        if (order.length === 0) return;
-        if (saLastApplied === null || sigOf(selection) !== saLastApplied) {
-          saStep = 0;
-          saOriginal = selection.slice();
-        }
-        if (saStep === 0) {
-          selection = order.slice();
-        } else if (saStep === 1) {
-          selection = [];
-        } else {
-          var orig = saOriginal || [];
-          selection = order.filter(function (id) { return orig.indexOf(id) === -1; });
-        }
-        anchorId = selection.length ? selection[0] : null;
-        saLastApplied = sigOf(selection);
-        saStep = (saStep + 1) % 3;
-        render();
+    // Server MCP: al posto del vecchio "Select all" (superato da Shift+click).
+    // Accende/spegne solo il server (niente console) e Ruby lo ricorda per il
+    // prossimo avvio. La checkbox in Settings → Interface apre console + MCP.
+    var btnDebug = $('btn-debug');
+    if (btnDebug) {
+      btnDebug.addEventListener('click', function () {
+        var turnOn = !state.mcp_running;
+        setStatus(turnOn ? 'Starting MCP server…' : 'Stopping MCP server…');
+        SMBridge.mcpToggle(turnOn);
       });
     }
     var btnSurvey = $('btn-survey-check');
@@ -1096,7 +1104,7 @@ window.SM = (function () {
         // il drag — un solo set_attribute alla chiusura del popup.
         SMColorPopup.show(e.target, current, function (hex) {
           SMBridge.setSceneColor(id, hex);
-        }, { allowNone: true, commitOnEnd: true });
+        }, { title: 'Scene color', allowNone: true, commitOnEnd: true });
       } else {
         var c = window.prompt('Scene color (hex, e.g. #4ea1ff):', current);
         if (c !== null) SMBridge.setSceneColor(id, c.trim());
@@ -1401,6 +1409,8 @@ window.SM = (function () {
     setPreviewProgress: setPreviewProgress,
     setExportProgress: setExportProgress,
     setActiveFromNative: setActiveFromNative,
-    selectId: selectId
+    selectId: selectId,
+    showStatus: setStatus,
+    setMcpRunning: setMcpRunning
   };
 })();

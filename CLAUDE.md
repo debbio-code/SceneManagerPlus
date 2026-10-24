@@ -92,6 +92,7 @@ scene_manager_plus.rb               # loader, registra l'extension
 scene_manager_plus/
 ├── main.rb                         # entry point: menu + toolbar + comando
 ├── assets/default_logo.png         # logo bundled per watermark
+├── assets/eyedropper.png           # cursore della pipetta nel modello (selettore colore)
 ├── assets/styles/_template.style   # UNICO template per creare stili nuovi
 │                                   # (vedi sez. "Stili nativi: creazione + rinomina")
 ├── assets/titleblock/              # asset bundlati per il cartiglio
@@ -100,6 +101,7 @@ scene_manager_plus/
 ├── core/
 │   ├── buffer.rb                   # Defer mode: stato globale edit in RAM + flush!
 │   ├── native_panel.rb             # controlli Win32 dei pannelli nativi (fiddle)
+│   ├── color_pick.rb               # pipette del selettore colore (modello, schermo)
 │   ├── exporter.rb                 # Batch export PNG/JPG + watermark + titleblock via ImageRep
 │   ├── folders.rb                  # cartelle logiche (schema + load/save)
 │   ├── layers.rb                   # layer/tag model-wide + payload per-scena
@@ -255,6 +257,19 @@ Remove-Item "$plug\scene_manager_plus.rb" -Force -ErrorAction SilentlyContinue
 Copy-Item "$src\scene_manager_plus.rb" "$plug\scene_manager_plus.rb" -Force
 Copy-Item "$src\scene_manager_plus" "$plug\" -Recurse
 ```
+
+⚠️ **Con più sessioni in parallelo (worktree in `.claude/worktrees/`)**
+(2026-10-24): la cartella Plugins è una sola e la copia la sostituisce per
+intero, quindi vince l'ultima sessione che copia. Da un worktree `$src` va
+messo al percorso **del worktree** (il comando sopra porterebbe in SketchUp i
+file della cartella principale, cioè il lavoro di un'altra sessione). Prima di
+copiare, controllare che le altre sessioni non abbiano modifiche già copiate
+in Plugins (`git -C <loro cartella> status --short` + un file loro presente in
+Plugins): in quel caso **non** copiare in automatico, avvisare l'utente e
+aspettare di unire. In una `reload` a caldo di `ui/settings_dialog.rb` (e degli
+altri dialog con `@dialog = nil` in testa al modulo) salvare prima l'handle
+della finestra e rimetterlo dopo il `load`, altrimenti la finestra aperta
+resta orfana.
 
 - Modifiche **Ruby (.rb)** → **avvisare l'utente di riavviare SketchUp**.
   In alternativa, se l'MCP è attivo, **reload a caldo** via `eval_ruby` senza
@@ -509,17 +524,10 @@ offset_x/y, opacity).
   dove viene usato. Quirks ulteriori scoperti prima (accetta solo hex
   lowercase, change event inaffidabile) sono irrilevanti perché non
   riusciamo nemmeno a interagire col picker. Per i settings (filename
-  label) usato input testuale hex + swatch + 6 preset clickabili. Per
-  il **Mini Style Manager** (Background + Sky color) costruito un picker
-  HSV custom in HTML/JS — `window.SMS` IIFE include un sub-modulo
-  privato `ColorPopup` con: SB square (saturation × value, gradient
-  CSS), hue slider verticale (gradient rainbow CSS), hex input, preview
-  swatch, 24 preset 8×3. Swatch della row clickabile apre il popup
-  posizionato sotto. Drag/click live-applica via `onApply` callback →
-  text input + swatch della row + Ruby (in viewport vedi il cambio
-  immediatamente). Outside click o Esc chiudono. Funziona al 100% in
-  CEF SU 2019 perché usa solo standard DOM/CSS senza el `<input
-  type="color">`.
+  label) usato input testuale hex + swatch + 6 preset clickabili.
+  Ovunque altro (Mini Style Manager, colore scena, layer, varianti) c'è il
+  selettore condiviso costruito in HTML/JS: vedi la sezione "Selettore
+  colore condiviso (`SMColorPopup`)".
 - **Spellcheck italiano**: non riusciti a forzarlo. Tentato (2026-05) con
   `spellcheck="true" lang="it"` su input rename inline + Properties name/desc
   e `<html lang="it">` + `<meta http-equiv="Content-Language" content="it">`:
@@ -2708,12 +2716,64 @@ Quando devi editare un file JS con caratteri Unicode (frecce, em-dash,
 ecc.), verifica sempre dopo l'edit con il check sopra. Pattern alternativo:
 fai l'edit con `Write` invece di `Edit` quando puoi.
 
-## Debugging mode (checkbox Settings → Interface) — 2026-06-01
+## Debugging mode (checkbox Settings → Interface + bottone "MCP") — 2026-06-01
 
 Checkbox "Debugging mode on startup (Ruby Console + MCP server)" in Settings →
 Interface. A ogni avvio di SketchUp apre la Ruby Console e avvia il server MCP,
 così le verifiche live via `eval_ruby` sono disponibili senza riaprire nulla
 (comodo nei tanti riavvii dovuti a modifiche `.rb`).
+
+**Bottone "MCP" in toolbar** (dal 2026-10-24, richiesta dell'utente: lo usa
+spesso). Ha preso il posto del vecchio "Select all" (☑, ciclo
+tutte/nessuna/inverti), superato da Shift+click. È una scritta e non un'icona
+di proposito ("più chiara a tutti": la prima versione era un 🐞).
+**Simile alla checkbox ma non identico, per scelta dell'utente**: la checkbox
+apre console + MCP all'avvio; il bottone accende/spegne **solo il server**,
+subito (la console a Claude non serve: parla col server via socket, la
+console mostra solo i log). Dettagli:
+- **Verde = server acceso adesso**, letto dal server vero
+  (`SettingsDialog.mcp_running?` = `@running` di `SU_MCP@server`), non da un
+  flag. Il polling a 250ms (`Dialog.poll_mcp_running`, sola lettura, gira
+  anche in defer mode) lo riallinea se il server si accende/spegne da fuori
+  (Extensions → MCP Server, checkbox, porta occupata). Disabilitato se `su_mcp`
+  manca (`state.mcp_available`).
+- **Si ricorda com'era** (scelta dell'utente): flag per-macchina
+  `mcp_on_open`, scritto al clic **e** alla chiusura di SketchUp
+  (`McpQuitObserver#onQuit`, salva `mcp_running?` comunque sia stato acceso).
+  All'avvio `main.rb`: se `debug_mode_on_open` → console + MCP, altrimenti se
+  `mcp_on_open` → solo MCP. ⚠️ Non verificato che una `write_default` dentro
+  `onQuit` arrivi su disco: se non arrivasse resta valida quella del clic.
+- **Spegnere il bottone toglie anche la spunta** (`debug_mode_on_open = false`):
+  la checkbox all'avvio riaccende MCP, quindi lasciarla accesa contraddiceva
+  "grigio = resta spento" — era il "i due bottoni non sono sincronizzati"
+  segnalato. Accenderlo invece non la tocca (la spunta vuol dire "anche la
+  console"). Verificato dal vivo via MCP: spento → porta 9876 chiusa, entrambi
+  i flag a false; riacceso → tutto come prima.
+- In `settings.js` le due checkbox per-macchina (debug, thumbnails) si
+  assegnano direttamente, **non** con `setIfNotFocused`: nel CEF il focus resta
+  sulla checkbox anche dopo un clic in un'altra finestra, e il refresh mandato
+  dal bottone veniva scartato. Stessa trappola del selettore stili (vedi
+  "Mini Style Manager — header").
+- Codice: `set_mcp_on` / `start_mcp` / `stop_mcp` / `mcp_server` in
+  `ui/settings_dialog.rb` (`activate_debug_mode` riusa `start_mcp`), callback
+  `sm_mcp_toggle` in `ui/dialog.rb`, `SM.setMcpRunning` / `SM.showStatus` in
+  `app.js`. `start_mcp` controlla `@running` dopo `start`: con la porta
+  occupata `su_mcp` si rispegne da solo e il bottone lo dice.
+- Collaudato il JS nel browser e il lato Ruby dal vivo via MCP (19.0.685).
+
+**Toolbar stretta** (stesso giorno): la finestra dell'utente sta a ~370 px e i
+bottoni con le emoji, nel CEF di SketchUp, vengono più larghi che in un browser.
+Padding 3px 4px e `white-space: nowrap` in `.toolbar button`: prima, a spazio
+insufficiente, i bottoni si restringevano e il "+" di 📷+ / 📁+ andava a capo.
+Tolto il `gap` della toolbar, che SketchUp ignora (Chrome 64, vedi
+`SU2019-LESSONS.md`): in SketchUp i bottoni sono sempre stati attaccati.
+Misurata in un browser normale: ci stanno tutti fino a ~290 px di larghezza;
+nel CEF le emoji vengono più larghe, quindi lì il margine è minore.
+
+Checkbox: `SettingsDialog.set_debug_on_open(enabled)` scrive il flag, se acceso
+apre subito console + MCP, e rimanda lo state anche alla finestra principale
+(il bottone diventa verde). Spegnerla non chiude la console né ferma il
+server: vale dal prossimo avvio.
 
 **Logica** in `SettingsDialog.activate_debug_mode` (riusata da `main.rb` allo
 startup e dal callback della checkbox):
@@ -2734,12 +2794,12 @@ dialog `debug_mode_on_open` è un campo **top-level** dello state (non dentro
 `state.debug_mode_on_open` (non da `writeUi`). Avvio in `main.rb`: timer 0.7s
 (dopo l'auto-open del dialog, per dar tempo a `su_mcp` di registrarsi).
 
-**Nota diagnostica**: la Ruby Console che si apre da sola a ogni avvio di SU
-**NON è Scene Manager+** — è il plugin MCP `su_mcp/main.rb` che fa
-`SKETCHUP_CONSOLE.show` a livello top-level (riga ~7) e di nuovo in
-`Server#initialize` (eseguito perché `@server = Server.new` parte al load).
-Il server MCP però NON parte da solo: solo la console viene mostrata. Per non
-far aprire la console all'avvio, il fix va fatto in `su_mcp`, non qui.
+**Nota diagnostica**: una vecchia versione del plugin MCP (`su_mcp/main.rb`)
+faceva `SKETCHUP_CONSOLE.show` al load e in `Server#initialize`, quindi la
+console si apriva a ogni avvio anche senza Scene Manager+. La versione
+installata su questa postazione il 2026-10-24 non lo fa più (scrive in console
+con `SKETCHUP_CONSOLE.write`, che non la apre). Se la console torna ad aprirsi
+da sola con la checkbox spenta, guardare prima `su_mcp`.
 
 ## Update from view parziale (tasto destro)
 
@@ -2778,8 +2838,9 @@ remove_color_attr`. `purge_unused_styles` pulisce anche colori orfani.
 `badge_color`; callback `sm_style_set_color { color: '#rrggbb'|'' }`.
 
 **UI Style Manager**: riga "Badge color" sotto il Nickname nell'header —
-swatch + hex input + bottone ✕. Swatch apre lo stesso `ColorPopup` HSV di
-Background/Sky. Swatch "vuoto" = pattern CSS a quadretti (`.swatch-empty`).
+swatch + hex input + bottone ✕. Swatch apre il selettore condiviso, in
+`commitOnEnd` + None (dal 2026-10-24: prima scriveva l'attributo a ogni
+movimento). Swatch "vuoto" = pattern CSS a quadretti (`.swatch-empty`).
 
 **Contrasto automatico** (`readableTextColor` in `app.js`): dato un colore
 hex calcola luminanza e sceglie testo `#1a1a1a` (scuro) o `#ffffff` (chiaro).
@@ -2787,18 +2848,77 @@ hex calcola luminanza e sceglie testo `#1a1a1a` (scuro) o `#ffffff` (chiaro).
 **Picker**: inline color sul `.ctx-letter` applicato **solo** se lo stile
 NON è `.current` (per non sovrascrivere il giallo che segnala lo stile attivo).
 
-## Color picker condiviso (`SMColorPopup`) + per-scene color
+## Selettore colore condiviso (`SMColorPopup`) + per-scene color
 
-`ui/html/js/color_popup.js` + `ui/html/css/color_popup.css` espongono
-`window.SMColorPopup`, un picker HSV unificato usato sia da `app.js` (main
-window) sia da `style_dialog.js` (Mini Style Manager). Markup `#sm-color-popup`
-+ `#cp-*` deve essere presente nell'HTML del dialog che lo usa (vedi
-`index.html` e `style.html`).
+**Dal 2026-10-24 è lo stesso selettore dei Componenti parametrici** (richiesta
+dell'utente; originale in `C:\Claude\Sketchup Plugins\Componenti dinamici\...
+\su_componenti_parametrici\selettore_colore.js` + `colore.rb`), coi colori di
+SM+ e i testi in inglese: menu Color wheel / HLS / HSB / RGB (l'ultimo scelto
+resta, `localStorage` `sm_color_popup_mode`), campione, **due pipette**
+(oggetto del modello, pixel dello schermo), cursori coi numeri, colori
+recenti, anteprima, codice, None (se chiesto) e OK. Riquadro al centro della
+finestra con fondo scurito (non più ancorato allo swatch). Usato da: Mini
+Style Manager (Background, Sky, Horizon, Badge), colore scena (`app.js`),
+colore layer (`properties.js`), colore materiale nelle varianti (`variant.js`).
 
-**API**: `SMColorPopup.show(triggerEl, currentHex, onApply, opts)` con:
+`ui/html/js/color_popup.js` **costruisce da solo il markup** alla prima
+apertura (id/classi `smcp*`): le pagine includono solo `color_popup.js` +
+`css/color_popup.css`, niente più blocco `#sm-color-popup` duplicato in ogni
+HTML. Per usarlo in un dialog nuovo: i due include + `Core::ColorPick.register(dlg)`
+nel suo `register_callbacks` (senza, le pipette dicono "only work inside
+SketchUp").
+
+**API** (invariata, i chiamanti non sono cambiati):
+`SMColorPopup.show(triggerEl, currentHex, onApply, opts)` con:
+- `opts.title` → testo in testa (es. "Sky color", "Layer color: <nome>").
 - `opts.allowNone = true` → mostra bottone **None** (commit string vuota).
 - `opts.commitOnEnd = true` → NON chiama `onApply` durante drag/typing; lo
-  chiama una sola volta alla `hide()` del popup con il colore finale.
+  chiama una sola volta alla chiusura con il colore finale (solo se toccato).
+- `opts.onPreview(hex)` → con `commitOnEnd`, a ogni ritocco.
+- `hide()` = conferma (OK, Invio nel codice, Esc, clic sul fondo — solo se
+  anche il mousedown era sul fondo, così un cursore lasciato fuori non chiude);
+  `cancel()` = chiude senza confermare né rimandare niente; `isOpen()`;
+  `picked(hex, done, notice)` = risposta delle pipette da Ruby.
+- `triggerEl` non serve più (resta nella firma).
+
+**Pipette** (`Core::ColorPick`, `core/color_pick.rb`, porting di `colore.rb`):
+callback `sm_cp_model` / `sm_cp_screen` / `sm_cp_cancel`, risposta con
+`SMColorPopup.picked(hex, done, notice)` — anteprima a ogni movimento
+(`done=false`), poi la presa (`done=true`, `''` = annullata, e il selettore
+torna al colore di prima, anche nel viewport). Modello = `push_tool` di uno
+strumento col cursore `assets/eyedropper.png` (raytest: materiale della
+faccia dal lato visto → gruppo/componente → colore default dello stile);
+schermo = timer 40ms con `GetCursorPos/GetDC/GetPixel` via fiddle, conferma
+clic/Invio/Spazio, Esc annulla. ⚠️ Il clic di conferma dello schermo arriva
+anche alla finestra sotto (non intercettabile senza hook globale): sulla lista
+scene cambierebbe scena — la nota nel selettore lo dice. Se la pagina non c'è
+più (finestra chiusa) la pipetta si ferma da sola in `deliver`.
+
+**Mentre è aperto i tasti non escono dal riquadro** (`stopPropagation` sul
+fondo, fuoco sul pannello): nella finestra principale le frecce
+cambierebbero scena sotto il selettore. Il fuoco va sul pannello, non sul
+bottone pipetta, anche perché Spazio/Invio confermano la pipetta dallo schermo
+e sul bottone la farebbero ripartire.
+
+**Mini Style Manager, colori dal vivo**: `sendLive` in `style_dialog.js` manda
+al più un `sm_style_apply` ogni 100ms (e l'ultimo sempre): cursori, ruota e
+pipetta che scorre lo schermo ne produrrebbero decine al secondo, ognuno una
+modifica dello stile con la sua voce di Undo. Misurato: 21 movimenti → 5
+invii. Se la finestra passa a un altro stile (cambio scena) col selettore
+aperto: `cancel()` + `dropLive()` — i ritocchi in coda andrebbero sullo stile
+nuovo (Ruby usa `@style_name`). Resta sullo stile vecchio solo quanto già
+applicato.
+
+⚠️ **CEF di SU 2019 = Chrome 64**: niente `gap` nei flex (Chrome 84) — nel
+CSS del selettore gli spazi sono margini. Vedi `docs/SU2019-LESSONS.md`.
+
+Collaudato: tutto il lato JS in browser (finto `window.sketchup`), il parsing
+dei cinque JS nel CEF vero di SketchUp, `color_at`/`color_under_cursor` dal
+vivo. **Non visto**: il selettore disegnato nel CEF di SketchUp, i clic veri
+sulle pipette. ⚠️ Il codice Ruby è quello di Componenti parametrici, ma
+nemmeno lì le pipette sono mai state provate dal vivo (lo dice il suo
+CLAUDE.md, 15/10/2026): è codice non collaudato in due plugin, non collaudato
+in uno.
 
 **Modalità `commitOnEnd`**: introdotta per il colore per-scena. Senza, ogni
 movimento nel SB square / hue slider triggera un write `set_attribute` su
@@ -2808,23 +2928,15 @@ picker dove il colore NON ha effetto live nel viewport (es. cosmetico,
 tag/etichetta). Per i picker dove il colore SI vede live nel viewport
 (Background/Sky color del Mini Style Manager), live mode è quello giusto.
 
-**Recenti**: gli ultimi 5 colori applicati sono salvati su `localStorage`
+**Recenti**: gli ultimi 8 colori confermati (una riga) su `localStorage`
 chiave `sm_color_popup_recent`, fallback in-memory se CEF non lo supporta.
-Push automatico in `hide()` se è stato applicato un colore valido. Sono
-condivisi tra TUTTI i picker (main window + Mini Style Manager), perché
-vivono nello stesso modulo `SMColorPopup`. CEF di SU 2019 supporta
-localStorage (verificato).
+Condivisi tra TUTTI i selettori di tutte le finestre. Il vecchio popup aveva
+anche 24 preset fissi: non ci sono più (come nel selettore dei Componenti
+parametrici, dove i preset li passa chi apre).
 
-**Enter/Esc nel campo hex** chiudono il popup (= commit in `commitOnEnd`,
-no-op altrimenti perché il colore è già stato applicato live). Il bottone
-**OK** (`#cp-ok`, richiesta utente 2026-09-23) fa esattamente lo stesso:
-chiama `hide()`, che è già il commit. Il markup `#cp-ok` va aggiunto in ogni
-dialog che include il popup (oggi `index.html`, `style.html`, `properties.html`).
-
-**Style dialog**: `style_dialog.js` aveva una IIFE privata `ColorPopup`
-identica; ora aliassata a `window.SMColorPopup` (il legacy `_ColorPopupLegacy`
-è dead-code lasciato come fallback rapido, mai inizializzato). Switching ha
-portato anche la riga "Recenti" e l'Enter-commit nel Style Manager.
+**Enter nel campo codice, Esc e OK** chiudono = conferma (OK richiesto
+dall'utente il 2026-09-23). Con una pipetta in corso Esc annulla la pipetta,
+non chiude.
 
 **Per-scene color** (`Core::SceneModel`):
 - Storage in dict `'SMP_scene_colors'` su `Sketchup.active_model`, key = uid
@@ -2843,11 +2955,6 @@ viene tintata). Vuoto = pattern a quadretti CSS, pieno = `background` inline.
 Click sx swatch → popup `allowNone:true, commitOnEnd:true`. Click dx swatch
 → `setSceneColor(id, '')` immediato (clear shortcut).
 
-**Trappola**: il popup HTML markup deve essere presente nel dialog che lo
-usa. Se aggiungi un nuovo dialog che vuole usare `SMColorPopup`, copia il
-blocco `<div id="sm-color-popup">...</div>` da `index.html` e includi
-`color_popup.css` + `color_popup.js`. Il markup è duplicato tra `index.html`
-e `style.html` (in CEF non si possono includere fragment HTML).
 
 ## Shortcut globali → `UI::Command`, non keydown JS
 
@@ -3164,8 +3271,8 @@ elenca invece di promettere un'esclusivita' inesistente.
   ha ne' `max-height` ne' `overflow`. Attenzione, basta impostare `overflow` su
   UN asse per creare un contenitore di scroll anche sull'altro. A scrollare e'
   `.body` dell'intero dialog.
-- Il markup di `SMColorPopup` e' stato duplicato anche in `properties.html`
-  (in CEF non si includono fragment HTML).
+- Il selettore colore e' quello condiviso (`SMColorPopup`, costruisce da se'
+  il suo markup: in `properties.html` bastano i due include).
 
 ## Azioni sui layer + finestra contenuto (2026-07-31)
 

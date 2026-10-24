@@ -81,18 +81,33 @@ body {
 .cancel-btn:hover { background: #8a3a3a; }
 .cancel-btn.hidden { display: none; }
 
-#btn-thumbs.active {
-  background: #2e6fb8;
-  border-color: #1a4e8a;
+/* Scritta invece di icona: piu' chiara a tutti. align-self: alto quanto i
+   bottoni con emoji, che a parita' di font-size vengono piu' alti del testo. */
+#btn-debug {
+  align-self: stretch;
+  padding: 0 3px;
+  font-size: 10px;
+  font-weight: bold;
+  letter-spacing: 0.5px;
+}
+/* Acceso = verde pieno, ben distinto dal grigio dei bottoni spenti: un verde
+   scuro su toolbar scura non si notava. */
+#btn-debug.active {
+  background: #22b14c;
+  border-color: #0f6b2e;
   color: #fff;
 }
-#btn-thumbs.active:hover { background: #3a85d6; }
+#btn-debug.active:hover { background: #2bc95a; }
 
+/* Bottoni stretti: la finestra sta spesso a ~370 px. Senza nowrap, quando
+   lo spazio manca i bottoni si restringono e il "+" di 📷+ / 📁+ va a capo.
+   Niente gap: il CEF di SU 2019 (Chrome 64) lo ignora nei flex, quindi in
+   SketchUp i bottoni sono sempre stati attaccati; un gap qui varrebbe solo
+   nel browser dei collaudi e falserebbe le misure. */
 .toolbar {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 4px 6px;
+  padding: 3px 4px;
   background: #3a3a3a;
   border-bottom: 1px solid #1e1e1e;
 }
@@ -100,10 +115,11 @@ body {
   background: #4a4a4a;
   border: 1px solid #1e1e1e;
   color: #ddd;
-  padding: 4px 8px;
+  padding: 3px 4px;
   cursor: pointer;
   font-size: 12px;
   border-radius: 2px;
+  white-space: nowrap;
 }
 .toolbar button:hover:not(:disabled) { background: #5a5a5a; }
 .toolbar button:disabled { opacity: 0.4; cursor: default; }

@@ -208,18 +208,12 @@ module SceneManagerPlus
         # Sketchup.write_default, NON nel gruppo 'ui' che è per-file model
         # attribute). Quando abilitato, a ogni avvio di SketchUp `main.rb`
         # chiama `activate_debug_mode`. Toggle-on lo attiva anche subito.
+        # Il bottone "MCP" della toolbar ha un flag suo (`mcp_on_open`, solo
+        # server, niente console): vedi `set_mcp_on`.
         dlg.add_action_callback('sm_settings_debug_on_open') do |_ctx, payload|
-          data    = parse(payload)
-          enabled = data['enabled'] ? true : false
-          Sketchup.write_default('SceneManagerPlus', 'debug_mode_on_open', enabled)
-          if enabled
-            status = activate_debug_mode
-            dlg.execute_script("window.SMS && SMS.setDebugResult(#{status.to_json});")
-          else
-            dlg.execute_script(
-              "window.SMS && SMS.setDebugResult(#{'Off — will not auto-start on next launch'.to_json});"
-            )
-          end
+          data   = parse(payload)
+          status = set_debug_on_open(data['enabled'] ? true : false)
+          dlg.execute_script("window.SMS && SMS.setDebugResult(#{status.to_json});")
         end
 
         # Thumbnails inline nella lista scene. Prima era un bottone della
@@ -232,12 +226,104 @@ module SceneManagerPlus
         end
       end
 
+      # Accende/spegne "Debugging mode on startup" (checkbox dei Settings):
+      # scrive il flag e, se acceso, apre subito console + MCP. Spegnere non
+      # chiude la console né ferma il server: vale solo per i prossimi avvii.
+      # Rimanda lo state anche alla finestra principale, il cui bottone "MCP"
+      # diventa verde se il server è partito. Ritorna lo status.
+      def set_debug_on_open(enabled)
+        Sketchup.write_default('SceneManagerPlus', 'debug_mode_on_open', enabled ? true : false)
+        status = enabled ? activate_debug_mode : 'Off — will not auto-start on next launch'
+        push_state
+        Dialog.push_state if defined?(Dialog)
+        status
+      end
+
+      # Bottone "MCP" della toolbar principale: accende/spegne SOLO il server
+      # MCP (niente console, che a Claude non serve) e ricorda la scelta per il
+      # prossimo avvio nel flag per-macchina `mcp_on_open`, distinto da
+      # `debug_mode_on_open` della checkbox (console + MCP). Ritorna lo status.
+      # Spegnere toglie anche la spunta della checkbox: la checkbox all'avvio
+      # riaccende MCP, quindi lasciarla accesa contraddirebbe "grigio = resta
+      # spento" (ed era il "non sincronizzati" segnalato). Accendere invece
+      # non la tocca: la checkbox vuol dire "anche la console".
+      def set_mcp_on(enabled)
+        Sketchup.write_default('SceneManagerPlus', 'mcp_on_open', enabled ? true : false)
+        Sketchup.write_default('SceneManagerPlus', 'debug_mode_on_open', false) unless enabled
+        status = enabled ? start_mcp : stop_mcp
+        puts "[SM+] MCP button: #{status}"
+        unless enabled
+          push_state
+          @dialog.execute_script("window.SMS && SMS.setDebugResult(#{'Off — MCP stopped from the toolbar button'.to_json});") if @dialog && @dialog.visible?
+        end
+        Dialog.push_state if defined?(Dialog)
+        status
+      end
+
+      # Il server MCP del plugin `su_mcp` è un'ivar del modulo SU_MCP (vedi
+      # su_mcp/main.rb): `start`/`stop`, con `@running` per lo stato e
+      # `start` idempotente (`return if @running`). nil se il plugin manca.
+      def mcp_server
+        return nil unless defined?(::SU_MCP)
+        srv = ::SU_MCP.instance_variable_get(:@server)
+        srv && srv.respond_to?(:start) && srv.respond_to?(:stop) ? srv : nil
+      end
+
+      # Sola lettura di un'ivar: sicuro anche dal polling a 250ms.
+      def mcp_running?
+        srv = mcp_server
+        srv ? srv.instance_variable_get(:@running) == true : false
+      end
+
+      def start_mcp
+        srv = mcp_server
+        unless srv
+          return defined?(::SU_MCP) ? 'MCP plugin loaded but server object missing' : 'MCP plugin not installed'
+        end
+        srv.start
+        # Se la porta è occupata (es. un'altra istanza di SketchUp col server
+        # acceso) `start` lo scrive in console e si rispegne da solo.
+        return 'MCP server failed to start (port busy? see Ruby Console)' unless mcp_running?
+        port = (srv.instance_variable_get(:@port) rescue nil)
+        port ? "MCP server listening on port #{port}" : 'MCP server started'
+      rescue => e
+        "MCP error: #{e.message}"
+      end
+
+      def stop_mcp
+        srv = mcp_server
+        return 'MCP plugin not installed' unless srv
+        srv.stop if mcp_running?
+        'MCP server stopped'
+      rescue => e
+        "MCP error: #{e.message}"
+      end
+
+      # "Ricorda com'era" del bottone MCP: alla chiusura di SketchUp si salva
+      # se il server è acceso, comunque sia stato acceso (bottone, checkbox,
+      # Extensions → MCP Server). Il clic sul bottone lo scrive anche subito,
+      # così la scelta regge anche se SketchUp si chiude male.
+      class McpQuitObserver < ::Sketchup::AppObserver
+        def onQuit
+          return unless SettingsDialog.mcp_server
+          Sketchup.write_default('SceneManagerPlus', 'mcp_on_open', SettingsDialog.mcp_running?)
+        rescue => e
+          warn "[SM+] MCP onQuit: #{e.class}: #{e.message}"
+        end
+      end
+
+      def install_mcp_quit_observer!
+        return if @mcp_quit_observer
+        @mcp_quit_observer = McpQuitObserver.new
+        ::Sketchup.add_observer(@mcp_quit_observer)
+      rescue => e
+        warn "[SM+] install_mcp_quit_observer!: #{e.class}: #{e.message}"
+      end
+
       # Apre la Ruby Console e avvia il server MCP (se il plugin `su_mcp` è
       # installato). Entrambe le azioni sono guardate: su una macchina senza
-      # MCP apre solo la console e lo segnala. Il server MCP espone `@server`
-      # come ivar del modulo SU_MCP (vedi su_mcp/main.rb); `Server#start` è
-      # idempotente (`return if @running`). Ritorna la stringa di status.
-      # Riusata da `main.rb` all'avvio e dal callback della checkbox.
+      # MCP apre solo la console e lo segnala. Ritorna la stringa di status.
+      # Riusata da `main.rb` all'avvio e da `set_debug_on_open`.
       def activate_debug_mode
         msgs = []
 
@@ -254,22 +340,7 @@ module SceneManagerPlus
         end
 
         # 2) MCP server (porta TCP locale)
-        if defined?(::SU_MCP)
-          begin
-            srv = ::SU_MCP.instance_variable_get(:@server)
-            if srv && srv.respond_to?(:start)
-              srv.start
-              port = (srv.instance_variable_get(:@port) rescue nil)
-              msgs << (port ? "MCP server listening on port #{port}" : 'MCP server started')
-            else
-              msgs << 'MCP plugin loaded but server object missing'
-            end
-          rescue => e
-            msgs << "MCP error: #{e.message}"
-          end
-        else
-          msgs << 'MCP plugin not installed'
-        end
+        msgs << start_mcp
 
         status = msgs.join(' · ')
         puts "[SM+] Debugging mode: #{status}"

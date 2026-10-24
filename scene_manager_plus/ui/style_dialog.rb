@@ -172,6 +172,7 @@ module SceneManagerPlus
       end
 
       def register_callbacks(dlg)
+        Core::ColorPick.register(dlg)
         dlg.add_action_callback('sm_style_ready') do |_ctx|
           push_state
         end

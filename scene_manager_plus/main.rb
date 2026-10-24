@@ -3,6 +3,7 @@ require 'sketchup.rb'
 module SceneManagerPlus
   require File.join(PLUGIN_DIR, 'core', 'buffer')
   require File.join(PLUGIN_DIR, 'core', 'native_panel')
+  require File.join(PLUGIN_DIR, 'core', 'color_pick')
   require File.join(PLUGIN_DIR, 'core', 'styles')
   require File.join(PLUGIN_DIR, 'core', 'style_presets')
   require File.join(PLUGIN_DIR, 'core', 'layers')
@@ -157,10 +158,23 @@ require File.join(PLUGIN_DIR, 'core', 'survey_check')
     # verifiche via MCP sono disponibili senza riaprire il dialog. Defer 0.7s:
     # leggermente dopo l'auto-open, per dare tempo al plugin MCP (su_mcp) di
     # registrarsi durante lo startup.
-    if Sketchup.read_default('SceneManagerPlus', 'debug_mode_on_open', false)
+    # Il bottone "MCP" della toolbar ha un flag suo (`mcp_on_open`): solo il
+    # server, senza console, e si ricorda com'era alla chiusura di SketchUp
+    # (observer onQuit). Se sono accesi tutti e due vince il debugging mode,
+    # che il server lo avvia comunque.
+    SceneManagerPlus::UI::SettingsDialog.install_mcp_quit_observer!
+    debug_on = Sketchup.read_default('SceneManagerPlus', 'debug_mode_on_open', false)
+    mcp_on   = Sketchup.read_default('SceneManagerPlus', 'mcp_on_open', false)
+    if debug_on || mcp_on
       ::UI.start_timer(0.7, false) do
         begin
-          SceneManagerPlus::UI::SettingsDialog.activate_debug_mode
+          if debug_on
+            SceneManagerPlus::UI::SettingsDialog.activate_debug_mode
+          else
+            status = SceneManagerPlus::UI::SettingsDialog.start_mcp
+            puts "[SM+] MCP on startup: #{status}"
+          end
+          SceneManagerPlus::UI::Dialog.push_state
         rescue => e
           warn "[SM+] debug auto-start failed: #{e.class}: #{e.message}"
         end

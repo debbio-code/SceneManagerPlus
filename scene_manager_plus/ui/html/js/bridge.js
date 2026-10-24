@@ -55,6 +55,7 @@ window.SMBridge = (function () {
     openExport:      function (sel)   { call('sm_open_export', { selected: sel || [] }); },
     openClipboard:   function (sel)   { call('sm_open_clipboard', { selected: sel || [] }); },
     surveyCheck:     function ()      { call('sm_survey_check'); },
+    mcpToggle:       function (on)    { call('sm_mcp_toggle', { enabled: !!on }); },
     cancelExport:    function ()      { call('sm_export_cancel_running'); },
     setExportIncluded: function (ids, included) {
                        var arr = Array.isArray(ids) ? ids : [ids];

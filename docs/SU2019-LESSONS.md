@@ -377,6 +377,12 @@ function Invoke-SUEval {
 }
 ```
 
+⚠️ Se il codice Ruby sta in un file, leggerlo con `[IO.File]::ReadAllText`,
+**non** con `Get-Content -Raw`: in PowerShell 5.1 quella stringa si porta dietro
+proprietà extra (`PSPath`…) e `ConvertTo-Json` la serializza come oggetto. Il
+server risponde `Ruby evaluation error: no implicit conversion of Hash into
+String`, che sembra un errore del proprio Ruby e non lo è (2026-10-24).
+
 ⚠️ **`Sketchup.open_file` chiamato dentro `eval_ruby` si pianta** (2026-08-01).
 L'eval gira nel message loop di SU e il caricamento di un file non può
 rientrarci: la chiamata non ritorna mai (osservato: >120s, socket muto, poi il
@@ -935,6 +941,25 @@ pretendere che siano uguali tra loro prima di confrontarli con il riferimento.
 
 ## CEF / HtmlDialog
 
+### Il CEF di SU 2019 è Chrome 64: niente `gap` nei flex
+
+Letto il 2026-10-24 da `navigator.userAgent` dentro una HtmlDialog di
+19.0.685: `Chrome/64.0.3282.119`. Quindi mancano le cose arrivate dopo, e la
+più insidiosa è **`gap` nei contenitori flex** (Chrome 84):
+`CSS.supports('gap','4px')` → `false`, la regola è ignorata e gli elementi
+di una riga si toccano. In Chrome moderno (il browser con cui si collauda la
+pagina fuori da SketchUp) invece funziona, quindi il difetto non si vede
+finché non si apre la finestra vera. Usare margini
+(`.riga > * + * { margin-left: 6px; }`). Stessa famiglia di `inset`
+(Chrome 87), già incontrato. Il vecchio popup colore e alcune regole di
+`style_dialog.css` usano `gap`: in SketchUp quegli spazi non ci sono mai
+stati.
+
+Per controllare la sintassi di un JS nel CEF vero senza eseguirlo: mandare
+il sorgente con `execute_script` dentro `new Function(src)` e riportare
+l'esito con un callback esistente (vedi sotto). Fatto così per i JS del
+selettore colore.
+
 ### CEF carica vecchi JS/CSS dalla cache anche dopo edit
 
 Modifico `dnd.js`, chiudo/riapro la finestra HtmlDialog, ma il codice in
@@ -950,6 +975,10 @@ gitignored.
 Registrare un callback nuovo su un `HtmlDialog` **già mostrato** non lo espone
 al contesto JS della pagina caricata: `sketchup.<nuovo_nome>` resta undefined e
 la chiamata muore in silenzio. Il binding object viene costruito al load.
+⚠️ **E non basta ricaricare la pagina** (verificato 2026-10-24): callback
+aggiunto, poi `set_file` sulla stessa HtmlDialog → `sketchup.<nuovo_nome>`
+ancora undefined. I callback vanno registrati prima del primo `show`; per
+aggiungerne uno serve una finestra nuova.
 
 Conseguenza pratica (utile per il debug): per interrogare il DOM di un dialog
 già aperto da Ruby, **riusare un callback esistente** (in SM+ va bene

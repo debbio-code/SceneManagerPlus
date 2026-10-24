@@ -196,9 +196,16 @@
     writeUi(ui);
     // Debug-on-startup: flag globale (non nel gruppo 'ui'), arriva al
     // top-level dello state.
-    setIfNotFocused($('#ui-debug-on-open'), 'checked', !!state.debug_mode_on_open);
+    // Assegnazione diretta, NON setIfNotFocused: una checkbox col focus non
+    // ha niente "in corso di scrittura" da proteggere, e nel CEF il focus le
+    // resta addosso anche dopo un clic in un'altra finestra (il blur non
+    // arriva), quindi il bottone "MCP" della toolbar non riusciva più a
+    // riallinearla.
+    const debugBox = $('#ui-debug-on-open');
+    if (debugBox) debugBox.checked = !!state.debug_mode_on_open;
     // Idem per le thumbnails inline della lista (flag per-macchina).
-    setIfNotFocused($('#ui-show-thumbs'), 'checked', !!state.show_thumbs);
+    const thumbsBox = $('#ui-show-thumbs');
+    if (thumbsBox) thumbsBox.checked = !!state.show_thumbs;
     requestPreview();
   };
 

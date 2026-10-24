@@ -170,22 +170,6 @@
     </div>
   </div>
 
-  <!-- Color picker popup (HSV square + hue slider + presets).
-       Costruito custom perché <input type="color"> è broken in CEF SU 2019. -->
-  <div id="sm-color-popup" class="sm-color-popup hidden">
-    <div class="cp-main">
-      <div id="cp-sb" class="cp-sb"><span class="cp-marker" id="cp-sb-marker"></span></div>
-      <div id="cp-hue" class="cp-hue"><span class="cp-hue-marker" id="cp-hue-marker"></span></div>
-    </div>
-    <div class="cp-bot">
-      <span id="cp-preview" class="cp-preview"></span>
-      <input type="text" id="cp-hex" class="cp-hex" maxlength="7" placeholder="#aabbcc" spellcheck="false">
-      <button id="cp-none" class="cp-none-btn" title="No color" style="display:none">None</button>
-      <button id="cp-ok" class="cp-ok-btn" title="Confirm color (Enter)">OK</button>
-    </div>
-    <div id="cp-recent" class="cp-recent"></div>
-    <div id="cp-presets" class="cp-presets"></div>
-  </div>
 
   <script src="js/color_popup.js"></script>
   <script src="js/style_dialog.js"></script>

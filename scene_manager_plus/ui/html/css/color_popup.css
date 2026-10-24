@@ -1,140 +1,140 @@
-/* Shared color picker popup. Stesso markup di style.html / index.html. */
-.sm-color-popup {
-  position: absolute;
-  background: #2b2b2b;
-  border: 1px solid #1e1e1e;
-  border-radius: 3px;
-  padding: 8px;
-  z-index: 1000;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.5);
-  user-select: none;
-}
-.sm-color-popup.hidden { display: none; }
-.cp-main {
-  display: flex;
-  gap: 6px;
-}
-.cp-sb {
-  width: 180px;
-  height: 130px;
-  position: relative;
-  cursor: crosshair;
-  background-image:
-    linear-gradient(to bottom, rgba(0,0,0,0), rgba(0,0,0,1)),
-    linear-gradient(to right, rgba(255,255,255,1), rgba(255,255,255,0));
-  background-blend-mode: normal;
-  border: 1px solid #1e1e1e;
-}
-.cp-hue {
-  width: 16px;
-  height: 130px;
-  position: relative;
-  cursor: pointer;
-  background: linear-gradient(to bottom,
-    #ff0000 0%, #ffff00 16.66%, #00ff00 33.33%,
-    #00ffff 50%, #0000ff 66.66%, #ff00ff 83.33%, #ff0000 100%);
-  border: 1px solid #1e1e1e;
-}
-.cp-marker {
-  position: absolute;
-  width: 10px;
-  height: 10px;
-  border: 2px solid #fff;
-  border-radius: 50%;
-  transform: translate(-50%, -50%);
-  pointer-events: none;
-  box-shadow: 0 0 1px #000, inset 0 0 1px #000;
-}
-.cp-hue-marker {
-  position: absolute;
-  left: 50%;
-  top: 0;
-  width: 16px;
-  height: 5px;
-  border: 1px solid #fff;
-  border-radius: 1px;
-  transform: translate(-50%, -50%);
-  pointer-events: none;
-  box-shadow: 0 0 1px #000;
-  background: rgba(0,0,0,0.2);
-}
-.cp-bot {
-  display: flex;
-  gap: 6px;
-  margin-top: 6px;
+/* Selettore colore condiviso (js/color_popup.js, che costruisce da solo il
+   markup). Stessa forma di quello dei Componenti parametrici, coi colori di
+   Scene Manager+. Il CEF di SU 2019 e' Chrome 64 (letto da navigator.userAgent
+   il 2026-10-24): niente `inset` e niente `gap` nei flex (arriva con Chrome
+   84, CSS.supports('gap') = false), gli spazi sono margini. */
+#smcp {
+  position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: none;
+  z-index: 3000;
   align-items: center;
-}
-.cp-preview {
-  width: 24px;
-  height: 24px;
-  border: 1px solid #1e1e1e;
-  border-radius: 2px;
-  background: #000;
-  flex-shrink: 0;
-}
-.cp-hex {
-  flex: 1;
-  min-width: 0; /* con None + OK sulla stessa riga l'input deve potersi stringere */
-  background: #1a1a1a;
+  justify-content: center;
+  user-select: none;
+  font-family: "Segoe UI", Tahoma, sans-serif;
+  font-size: 12px;
   color: #ddd;
+}
+#smcp * { box-sizing: border-box; }
+#smcp input { user-select: text; }
+#smcpPanel {
+  background: #333;
   border: 1px solid #1e1e1e;
-  border-radius: 2px;
-  padding: 3px 6px;
-  font-family: Consolas, "Courier New", monospace;
+  border-radius: 6px;
+  padding: 12px;
+  width: 236px;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
   outline: none;
+}
+#smcpTitle {
+  font-size: 11px;
+  font-weight: 600;
+  color: #4ea1ff;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  margin: 0 0 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#smcp .smcp-head { display: flex; align-items: center; }
+#smcp .smcp-head > * + * { margin-left: 6px; }
+#smcpMode {
+  flex: 0 0 104px; width: 104px;
+  background: #1a1a1a; color: #ddd;
+  border: 1px solid #1e1e1e; border-radius: 3px;
+  padding: 3px; font: inherit;
+}
+#smcpSample { flex: 1; height: 24px; border-radius: 3px; border: 1px solid #0006; }
+#smcp .smcp-ico {
+  flex: 0 0 26px; width: 26px; height: 24px; padding: 0;
+  border: 1px solid #1e1e1e; border-radius: 3px;
+  background: #444; color: #ddd;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+}
+#smcp .smcp-ico:hover { background: #4f4f4f; border-color: #4ea1ff; }
+#smcp .smcp-ico.on { background: #2f6fb3; border-color: #4ea1ff; color: #fff; }
+#smcpWheel {
+  position: relative;
+  width: 128px; height: 128px;
+  margin: 10px auto 2px;
+  cursor: crosshair;
+}
+#smcpCanvas, #smcpDark {
+  position: absolute; left: 0; top: 0;
+  width: 128px; height: 128px;
+  border-radius: 50%;
+}
+#smcpDark { background: #000; pointer-events: none; }
+#smcpDot {
+  position: absolute; width: 12px; height: 12px;
+  border-radius: 50%; border: 2px solid #fff;
+  box-shadow: 0 0 0 1px #0008;
+  transform: translate(-6px, -6px);
+  pointer-events: none;
+}
+#smcp .smcp-row { display: flex; align-items: center; margin-top: 9px; }
+#smcp .smcp-row > * + * { margin-left: 8px; }
+#smcp .smcp-row span { flex: 0 0 10px; color: #999; font-weight: 600; font-size: 12px; }
+#smcp .smcp-bar {
+  position: relative; flex: 1; height: 14px;
+  border-radius: 7px; border: 1px solid #0006;
+  cursor: pointer;
+}
+#smcp .smcp-cur {
+  position: absolute; top: -2px; width: 14px; height: 16px;
+  border-radius: 4px; border: 2px solid #fff;
+  box-shadow: 0 0 0 1px #0008;
+  transform: translateX(-7px);
+  pointer-events: none;
+}
+#smcp .smcp-row input {
+  flex: 0 0 48px; width: 48px;
+  text-align: right;
+  background: #1a1a1a; color: #ddd;
+  border: 1px solid #1e1e1e; border-radius: 3px;
+  padding: 2px 4px; font: inherit;
+  font-variant-numeric: tabular-nums;
+  -webkit-appearance: textfield; appearance: textfield;
+}
+/* Le freccette dei campi numerici nel CEF di SU 2019 sono larghe 2-3 px e
+   spesso non prendono il clic: via. Le frecce da tastiera funzionano. */
+#smcp .smcp-row input::-webkit-inner-spin-button,
+#smcp .smcp-row input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+#smcp input:focus, #smcpMode:focus { outline: none; border-color: #4ea1ff; }
+#smcpRecent { display: flex; flex-wrap: wrap; margin: 10px 0 -4px; }
+#smcpRecent span {
+  width: 22px; height: 22px;
+  margin: 0 4px 4px 0;
+  border-radius: 3px; border: 1px solid #0008;
+  cursor: pointer;
+}
+#smcpRecent span:hover { border-color: #4ea1ff; }
+#smcp .smcp-foot { display: flex; align-items: center; margin-top: 10px; }
+#smcp .smcp-foot > * + * { margin-left: 6px; }
+#smcpPrev { flex: 0 0 auto; width: 30px; height: 30px; border-radius: 3px; border: 1px solid #1e1e1e; }
+#smcpHex {
+  flex: 1; width: auto; min-width: 0;
+  background: #1a1a1a; color: #ddd;
+  border: 1px solid #1e1e1e; border-radius: 3px;
+  padding: 5px;
+  font-family: Consolas, "Courier New", monospace;
   text-transform: lowercase;
 }
-.cp-hex:focus { border-color: #4ea1ff; }
-.cp-presets {
-  display: grid;
-  grid-template-columns: repeat(8, 1fr);
-  gap: 3px;
-  margin-top: 6px;
-}
-.cp-presets .cp-preset {
-  width: 100%;
-  aspect-ratio: 1;
-  border: 1px solid #1e1e1e;
-  border-radius: 2px;
+#smcp .smcp-btn {
+  flex: 0 0 auto;
+  background: #444; color: #ddd;
+  border: 1px solid #1e1e1e; border-radius: 3px;
+  padding: 6px 9px;
+  font: inherit; font-size: 11px;
   cursor: pointer;
 }
-.cp-presets .cp-preset:hover { border-color: #4ea1ff; }
-
-.cp-none-btn {
-  background: #3a3a3a;
-  color: #ddd;
-  border: 1px solid #1e1e1e;
-  border-radius: 2px;
-  padding: 3px 8px;
-  font-size: 11px;
-  cursor: pointer;
-  flex-shrink: 0;
-}
-.cp-none-btn:hover { background: #4a4a4a; border-color: #4ea1ff; }
-
-.cp-ok-btn {
-  background: #2f6fb3;
-  color: #fff;
-  border: 1px solid #1e1e1e;
-  border-radius: 2px;
-  padding: 3px 10px;
-  font-size: 11px;
-  font-weight: bold;
-  cursor: pointer;
-  flex-shrink: 0;
-}
-.cp-ok-btn:hover { background: #3d82cc; border-color: #4ea1ff; }
-
-.cp-recent {
-  display: flex;
-  gap: 3px;
-  margin-top: 6px;
-}
-.cp-recent-swatch {
-  width: 20px;
-  height: 20px;
-  border: 1px solid #1e1e1e;
-  border-radius: 2px;
-  cursor: pointer;
-}
-.cp-recent-swatch:hover { border-color: #4ea1ff; }
+#smcp .smcp-btn:hover { background: #4f4f4f; border-color: #4ea1ff; }
+#smcp .smcp-ok { background: #2f6fb3; color: #fff; font-weight: bold; padding: 6px 12px; }
+#smcp .smcp-ok:hover { background: #3d82cc; }
+#smcpNote { display: none; font-size: 11px; line-height: 1.4; color: #8cc4ff; margin: 8px 0 0; }
+#smcpNote .smcp-dim { color: #999; }
