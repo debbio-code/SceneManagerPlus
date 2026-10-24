@@ -982,7 +982,7 @@ module SceneManagerPlus
           when id_yes
             puts "[SM+] update_from_view: user chose 'Update selected style' for '#{style_name}'"
             begin
-              styles.update_selected_style
+              Core::Styles.update_selected_style_keeping_description(model)
             rescue => e
               warn "[SM+] update_selected_style failed: #{e.class}: #{e.message}"
             end
@@ -1121,7 +1121,7 @@ module SceneManagerPlus
           when id_yes
             puts "[SM+] add_from_view: user chose 'Update selected style' for '#{style_name}'"
             begin
-              styles.update_selected_style
+              Core::Styles.update_selected_style_keeping_description(model)
             rescue => e
               warn "[SM+] update_selected_style failed: #{e.class}: #{e.message}"
             end

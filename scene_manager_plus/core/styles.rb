@@ -198,9 +198,10 @@ module SceneManagerPlus
       #   inferendo il tipo dalla RO corrente del template (se la chiave è un
       #   colore nel template, la stringa hex viene promossa a Color).
       # name: nome desiderato per lo stile (reso unico automaticamente).
+      # description: se non nil, sostituisce quella del template.
       #
       # Ritorna il Sketchup::Style creato o nil (errore).
-      def create_style_from_ro_hash(ro_hash, name: nil)
+      def create_style_from_ro_hash(ro_hash, name: nil, description: nil)
         m = model
         return nil unless m
         ro_hash ||= {}
@@ -227,6 +228,8 @@ module SceneManagerPlus
           apply_ro_snapshot(ro, ro_hash)
 
           m.styles.update_selected_style
+          # Dopo l'update, non prima (vedi update_selected_style_keeping_description).
+          loaded.description = description.to_s unless description.nil?
 
           m.commit_operation
           loaded
@@ -392,12 +395,16 @@ module SceneManagerPlus
       # `Sketchup::Style#description=` esiste e persiste (verificato).
       def set_description(style_name, text)
         st = find_style(style_name)
-        return false unless st
+        unless st
+          warn "[SM+] set_description: style #{style_name.inspect} not found"
+          return false
+        end
         m = model
         m.start_operation('SM+ Style description', true)
         begin
           st.description = text.to_s
           m.commit_operation
+          puts "[SM+] set_description '#{st.name}': #{st.description.to_s.inspect}"
           true
         rescue => e
           m.abort_operation
@@ -411,6 +418,24 @@ module SceneManagerPlus
         st ? st.description.to_s : nil
       rescue
         nil
+      end
+
+      # update_selected_style (= Update del pannello nativo) che non perde la
+      # descrizione. Segnalazione dell'utente (2026-10-24): "non salva la
+      # descrizione". Sospetto, NON verificato dal vivo: l'Update copia nello
+      # stile la copia di lavoro di SketchUp, che la descrizione scritta via
+      # Ruby non l'ha, e un edit qualsiasi nel Mini Style Manager la
+      # rimetteva com'era. Qui la si rilegge prima e la si rimette se è
+      # cambiata; il puts dice in Ruby Console se il sospetto era giusto.
+      # Da chiamare dentro l'operazione del caller.
+      def update_selected_style_keeping_description(m)
+        st   = m.styles.selected_style
+        desc = st ? st.description.to_s : nil
+        m.styles.update_selected_style
+        return if desc.nil? || st.description.to_s == desc
+        puts "[SM+] update_selected_style changed the description of " \
+             "'#{st.name}' (#{st.description.to_s.inspect}): restored #{desc.inspect}"
+        st.description = desc
       end
 
       # UI helper: prompt per un nome stile con retry su duplicato. Ritorna

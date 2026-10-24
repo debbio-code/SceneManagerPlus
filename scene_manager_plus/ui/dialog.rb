@@ -405,6 +405,17 @@ module SceneManagerPlus
           StyleDialog.after_assign(ids, style ? style.name : nil) if result != :aborted
         end
 
+        # Preset di stile dal picker (voci sotto "+ New style…"): crea lo
+        # stile del preset, o riusa quello omonimo se l'utente vuole, e lo
+        # assegna alle scene di contesto. Tutto in Core::StylePresets.
+        dlg.add_action_callback('sm_style_preset') do |_ctx, payload|
+          data = parse(payload)
+          ids  = data['ids'].is_a?(Array) ? data['ids'] : [data['id']].compact
+          name = Core::StylePresets.apply_to_scenes(data['preset'], ids)
+          push_state
+          StyleDialog.after_assign(ids, name) if name
+        end
+
         dlg.add_action_callback('sm_scene_set_color') do |_ctx, payload|
           data = parse(payload)
           Core::SceneModel.set_scene_color(data['id'], data['color'])
@@ -562,6 +573,7 @@ module SceneManagerPlus
           folders:   payload[:folders],
           flag_keys: Core::SceneModel::FLAG_KEYS,
           styles:    Core::SceneModel.styles_map,
+          style_presets: Core::StylePresets.list,
           deferred:  Core::Buffer.deferred?,
           pending:   Core::Buffer.pending_count,
           previews:  Core::Previews.url_map,

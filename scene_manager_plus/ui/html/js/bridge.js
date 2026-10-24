@@ -36,6 +36,7 @@ window.SMBridge = (function () {
     openStyle:       function (id, name) { call('sm_open_style', { id: id, style_name: name }); },
     openNativeStylesPanel: function (id) { call('sm_open_native_styles_panel', { id: id }); },
     newStyle:        function (ids)      { call('sm_style_new', { ids: [].concat(ids) }); },
+    stylePreset:     function (ids, preset) { call('sm_style_preset', { ids: [].concat(ids), preset: preset }); },
     deleteScenes:    function (ids)   { call('sm_delete', { ids: ids }); },
     newSceneFromView:function ()      { call('sm_new_scene_from_view'); },
     folderCreate:    function (name)  { call('sm_folder_create', { name: name }); },

@@ -749,17 +749,29 @@ window.SMS = (function () {
       });
       nickEl.addEventListener('blur', commitStyleName);
     }
-    // Description input: stesso pattern.
+    // Description input: stesso pattern, piu' un salvataggio dopo una pausa
+    // nella scrittura. In CEF il blur non arriva se si clicca fuori dalla
+    // finestra o la si chiude, e la descrizione andava persa (segnalato
+    // 2026-10-24). Col nome non si fa: ogni salvataggio e' una rinomina.
     var descEl = $('style-description');
     if (descEl) {
+      var descTimer = null;
+      var stopDescTimer = function () {
+        if (descTimer) { clearTimeout(descTimer); descTimer = null; }
+      };
+      descEl.addEventListener('input', function () {
+        stopDescTimer();
+        descTimer = setTimeout(function () { descTimer = null; commitDescription(); }, 800);
+      });
       descEl.addEventListener('keydown', function (e) {
         if (e.key === 'Enter') { e.preventDefault(); descEl.blur(); }
         else if (e.key === 'Escape') {
+          stopDescTimer();
           descEl.value = state.description || '';
           descEl.blur();
         }
       });
-      descEl.addEventListener('blur', commitDescription);
+      descEl.addEventListener('blur', function () { stopDescTimer(); commitDescription(); });
     }
     // Badge color: swatch apre il popup HSV; hex input + bottone clear.
     var bSw = $('sw-BadgeColor');

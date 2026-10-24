@@ -359,6 +359,21 @@ window.SM = (function () {
     });
     menu.appendChild(newItem);
 
+    // Preset di stile (Core::StylePresets): uno stile gia' pronto, creato
+    // dal plugin e assegnato alle scene bersaglio.
+    (state.style_presets || []).forEach(function (p) {
+      var item = document.createElement('div');
+      item.className = 'ctx-item style-pick style-pick-new';
+      item.innerHTML = '<span class="ctx-letter">+</span><span class="ctx-name"></span>';
+      item.querySelector('.ctx-name').textContent = p.name + ' (preset)';
+      item.title = 'Create the ' + p.name + ' style and assign it';
+      item.addEventListener('click', function () {
+        hideContextMenu();
+        SMBridge.stylePreset(targetIds, p.id);
+      });
+      menu.appendChild(item);
+    });
+
     if (styles.length > 0) {
       var sep = document.createElement('div');
       sep.className = 'ctx-sep';

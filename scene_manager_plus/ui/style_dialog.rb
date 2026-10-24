@@ -424,7 +424,7 @@ module SceneManagerPlus
       def commit_style!
         m = Sketchup.active_model
         return false unless m && m.styles.active_style_changed
-        m.styles.update_selected_style
+        Core::Styles.update_selected_style_keeping_description(m)
         true
       rescue => e
         warn "[SM+] commit_style!: #{e.class}: #{e.message}"
@@ -548,9 +548,8 @@ module SceneManagerPlus
           # Committa le modifiche IN-MEMORY al persistente: senza questo, le
           # modifiche valgono per la sessione corrente ma quando una scena viene
           # ri-attivata SU riapplica lo style "salvato" e le perde.
-          if m.styles.respond_to?(:update_selected_style)
-            m.styles.update_selected_style
-          end
+          # Senza perdere la descrizione: vedi il metodo in Core::Styles.
+          Core::Styles.update_selected_style_keeping_description(m)
           m.commit_operation
           true
         rescue => e
