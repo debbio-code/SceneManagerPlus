@@ -1081,7 +1081,7 @@ window.SM = (function () {
         // il drag — un solo set_attribute alla chiusura del popup.
         SMColorPopup.show(e.target, current, function (hex) {
           SMBridge.setSceneColor(id, hex);
-        }, { allowNone: true, commitOnEnd: true });
+        }, { title: 'Scene color', allowNone: true, commitOnEnd: true });
       } else {
         var c = window.prompt('Scene color (hex, e.g. #4ea1ff):', current);
         if (c !== null) SMBridge.setSceneColor(id, c.trim());
