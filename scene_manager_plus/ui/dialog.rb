@@ -9,6 +9,7 @@ module SceneManagerPlus
       @poll_timer_id     = nil
       @last_active_uid   = nil
       @last_native_sig   = nil
+      @last_mcp_running  = nil
 
       # Polling 250ms: se selected_page cambia (e defer è OFF), aggiorna la
       # selezione nel plugin. Più affidabile del frame_change_observer che
@@ -17,10 +18,24 @@ module SceneManagerPlus
         stop_active_scene_poll
         @last_active_uid = nil
         @last_native_sig = nil
+        @last_mcp_running = nil
         @poll_timer_id = ::UI.start_timer(0.25, true) do
           poll_active_scene
         end
         puts "[SM+] active scene poll started"
+      end
+
+      # Il server MCP si accende/spegne anche da fuori (Extensions → MCP Server,
+      # checkbox dei Settings, errore all'avvio): il verde del bottone "MCP"
+      # deve seguire lo stato vero. Sola lettura di un'ivar, niente write;
+      # gira anche in defer mode (non tocca il modello).
+      def poll_mcp_running
+        running = SettingsDialog.mcp_running?
+        return if running == @last_mcp_running
+        @last_mcp_running = running
+        @dialog.execute_script("window.SM && SM.setMcpRunning && SM.setMcpRunning(#{running});")
+      rescue => e
+        warn "[SM+] poll_mcp_running: #{e.class}: #{e.message}"
       end
 
       def stop_active_scene_poll
@@ -35,6 +50,7 @@ module SceneManagerPlus
 
       def poll_active_scene
         return unless @dialog && @dialog.visible?
+        poll_mcp_running
         return if Core::Buffer.deferred?
         m = Sketchup.active_model
         return unless m
@@ -455,12 +471,13 @@ module SceneManagerPlus
           end
         end
 
-        # Bottone "MCP": stesso flag della checkbox "Debugging mode on startup"
-        # dei Settings. set_debug_on_open rimanda già lo state (che riscrive
-        # la status bar), quindi l'esito si mostra dopo.
-        dlg.add_action_callback('sm_debug_toggle') do |_ctx, payload|
+        # Bottone "MCP": accende/spegne solo il server MCP e lo ricorda per il
+        # prossimo avvio (vedi SettingsDialog.set_mcp_on). set_mcp_on rimanda
+        # già lo state (che riscrive la status bar), quindi l'esito si mostra
+        # dopo.
+        dlg.add_action_callback('sm_mcp_toggle') do |_ctx, payload|
           data   = parse(payload)
-          status = SettingsDialog.set_debug_on_open(data['enabled'] ? true : false)
+          status = SettingsDialog.set_mcp_on(data['enabled'] ? true : false)
           dlg.execute_script("window.SM && SM.showStatus && SM.showStatus(#{status.to_json});")
         end
 
@@ -581,8 +598,10 @@ module SceneManagerPlus
           variant_clipboard: payload[:variant_clipboard],
           # Flag per-macchina, si cambia da Settings → Interface.
           show_thumbs: Sketchup.read_default('SceneManagerPlus', 'show_thumbs', false) ? true : false,
-          # Flag per-macchina: bottone "MCP" + checkbox in Settings → Interface.
-          debug_mode_on_open: Sketchup.read_default('SceneManagerPlus', 'debug_mode_on_open', false) ? true : false
+          # Bottone "MCP": verde = server acceso ADESSO (stato vero del server,
+          # non il flag dell'avvio), disabilitato se il plugin MCP manca.
+          mcp_available: SettingsDialog.mcp_server ? true : false,
+          mcp_running:   SettingsDialog.mcp_running?
         }
         puts "[SM+] push_state: model=#{state[:model_info][:title].inspect} " \
              "native_pages=#{state[:model_info][:pages_count]} " \

@@ -120,18 +120,29 @@ window.SM = (function () {
     updateOrderBanner();
   }
 
+  // Verde = server MCP acceso adesso (stato vero, letto da Ruby). Lo tiene
+  // aggiornato anche il polling (setMcpRunning) se il server viene acceso o
+  // spento da fuori.
   function updateDebugButton() {
     var btn = $('btn-debug');
     if (!btn) return;
-    if (state.debug_mode_on_open) {
+    btn.disabled = state.mcp_available === false;
+    if (btn.disabled) {
+      btn.classList.remove('active');
+      btn.title = 'MCP plugin not installed on this computer';
+    } else if (state.mcp_running) {
       btn.classList.add('active');
-      btn.title = 'Debugging mode ON: Ruby Console + MCP server start with SketchUp. ' +
-        'Click to turn off (takes effect from the next launch)';
+      btn.title = 'MCP server ON (left on, it restarts with SketchUp). Click to stop it';
     } else {
       btn.classList.remove('active');
-      btn.title = 'Debugging mode on startup (Ruby Console + MCP server). ' +
-        'Click to turn on: also starts them right now';
+      btn.title = 'MCP server OFF. Click to start it (left on, it restarts with SketchUp). ' +
+        'Ruby Console + MCP together: Settings → Interface';
     }
+  }
+
+  function setMcpRunning(running) {
+    state.mcp_running = !!running;
+    updateDebugButton();
   }
 
   function updateOrderBanner() {
@@ -951,14 +962,15 @@ window.SM = (function () {
     if (btnDefer) {
       btnDefer.addEventListener('click', function () { SMBridge.deferToggle(); });
     }
-    // Debugging mode on startup: al posto del vecchio "Select all" (superato
-    // da Shift+click). Stesso flag della checkbox in Settings → Interface.
+    // Server MCP: al posto del vecchio "Select all" (superato da Shift+click).
+    // Accende/spegne solo il server (niente console) e Ruby lo ricorda per il
+    // prossimo avvio. La checkbox in Settings → Interface apre console + MCP.
     var btnDebug = $('btn-debug');
     if (btnDebug) {
       btnDebug.addEventListener('click', function () {
-        var turnOn = !state.debug_mode_on_open;
-        if (turnOn) setStatus('Debugging mode: starting Ruby Console + MCP server…');
-        SMBridge.debugToggle(turnOn);
+        var turnOn = !state.mcp_running;
+        setStatus(turnOn ? 'Starting MCP server…' : 'Stopping MCP server…');
+        SMBridge.mcpToggle(turnOn);
       });
     }
     var btnSurvey = $('btn-survey-check');
@@ -1383,6 +1395,7 @@ window.SM = (function () {
     setExportProgress: setExportProgress,
     setActiveFromNative: setActiveFromNative,
     selectId: selectId,
-    showStatus: setStatus
+    showStatus: setStatus,
+    setMcpRunning: setMcpRunning
   };
 })();

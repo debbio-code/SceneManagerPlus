@@ -2711,10 +2711,32 @@ così le verifiche live via `eval_ruby` sono disponibili senza riaprire nulla
 (comodo nei tanti riavvii dovuti a modifiche `.rb`).
 
 **Bottone "MCP" in toolbar** (dal 2026-10-24, richiesta dell'utente: lo usa
-spesso): stesso flag della checkbox, verde quando acceso. È una scritta e non
-un'icona di proposito ("più chiara a tutti": la prima versione era un 🐞). Ha
-preso il posto del vecchio "Select all" (☑, ciclo tutte/nessuna/inverti),
-superato da Shift+click.
+spesso). Ha preso il posto del vecchio "Select all" (☑, ciclo
+tutte/nessuna/inverti), superato da Shift+click. È una scritta e non un'icona
+di proposito ("più chiara a tutti": la prima versione era un 🐞).
+**Simile alla checkbox ma non identico, per scelta dell'utente**: la checkbox
+apre console + MCP all'avvio; il bottone accende/spegne **solo il server**,
+subito (la console a Claude non serve: parla col server via socket, la
+console mostra solo i log). Dettagli:
+- **Verde = server acceso adesso**, letto dal server vero
+  (`SettingsDialog.mcp_running?` = `@running` di `SU_MCP@server`), non da un
+  flag. Il polling a 250ms (`Dialog.poll_mcp_running`, sola lettura, gira
+  anche in defer mode) lo riallinea se il server si accende/spegne da fuori
+  (Extensions → MCP Server, checkbox, porta occupata). Disabilitato se `su_mcp`
+  manca (`state.mcp_available`).
+- **Si ricorda com'era** (scelta dell'utente): flag per-macchina
+  `mcp_on_open`, scritto al clic **e** alla chiusura di SketchUp
+  (`McpQuitObserver#onQuit`, salva `mcp_running?` comunque sia stato acceso).
+  All'avvio `main.rb`: se `debug_mode_on_open` → console + MCP, altrimenti se
+  `mcp_on_open` → solo MCP. ⚠️ Non verificato che una `write_default` dentro
+  `onQuit` arrivi su disco: se non arrivasse resta valida quella del clic.
+- Codice: `set_mcp_on` / `start_mcp` / `stop_mcp` / `mcp_server` in
+  `ui/settings_dialog.rb` (`activate_debug_mode` riusa `start_mcp`), callback
+  `sm_mcp_toggle` in `ui/dialog.rb`, `SM.setMcpRunning` / `SM.showStatus` in
+  `app.js`. `start_mcp` controlla `@running` dopo `start`: con la porta
+  occupata `su_mcp` si rispegne da solo e il bottone lo dice.
+- Collaudato il JS nel browser; il lato Ruby solo riletto (niente Ruby sulla
+  postazione, MCP spento in quella sessione).
 
 **Toolbar stretta** (stesso giorno): la finestra dell'utente sta a ~370 px e i
 bottoni con le emoji, nel CEF di SketchUp, vengono più larghi che in un browser.
@@ -2724,13 +2746,11 @@ Tolto il `gap` della toolbar, che SketchUp ignora (Chrome 64, vedi
 `SU2019-LESSONS.md`): in SketchUp i bottoni sono sempre stati attaccati.
 Misurata in un browser normale: ci stanno tutti fino a ~290 px di larghezza;
 nel CEF le emoji vengono più larghe, quindi lì il margine è minore.
-La logica comune è `SettingsDialog.set_debug_on_open(enabled)` (scrive il flag,
-se acceso apre subito console + MCP, rimanda lo state a **entrambe** le
-finestre e ritorna lo status); la usano `sm_settings_debug_on_open` e
-`sm_debug_toggle` (`ui/dialog.rb`). Il flag arriva alla finestra principale
-come `state.debug_mode_on_open` (letto direttamente in `Dialog.push_state`,
-come `show_thumbs`), l'esito va nella status bar via `SM.showStatus`.
-Spegnere non chiude la console né ferma il server: vale dal prossimo avvio.
+
+Checkbox: `SettingsDialog.set_debug_on_open(enabled)` scrive il flag, se acceso
+apre subito console + MCP, e rimanda lo state anche alla finestra principale
+(il bottone diventa verde). Spegnerla non chiude la console né ferma il
+server: vale dal prossimo avvio.
 
 **Logica** in `SettingsDialog.activate_debug_mode` (riusata da `main.rb` allo
 startup e dal callback della checkbox):
@@ -2751,12 +2771,12 @@ dialog `debug_mode_on_open` è un campo **top-level** dello state (non dentro
 `state.debug_mode_on_open` (non da `writeUi`). Avvio in `main.rb`: timer 0.7s
 (dopo l'auto-open del dialog, per dar tempo a `su_mcp` di registrarsi).
 
-**Nota diagnostica**: la Ruby Console che si apre da sola a ogni avvio di SU
-**NON è Scene Manager+** — è il plugin MCP `su_mcp/main.rb` che fa
-`SKETCHUP_CONSOLE.show` a livello top-level (riga ~7) e di nuovo in
-`Server#initialize` (eseguito perché `@server = Server.new` parte al load).
-Il server MCP però NON parte da solo: solo la console viene mostrata. Per non
-far aprire la console all'avvio, il fix va fatto in `su_mcp`, non qui.
+**Nota diagnostica**: una vecchia versione del plugin MCP (`su_mcp/main.rb`)
+faceva `SKETCHUP_CONSOLE.show` al load e in `Server#initialize`, quindi la
+console si apriva a ogni avvio anche senza Scene Manager+. La versione
+installata su questa postazione il 2026-10-24 non lo fa più (scrive in console
+con `SKETCHUP_CONSOLE.write`, che non la apre). Se la console torna ad aprirsi
+da sola con la checkbox spenta, guardare prima `su_mcp`.
 
 ## Update from view parziale (tasto destro)
 
