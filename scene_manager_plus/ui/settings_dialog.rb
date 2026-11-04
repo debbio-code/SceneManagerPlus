@@ -224,6 +224,12 @@ module SceneManagerPlus
           Sketchup.write_default('SceneManagerPlus', 'show_thumbs', data['enabled'] ? true : false)
           Dialog.push_state if defined?(Dialog)
         end
+
+        # Scene Tabs sempre nascoste (flag per-macchina, vedi Core::SceneTabs).
+        dlg.add_action_callback('sm_settings_hide_scene_tabs') do |_ctx, payload|
+          data = parse(payload)
+          Core::SceneTabs.set_enabled(data['enabled'] ? true : false)
+        end
       end
 
       # Accende/spegne "Debugging mode on startup" (checkbox dei Settings):
@@ -357,7 +363,8 @@ module SceneManagerPlus
           # Flag globale per-macchina (write_default), non per-file: vedi
           # callback sm_settings_debug_on_open.
           debug_mode_on_open: Sketchup.read_default('SceneManagerPlus', 'debug_mode_on_open', false),
-          show_thumbs:        Sketchup.read_default('SceneManagerPlus', 'show_thumbs', false) ? true : false
+          show_thumbs:        Sketchup.read_default('SceneManagerPlus', 'show_thumbs', false) ? true : false,
+          hide_scene_tabs:    Core::SceneTabs.enabled?
         }
         js = "window.SMS && SMS.setState(#{state.to_json});"
         @dialog.execute_script(js)

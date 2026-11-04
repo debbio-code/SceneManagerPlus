@@ -717,9 +717,10 @@ h1('17. Risoluzione problemi')
 table(
     ['Sintomo', 'Causa / Soluzione'],
     [
-        ['Le tab scene restano visibili dopo aver riaperto un file',
-         'Bug noto SU 2019. Workaround: View → Scene Tabs, clicca due volte (accende e spegne davvero). Oppure '
-         'attiva in Settings → Interface "Force Scene Tabs OFF".'],
+        ['Le tab scene compaiono sopra la vista',
+         'Bug noto SU 2019: ricompaiono a ogni apertura di file. Il plugin le nasconde da solo entro un secondo '
+         '(Settings → Interface → "Always hide SketchUp\'s Scene Tabs", accesa di default). Se le vuoi vedere, '
+         'togli quella spunta.'],
         ['Una scena mostra il badge "?"',
          'Lo stile non è enumerato: tipicamente una scena Match Photo. Normale.'],
         ['Il marker giallo non segue la selezione',

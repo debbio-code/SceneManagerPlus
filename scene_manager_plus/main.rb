@@ -3,6 +3,7 @@ require 'sketchup.rb'
 module SceneManagerPlus
   require File.join(PLUGIN_DIR, 'core', 'buffer')
   require File.join(PLUGIN_DIR, 'core', 'native_panel')
+  require File.join(PLUGIN_DIR, 'core', 'scene_tabs')
   require File.join(PLUGIN_DIR, 'core', 'color_pick')
   require File.join(PLUGIN_DIR, 'core', 'styles')
   require File.join(PLUGIN_DIR, 'core', 'style_presets')
@@ -141,6 +142,10 @@ require File.join(PLUGIN_DIR, 'core', 'survey_check')
     # Varianti colore: observer di salvataggio (pre-save restore base,
     # post-save re-apply) + re-attach su nuovi modelli/file aperti.
     Core::Variants.install_observers!
+
+    # Scene Tabs sempre nascoste (Settings -> Interface, flag per-macchina):
+    # controllo per pochi secondi dopo l'avvio e dopo ogni file aperto, poi fermo.
+    Core::SceneTabs.start!
 
     if Sketchup.read_default('SceneManagerPlus', 'main_dialog_open', false)
       ::UI.start_timer(0.5, false) do

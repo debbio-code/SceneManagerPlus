@@ -133,6 +133,7 @@ module SceneManagerPlus
             wtext:   Fiddle::Function.new(u['GetWindowTextA'], [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT], Fiddle::TYPE_INT),
             wclass:  Fiddle::Function.new(u['GetClassNameA'], [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT], Fiddle::TYPE_INT),
             procid:  Fiddle::Function.new(u['GetWindowThreadProcessId'], [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP], Fiddle::TYPE_LONG),
+            wrect:   Fiddle::Function.new(u['GetWindowRect'], [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP], Fiddle::TYPE_INT),
             # wparam/lparam a 64 bit: su Win64 passare un `long` (4 byte)
             # lascerebbe sporcizia nella parte alta del registro.
             send:    Fiddle::Function.new(u['SendMessageA'],
@@ -199,6 +200,21 @@ module SceneManagerPlus
         !h.nil? && !h.null? && @fn[:iswin].call(h) != 0
       rescue
         false
+      end
+
+      # Il desktop: i suoi figli sono tutte le finestre top-level (di tutti i
+      # processi; filtrare con pid_of).
+      def desktop
+        @fn[:desktop].call
+      end
+
+      # [left, top, right, bottom] in coordinate schermo, nil se fallisce.
+      def window_rect(h)
+        buf = [0, 0, 0, 0].pack('l4')
+        return nil if @fn[:wrect].call(h, buf) == 0
+        buf.unpack('l4')
+      rescue
+        nil
       end
 
       def enabled?(h)

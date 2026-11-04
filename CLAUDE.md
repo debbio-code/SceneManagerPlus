@@ -101,6 +101,7 @@ scene_manager_plus/
 ├── core/
 │   ├── buffer.rb                   # Defer mode: stato globale edit in RAM + flush!
 │   ├── native_panel.rb             # controlli Win32 dei pannelli nativi (fiddle)
+│   ├── scene_tabs.rb               # Scene Tabs di SU sempre nascoste (timer + Win32)
 │   ├── color_pick.rb               # pipette del selettore colore (modello, schermo)
 │   ├── exporter.rb                 # Batch export PNG/JPG + watermark + titleblock via ImageRep
 │   ├── folders.rb                  # cartelle logiche (schema + load/save)
@@ -735,18 +736,79 @@ Tabella di verità chiusa:
 | Utente accende layer hidden   | T            | T (stale)        | T        | T ✓      |
 | Utente spegne layer visible   | F            | F (stale)        | F        | F ✓      |
 
-## Workaround Scene Tabs visibili dopo riapertura file (SU 2019)
+## Scene Tabs sempre nascoste (`Core::SceneTabs`) — 2026-11-04
 
-Bug noto SU 2019: se chiudi un file con Scene Tabs OFF, alla riapertura le
-tabs restano visibili nel viewport anche se nel menu `View → Scene Tabs`
-risultano off. Workaround manuale: clicca la voce nel menu (accende — no
-effetto visibile per il bug) e ricliccala (spegne davvero).
+**Richiesta dell'utente: le linguette scena sopra il viewport non devono
+comparire mai.** Settings → Interface → "Always hide SketchUp's Scene Tabs",
+flag **per-macchina** `write_default('SceneManagerPlus', 'hide_scene_tabs')`,
+default **acceso**. Sostituisce il vecchio setting per-file
+`ui.hide_scene_tabs_on_open` (non esiste più).
 
-Riprodotto in `Dialog#force_hide_scene_tabs_if_enabled` con due
-`Sketchup.send_action(10534)` consecutivi. Opt-in via Settings → Interface
-→ "Force Scene Tabs OFF when the plugin opens" (default false: chi vuole
-le tabs ON non vuole vederle nascoste da noi). Override dell'ID via
-`Sketchup.write_default('SceneManagerPlus', 'scene_tabs_cmd_id', N)`.
+Bug di SU 2019, **riprodotto a ogni apertura di file** (19.0.685): le linguette
+ricompaiono mentre il flag interno di `View → Scene Tabs` resta spento. Il
+primo toggle non cambia niente a video (accende un flag già "acceso" a video),
+il secondo le spegne davvero. Rimedio manuale storico: due clic sulla voce.
+
+**Perché il vecchio rimedio non bastava** (era `Dialog#force_hide_scene_tabs_if_enabled`:
+due `send_action(10534)` alla cieca in `Dialog.show`): scattava **una volta
+sola**, all'apertura della finestra del plugin. All'avvio questa si riapre
+0,5 s dopo il caricamento del plugin, quindi un file pesante finiva di
+caricarsi dopo e le linguette tornavano; aprendo un altro file con la finestra
+già aperta non scattava niente; e se le linguette erano accese davvero, due
+toggle le lasciavano accese.
+
+**Adesso**: timer da 0,3 s, indipendente dalla finestra del plugin, che gira
+**solo a finestre di pochi secondi** (scelta dell'utente: niente controllo
+permanente): `STARTUP_FOR` dopo il caricamento del plugin e `AFTER_OPEN_FOR`
+dopo ogni file aperto o nuovo (`AppObserver#onOpenModel`/`onNewModel`), poi si
+ferma da solo (mai a metà di una coppia di toggle). Guarda se la barra è
+**davvero visibile** e manda un toggle; al giro dopo il prossimo (~0,6 s) se è
+ancora visibile ne manda un secondo (caso del bug). Il feedback è la barra
+stessa, non il segno di spunta del menu (MFC lo aggiorna solo quando il menu si
+apre). Dopo 2 toggle a vuoto si ferma finché non la vede nascosta (niente
+lampeggio infinito). Salta i giri con una finestra modale aperta (finestra
+principale disabilitata). Solo letture, nessuna scrittura sul modello; il
+toggle non sporca il modello (`modified?` resta false).
+
+⚠️ **10 s è un valore DI PROVA** (entrambe le costanti), voluto corto
+dall'utente: "proviamo meno e segnatelo, al massimo aumentiamo". **Se le
+linguette ricompaiono dopo l'apertura di un file, alzare `STARTUP_FOR` /
+`AFTER_OPEN_FOR` in `core/scene_tabs.rb`.** Diagnosi:
+`SceneManagerPlus::Core::SceneTabs.log` (ultimi 20 eventi con orario: armato,
+toggle, fermato). Se le linguette le accende l'utente a mano, restano accese
+fino al prossimo file aperto: accettato, nessuno le usa più.
+
+⚠️ **`expectsStartupModelNotifications` → `true` nell'observer è
+indispensabile**: senza, SketchUp non chiama `onOpenModel` per il file aperto
+all'avvio (doppio clic sul .skp). Misurato: registro con il solo "startup", e
+linguette comparse 9,6 s dopo, a un soffio dalla fine della finestra.
+
+Fatti misurati (19.0.685, 2026-11-04):
+- **Costo**: un controllo = **2,1 µs** (5000 chiamate in 11 ms dentro SketchUp).
+  Anche il primo progetto, sempre acceso, costava ~7 µs al secondo:
+  trascurabile. La finestra limitata è una scelta di pulizia, non di prestazioni.
+- **Tempi, da `onOpenModel` alla comparsa delle linguette**: file aperto da
+  dentro SketchUp 0,3 s (file piccolo) e 1,8 s (`Galeazzi - Preventivo Slim.skp`,
+  58 MB, 8 s di caricamento); file aperto all'avvio 2,6 s (piccolo e Galeazzi).
+  In tutti i casi nascoste con 2 toggle e controllo fermo dopo ~10 s.
+- **Creare una scena NON le fa ricomparire** a controllo fermo: provato sia col
+  comando nativo Add Scene (21067, il ramo Match Photo) sia con `pages.add`.
+- La barra è un **`SysTabControl32` dentro un `msctls_statusbar32` figlio
+  diretto della finestra principale** (classe `Afx:...`). Nascosta = WS_VISIBLE
+  tolto (il rettangolo resta alto 33 px), quindi basta `IsWindowVisible`. Il
+  pannello Styles flottante è un `#32770` top-level con un suo `SysTabControl32`:
+  `find_bar` salta i `#32770`.
+- Dopo `send_action(10534)` la barra cambia stato in **~35 ms**, prima del giro
+  di timer successivo.
+- Collaudo: con le linguette accese a mano → 1 toggle, nascoste in 0,3 s; aprendo
+  un altro file e poi riaprendo → 2 toggle a ~0,6 s, nascoste; casella dei
+  Settings cliccata nella finestra vera → spenta lascia le linguette, riaccesa
+  le nasconde subito.
+
+Override dell'ID via
+`Sketchup.write_default('SceneManagerPlus', 'scene_tabs_cmd_id', N)`; prova di
+un ID da console: `SceneManagerPlus::Core::SceneTabs.try_cmd(N)`. La console
+mostra `[SM+] Scene Tabs visible -> hiding (toggle N)` a ogni intervento.
 
 ### Come trovare command IDs su SU 2019 Windows
 

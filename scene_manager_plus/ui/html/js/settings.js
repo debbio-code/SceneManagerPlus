@@ -206,6 +206,9 @@
     // Idem per le thumbnails inline della lista (flag per-macchina).
     const thumbsBox = $('#ui-show-thumbs');
     if (thumbsBox) thumbsBox.checked = !!state.show_thumbs;
+    // Idem per le Scene Tabs sempre nascoste (flag per-macchina).
+    const tabsBox = $('#ui-hide-scene-tabs');
+    if (tabsBox) tabsBox.checked = state.hide_scene_tabs !== false;
     requestPreview();
   };
 
@@ -296,13 +299,11 @@
 
   function readUi() {
     return {
-      show_order_banner:       $('#ui-show-order-banner').checked,
-      hide_scene_tabs_on_open: $('#ui-hide-scene-tabs-on-open').checked
+      show_order_banner: $('#ui-show-order-banner').checked
     };
   }
   function writeUi(u) {
     setIfNotFocused($('#ui-show-order-banner'), 'checked', u.show_order_banner !== false);
-    setIfNotFocused($('#ui-hide-scene-tabs-on-open'), 'checked', !!u.hide_scene_tabs_on_open);
   }
   function setUiStatus(msg) {
     const el = $('#ui-status');
@@ -518,8 +519,6 @@
     }
     const uiBanner = document.getElementById('ui-show-order-banner');
     if (uiBanner) uiBanner.addEventListener('change', saveUiNow);
-    const uiHideTabs = document.getElementById('ui-hide-scene-tabs-on-open');
-    if (uiHideTabs) uiHideTabs.addEventListener('change', saveUiNow);
 
     // Styles: purge unused styles. UI a senso unico (Ruby fa il
     // confirmation messagebox + purge_unused + cleanup metadata).
@@ -553,6 +552,13 @@
     if (thumbsChk) {
       thumbsChk.addEventListener('change', () => {
         call('sm_settings_show_thumbs', { enabled: thumbsChk.checked });
+      });
+    }
+
+    const tabsChk = document.getElementById('ui-hide-scene-tabs');
+    if (tabsChk) {
+      tabsChk.addEventListener('change', () => {
+        call('sm_settings_hide_scene_tabs', { enabled: tabsChk.checked });
       });
     }
 
