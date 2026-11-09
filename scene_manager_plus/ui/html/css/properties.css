@@ -206,6 +206,7 @@ fieldset legend {
   font-size: 11px;
   font-style: italic;
 }
+.footer .status.is-warn { color: #e0a040; }
 
 /* === Layers section ========================================= */
 /* Griglia a 5 colonne, condivisa da header e righe, cosi le colonne restano
@@ -356,6 +357,10 @@ fieldset legend {
 .lay-info { font-family: Georgia, "Times New Roman", serif; font-style: italic; font-weight: bold; }
 .lay-info:hover, .lay-mv:hover { background: #4a4a4a; border-color: #4ea1ff; color: #fff; }
 .lay-info:active, .lay-mv:active { background: #2b5a86; }
+/* Freccia appena premuta: blu finche' lo spostamento non e' confermato (vedi
+   setMoveFlash in properties.js). Piu' acceso di :active, che dura solo
+   finche' il tasto del mouse e' giu'. */
+.lay-mv.is-done, .lay-mv.is-done:hover { background: #2e6fb8; border-color: #4ea1ff; color: #fff; }
 .lay-sw.is-empty {
   background-image:
     linear-gradient(45deg, #555 25%, transparent 25%, transparent 75%, #555 75%),

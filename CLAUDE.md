@@ -3397,15 +3397,37 @@ quest'ultimo) e `C` in toolbar.
 
 | Controllo | Cosa fa |
 |---|---|
-| `→` per riga | Sposta la selezione del viewport su quel layer, **previa conferma OK/Cancel** con il riepilogo di cosa verrà spostato |
+| `→` per riga | Sposta la selezione del viewport su quel layer, **senza conferma** (dal 2026-11-09) |
 | `i` per riga | Apre `UI::LayerInfoDialog` col contenuto del layer |
 | `C` in toolbar | Toggle `DisplayColorByLayer` (checkbox "Color by layer" nativa) |
 
-**La conferma sulla freccia non è negoziabile**: il bottone sta in una riga
-fitta, il click parte facile, e spostare geometria di layer si nota molto dopo
-(se il layer di destinazione è spento, la geometria "sparisce" — il messagebox
-lo avvisa esplicitamente). Semantica = Entity Info nativo: agisce sulle entità
-**selezionate**, senza scendere dentro gruppi/componenti.
+**Freccia senza conferma (scelta dell'utente, 2026-11-09)**: fino a quel giorno
+apriva un messagebox OK/Cancel col riepilogo ("la conferma non è negoziabile"),
+tolto perché era un clic in più a ogni spostamento. Il riscontro adesso è
+doppio: la freccia si accende **blu al clic** (comando ricevuto) e resta blu
+1,5 s dopo la risposta di Ruby se qualcosa si è spostato (`setMoveFlash` in
+`properties.js`; il nome del layer vive in una variabile perché un
+`push_state` che ridisegna le righe cancellerebbe la classe); l'esito va nella
+barra in basso, in **ambra** e con la freccia subito spenta se non si è
+spostato niente (selezione vuota, già su quel layer — campo `status_warn` dello
+state). Quello che il messagebox avvisava resta nel testo: layer spento = "they
+are no longer visible", più "(Ctrl+Z to undo)". Collaudato dal vivo
+(19.0.685) pilotando la finestra vera: selezione vuota, spostamento e ritorno,
+"già lì". Non provato il ramo col layer spento (solo testo). Semantica = Entity
+Info nativo: agisce sulle entità **selezionate**, senza scendere dentro
+gruppi/componenti.
+
+**La scheda scena aperta non rallenta SketchUp** (misurato 2026-11-09 su
+"Saccani Esecutivo", 25 scene, 33 layer): non ha timer né observer, si
+aggiorna solo al cambio scena e dopo un comando, e un aggiornamento costa
+~0,5 ms di Ruby. A/B aperta/chiusa: ridisegno del viewport identico (16,7 ms,
+il limite dello schermo), nessun blocco a riposo. Se l'utente segnala lag con
+la scheda aperta, la causa è altrove.
+
+⚠️ **Sonde nel CEF via MCP**: un `add_action_callback` aggiunto a finestra già
+aperta **non** diventa chiamabile dal JS, nemmeno ricaricando la pagina con
+`set_file`. Per leggere il DOM si ridefinisce un callback esistente (qui
+`sm_props_log`) e lo si rimette com'era alla fine.
 
 **`Core::Layers` ora ha un walker unico** `each_entity_on_layer(l)` che yielda
 `(entity, 'root'|'nested', owner_definition_name)`. Ci passano `stats_for`

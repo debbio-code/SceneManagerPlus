@@ -79,9 +79,22 @@
     return flags;
   }
 
-  function setStatus(msg, ms) {
-    $('#status').textContent = msg;
-    if (msg) setTimeout(() => { $('#status').textContent = ''; }, ms || 1500);
+  // Un timer solo: con un setTimeout per messaggio, quello di un messaggio
+  // vecchio cancellava il nuovo prima del tempo. `warn` = esito "non fatto",
+  // in ambra.
+  var statusTimer = null;
+  function setStatus(msg, ms, warn) {
+    var el = $('#status');
+    el.textContent = msg;
+    el.classList.toggle('is-warn', !!(msg && warn));
+    if (statusTimer) { clearTimeout(statusTimer); statusTimer = null; }
+    if (msg) {
+      statusTimer = setTimeout(function () {
+        el.textContent = '';
+        el.classList.remove('is-warn');
+        statusTimer = null;
+      }, ms || 1500);
+    }
   }
 
   function currentId() {
@@ -194,7 +207,12 @@
     renderFog(s.fog || {}, !!s.is_active);
     // Esito di un'operazione Ruby che non merita un messagebox (es. quante
     // entita' sono finite sul layer).
-    if (state.status) setStatus(state.status, 4000);
+    if (state.status) setStatus(state.status, 5000, !!state.status_warn);
+    // Freccia "sposta qui" in attesa di risposta: e' arrivata. Spostato =
+    // resta blu ancora un attimo; niente spostato = si spegne subito (il
+    // perche' lo dice la barra in basso).
+    if (mvFlash && state.status) setMoveFlash(state.status_warn ? null : mvFlash, MV_FLASH_MS);
+    else paintMoveFlash();
   };
 
   // === Fog dual-range slider =================================================
@@ -495,6 +513,40 @@
   var layAnchor   = null;   // ancora dello Shift+click
   var layRenaming = null;   // nome del layer in rename inline
 
+  // Freccia "sposta la selezione qui" accesa in blu: si accende al clic
+  // (comando ricevuto) e resta accesa finche' Ruby non risponde, piu'
+  // MV_FLASH_MS se lo spostamento e' avvenuto. Vive in una variabile e non
+  // solo come classe sul bottone perche' un push_state che ridisegna le righe
+  // la cancellerebbe. MV_WAIT_MS e' solo un paracadute se la risposta non
+  // arriva mai.
+  var MV_FLASH_MS  = 1500;
+  var MV_WAIT_MS   = 15000;
+  var mvFlash      = null;  // nome del layer della freccia accesa
+  var mvFlashTimer = null;
+
+  function setMoveFlash(name, ms) {
+    if (mvFlashTimer) { clearTimeout(mvFlashTimer); mvFlashTimer = null; }
+    mvFlash = name || null;
+    if (mvFlash) {
+      mvFlashTimer = setTimeout(function () {
+        mvFlash = null;
+        mvFlashTimer = null;
+        paintMoveFlash();
+      }, ms);
+    }
+    paintMoveFlash();
+  }
+
+  function paintMoveFlash() {
+    var list = $('#lay-list');
+    if (!list) return;
+    var rows = list.querySelectorAll('.lay-row');
+    for (var i = 0; i < rows.length; i++) {
+      var b = rows[i].querySelector('.lay-mv');
+      if (b) b.classList.toggle('is-done', !!mvFlash && rows[i].dataset.name === mvFlash);
+    }
+  }
+
   function layCall(op, name, value) {
     var data = { op: op };
     if (name  !== undefined && name  !== null) data.name  = name;
@@ -747,11 +799,14 @@
       }
 
       // La selezione vive nel viewport, non nel dialog: nessun payload da
-      // costruire qui, Ruby legge model.selection al volo.
+      // costruire qui, Ruby legge model.selection al volo. Niente conferma:
+      // la freccia si accende subito (comando ricevuto) e l'esito arriva
+      // nella barra in basso.
       var mv = row.querySelector('.lay-mv');
       if (mv) {
         mv.addEventListener('click', function (e) {
           e.stopPropagation();
+          setMoveFlash(name, MV_WAIT_MS);
           layCall('assign_selection', name);
         });
       }

@@ -459,6 +459,7 @@ module SceneManagerPlus
         name   = data['name'].to_s
         focus  = nil
         status = nil
+        warn_status = false
         # Visibilita', colore e line style si propagano a tutta la selezione:
         # `names` arriva dalla UI quando le righe selezionate sono piu' di una
         # (shift/ctrl-click), altrimenti si lavora sul solo `name`.
@@ -487,7 +488,8 @@ module SceneManagerPlus
         when 'color_by_layer'
           Core::Layers.set_color_by_layer(data['value'])
         when 'assign_selection'
-          status = assign_selection_status(name)
+          status, moved = assign_selection_status(name)
+          warn_status = !moved
         when 'info'
           LayerInfoDialog.show_for(name)
         when 'delete'
@@ -500,7 +502,7 @@ module SceneManagerPlus
           )
         end
 
-        push_state(focus_layer: focus, status: status)
+        push_state(focus_layer: focus, status: status, status_warn: warn_status)
       rescue => e
         warn "[SM+] handle_layer_op failed: #{e.class}: #{e.message}"
       end
@@ -519,46 +521,39 @@ module SceneManagerPlus
         res['name']
       end
 
-      # Sposta la selezione del viewport sul layer, previa conferma.
+      # Sposta la selezione del viewport sul layer, SENZA conferma.
       #
-      # La conferma non e' negoziabile: la freccia sta in una riga fitta di
-      # controlli, il click parte facile, e cambiare layer a geometria gia'
-      # modellata e' un'operazione che si nota solo molto dopo (specie se il
-      # layer di destinazione e' spento e la geometria "sparisce"). Il
-      # messagebox elenca cosa verra' spostato PRIMA di toccare il modello.
+      # Fino al 2026-11-09 c'era un messagebox OK/Cancel ("la conferma non e'
+      # negoziabile"); l'utente l'ha tolto: un clic in piu' a ogni spostamento
+      # pesa piu' del rischio, e l'operazione e' un solo Ctrl+Z. Il riscontro
+      # e' la freccia che si colora di blu e l'esito nella barra in basso, che
+      # dice anche quello che il messagebox avvisava: layer spento = la
+      # geometria spostata sparisce dal viewport.
+      #
+      # Ritorna [testo, spostato?]: senza nulla di spostato la freccia non
+      # resta blu e il testo esce in ambra.
       def assign_selection_status(name)
-        sum = Core::Layers.selection_summary(name)
-        return 'Layer not found' unless sum
-        return 'Select something in the model first' if sum['total'].to_i.zero?
-        return 'Move cancelled' unless confirm_assign_selection(name, sum)
-
         res = Core::Layers.assign_selection(name)
-        return 'Layer not found' unless res
-        parts = ["#{res['moved']} moved to \"#{name}\""]
-        parts << "#{res['already']} already there" if res['already'].to_i > 0
-        parts << "#{res['skipped']} skipped"       if res['skipped'].to_i > 0
-        parts.join(', ')
-      end
+        return ['Layer not found', false] unless res
+        return ['Select something in the model first', false] if res['total'].to_i.zero?
 
-      def confirm_assign_selection(name, sum)
-        breakdown = (sum['counts'] || {})
-                    .sort_by { |k, v| [-v.to_i, k.to_s] }
-                    .map { |k, v| Core::Layers.count_label(v, k) }
-                    .join(', ')
-        msg = "Move the current selection to layer \"#{name}\"?\n\n" \
-              "#{sum['total']} selected: #{breakdown}"
-        if sum['already'].to_i > 0
-          msg += "\n#{sum['already']} of them are already on this layer."
+        moved = res['moved'].to_i
+        parts = if moved > 0
+                  ["#{moved} moved to \"#{name}\""]
+                else
+                  ["Nothing moved: already on \"#{name}\""]
+                end
+        parts << "#{res['already']} already there" if moved > 0 && res['already'].to_i > 0
+        parts << "#{res['skipped']} skipped"       if res['skipped'].to_i > 0
+        msg = parts.join(', ')
+        if moved > 0
+          l = Core::Layers.find(name)
+          # Spostare su un layer spento fa sparire la geometria dal viewport:
+          # senza dirlo sembra di averla cancellata.
+          msg += ' - the layer is hidden, so they are no longer visible' if l && !(l.visible? rescue true)
+          msg += ' (Ctrl+Z to undo)'
         end
-        # Spostare su un layer spento fa sparire la geometria dal viewport:
-        # senza questo avviso sembra di averla cancellata.
-        l = Core::Layers.find(name)
-        if l && !(l.visible? rescue true)
-          msg += "\n\nWarning: this layer is hidden in the model, so the moved " \
-                 'entities will disappear from the viewport.'
-        end
-        msg += "\n\nGroups and components move as a whole, like Entity Info."
-        ::UI.messagebox(msg, MB_OKCANCEL) == IDOK
+        [msg, moved > 0]
       end
 
       def warn_unconstrained_scenes(names)
@@ -652,7 +647,9 @@ module SceneManagerPlus
 
       # `focus_layer`: nome del layer appena creato — il JS ci apre sopra il
       # rename inline, come fa il pannello nativo dopo il "+".
-      def push_state(focus_layer: nil, status: nil)
+      # `status_warn`: l'esito e' un "non fatto" (testo in ambra, e la freccia
+      # dei layer non resta blu).
+      def push_state(focus_layer: nil, status: nil, status_warn: false)
         return unless @dialog && @dialog.visible?
         scene = scene_payload(@scene_id)
         preview = @scene_id ? Core::Previews.url_map[@scene_id] : nil
@@ -661,7 +658,8 @@ module SceneManagerPlus
           flag_keys:   Core::SceneModel::FLAG_KEYS,
           preview_url: preview,
           focus_layer: focus_layer,
-          status:      status
+          status:      status,
+          status_warn: status_warn ? true : false
         }
         @dialog.execute_script("window.SMP && SMP.setState(#{state.to_json});")
       rescue => e

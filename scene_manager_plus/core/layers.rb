@@ -503,24 +503,6 @@ module SceneManagerPlus
         nil
       end
 
-      # Cosa verrebbe spostato dalla freccia, per la conferma prima di agire.
-      # { 'total', 'already', 'counts' => { categoria => n } }.
-      def selection_summary(name)
-        m = model
-        l = find(name)
-        return nil unless m && l
-        sel = (m.selection.to_a rescue [])
-        counts  = Hash.new(0)
-        already = 0
-        sel.each do |e|
-          counts[category_of(e)] += 1
-          already += 1 if (e.layer rescue nil) == l
-        end
-        { 'total' => sel.size, 'already' => already, 'counts' => counts }
-      rescue
-        nil
-      end
-
       # Seleziona nel modello le entita' di una categoria che stanno su questo
       # layer. `category`: chiave di category_of, oppure 'root' / 'nested' /
       # 'all'. `def_name` non nil = solo le istanze di quella definition.
